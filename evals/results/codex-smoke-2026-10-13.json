@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-13",
+  "kind": "Codex CLI client protocol smoke",
+  "scenario": "Knowledge lookup, open, pending checklist, incomplete check, explicit abort",
+  "baseline": "110785a69a9b131b2152a46cd33e7e6c27d5dcc7",
+  "exit_code": 0,
+  "calls": [
+    {
+      "tool": "knowledge_search",
+      "outcome": "ok",
+      "code": "KNOWLEDGE_SEARCHED",
+      "error": null,
+      "knowledge": [
+        {
+          "id": "service-boundary",
+          "version": "26b8629eaf044b4ded862d36a82390d4fc7d2e0dad31530b58a654ed683a2abc",
+          "effective": true
+        },
+        {
+          "id": "session-eligibility",
+          "version": "9a28b61879e6f0c4017a64e96976af3f53ff95f0ea90a16fe9b11035e18aad38",
+          "effective": true
+        },
+        {
+          "id": "status-consumers",
+          "version": "3ed4f389c058229902853f9e0126deee1e65a710f89b08f26a8504b2d465f156",
+          "effective": true
+        }
+      ]
+    },
+    {
+      "tool": "task_open",
+      "outcome": "ok",
+      "code": "TASK_OPENED",
+      "error": null,
+      "task_id": "80afb53e-f078-4f64-bad4-737aec8c3708",
+      "revision": 0,
+      "phase": "active"
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED",
+      "error": null,
+      "task_id": "80afb53e-f078-4f64-bad4-737aec8c3708",
+      "revision": 1,
+      "phase": "active"
+    },
+    {
+      "tool": "task_check",
+      "outcome": "incomplete",
+      "code": "REVIEW_INCOMPLETE",
+      "error": null,
+      "task_id": "80afb53e-f078-4f64-bad4-737aec8c3708",
+      "pending_items": [
+        "service",
+        "auth",
+        "view"
+      ],
+      "pending_acceptance": [
+        "related-locations"
+      ],
+      "changed_paths": []
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED",
+      "error": null,
+      "task_id": "80afb53e-f078-4f64-bad4-737aec8c3708",
+      "revision": 2,
+      "phase": "aborted"
+    }
+  ],
+  "limits": [
+    "No business implementation or task completion was tested in this CLI run.",
+    "Experience proposal is covered by automated tests, not invoked in this CLI smoke.",
+    "WebSocket requests timed out and Codex completed after falling back to HTTPS.",
+    "Unrelated installed user skills emitted parse warnings; this project Skill loaded successfully."
+  ]
+}

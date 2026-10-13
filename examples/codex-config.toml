@@ -1,0 +1,6 @@
+# Replace all three absolute paths. This example is not installed automatically.
+[mcp_servers.project_dev]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/project-dev-agent/dist/src/cli.js", "serve", "--project", "/absolute/path/to/project-worktree"]
+startup_timeout_sec = 20
+tool_timeout_sec = 30

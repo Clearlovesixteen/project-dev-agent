@@ -1,0 +1,9 @@
+{
+  "oracle_version": "v0.2",
+  "passed": true,
+  "exit_code": 0,
+  "assertions": "Creation, update, new login restriction, existing session restriction, query status and label, unknown status rejection, active account behavior and invalid sessions.",
+  "review": "Diff preserves service validation and reads through the service; new tests include tokens issued before disabling.",
+  "original_oracle_failure_retained": true,
+  "limitation": "The evaluator wording was corrected after this functional replay; do not count this as a frozen comparative evaluation."
+}

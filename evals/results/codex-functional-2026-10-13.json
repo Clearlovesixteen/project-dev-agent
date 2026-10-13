@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-13",
+  "kind": "Codex CLI functional replay",
+  "exit_code": 0,
+  "baseline": "110785a69a9b131b2152a46cd33e7e6c27d5dcc7",
+  "requirement": "Add disabled creation and updates, block account use, show correct status, preserve active behavior.",
+  "candidate_tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "task_id": "61116009-a1a6-4368-95d0-f0804d3776db",
+  "task_phase": "closed",
+  "calls": [
+    {
+      "tool": "task_open",
+      "outcome": "ok",
+      "code": "TASK_OPENED",
+      "error": null,
+      "task_id": "61116009-a1a6-4368-95d0-f0804d3776db",
+      "revision": 0,
+      "phase": "active"
+    },
+    {
+      "tool": "knowledge_search",
+      "outcome": "ok",
+      "code": "KNOWLEDGE_SEARCHED",
+      "error": null,
+      "knowledge": [
+        {
+          "id": "service-boundary",
+          "version": "26b8629eaf044b4ded862d36a82390d4fc7d2e0dad31530b58a654ed683a2abc",
+          "effective": true
+        },
+        {
+          "id": "session-eligibility",
+          "version": "9a28b61879e6f0c4017a64e96976af3f53ff95f0ea90a16fe9b11035e18aad38",
+          "effective": true
+        },
+        {
+          "id": "status-consumers",
+          "version": "3ed4f389c058229902853f9e0126deee1e65a710f89b08f26a8504b2d465f156",
+          "effective": true
+        }
+      ]
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED",
+      "error": null,
+      "task_id": "61116009-a1a6-4368-95d0-f0804d3776db",
+      "revision": 1,
+      "phase": "active"
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED",
+      "error": null,
+      "task_id": "61116009-a1a6-4368-95d0-f0804d3776db",
+      "revision": 2,
+      "phase": "active"
+    },
+    {
+      "tool": "task_check",
+      "outcome": "ok",
+      "code": "CHECKLIST_REVIEWED",
+      "error": null,
+      "pending_items": [],
+      "pending_acceptance": [],
+      "unresolved_validations": [],
+      "unexpected_changes": [],
+      "changed_paths": [
+        "src/auth.js",
+        "src/service.js",
+        "src/view.js",
+        "tests/accounts.test.js"
+      ]
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED",
+      "error": null,
+      "task_id": "61116009-a1a6-4368-95d0-f0804d3776db",
+      "revision": 3,
+      "phase": "closed"
+    }
+  ],
+  "independent_acceptance": {
+    "oracle_version": "v0.2",
+    "passed": true,
+    "exit_code": 0,
+    "assertions": "Creation, update, new login restriction, existing session restriction, query status and label, unknown status rejection, active account behavior and invalid sessions.",
+    "review": "Diff preserves service validation and reads through the service; new tests include tokens issued before disabling.",
+    "original_oracle_failure_retained": true,
+    "limitation": "The evaluator wording was corrected after this functional replay; do not count this as a frozen comparative evaluation."
+  }
+}

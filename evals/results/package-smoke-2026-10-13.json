@@ -1,0 +1,48 @@
+{
+  "kind": "Packed npm artifact installation smoke",
+  "result": "passed",
+  "package": "project-dev-agent-0.1.0.tgz",
+  "path_with_spaces": true,
+  "isolated_installation": true,
+  "sample_tests_passed": true,
+  "ignore_template_restored": true,
+  "tools": [
+    "experience_propose",
+    "knowledge_search",
+    "task_check",
+    "task_open",
+    "task_update"
+  ],
+  "calls": [
+    {
+      "tool": "knowledge_search",
+      "outcome": "ok",
+      "code": "KNOWLEDGE_SEARCHED"
+    },
+    {
+      "tool": "task_open",
+      "outcome": "ok",
+      "code": "TASK_OPENED"
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED"
+    },
+    {
+      "tool": "experience_propose",
+      "outcome": "ok",
+      "code": "EXPERIENCE_PROPOSED"
+    },
+    {
+      "tool": "task_check",
+      "outcome": "incomplete",
+      "code": "REVIEW_INCOMPLETE"
+    },
+    {
+      "tool": "task_update",
+      "outcome": "ok",
+      "code": "TASK_UPDATED"
+    }
+  ]
+}

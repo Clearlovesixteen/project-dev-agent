@@ -1,0 +1,6 @@
+schema_version: 1
+knowledge_dir: .project-dev/knowledge
+modules:
+  - name: example-module
+    paths: [src/example]
+exclude_paths: [node_modules, dist, .project-dev/local]
