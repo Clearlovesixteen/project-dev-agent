@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="description" content="让 Codex 带着项目依据完成开发，并把有价值的纠正留给下一次任务。"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><title>Project Dev Agent · Project Dev</title><style>
+:root{--paper:#f8f7f3;--panel:#efeee8;--ink:#203331;--muted:#62726d;--line:#dcded4;--accent:#116654;--white:#fff;--code:#172e2b;--serif:"Iowan Old Style","Songti SC","Noto Serif CJK SC",serif;--sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--mono:"SFMono-Regular",Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:30px}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.85 var(--sans);-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none;text-underline-offset:4px}a:hover{text-decoration:underline}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #d19629;outline-offset:4px}.skip{position:fixed;left:12px;top:-80px;z-index:20;padding:10px;background:white}.skip:focus{top:12px}
+.sidebar{position:fixed;inset:0 auto 0 0;width:258px;padding:34px 24px 24px;background:var(--panel);border-right:1px solid var(--line);overflow:auto;z-index:5}.brand{display:flex;align-items:center;gap:11px;font-size:17px;font-weight:650;color:var(--ink);letter-spacing:-.5px}.brand-mark{display:grid;place-items:center;width:31px;height:31px;background:var(--accent);color:white;border-radius:9px;font:16px var(--mono)}.brand-sub{font:10px/1.5 var(--mono);color:var(--muted);letter-spacing:2px;margin:11px 0 29px}.nav-group{margin:23px 0 9px;color:#6b7871;font-size:11px;font-weight:600;letter-spacing:1.5px}.nav-link{display:block;padding:7px 11px;margin:3px 0;border-radius:7px;color:#495c54;font-size:13px;line-height:1.6}.nav-link:hover{background:#e2e6dc;text-decoration:none}.nav-link.active{background:#dce8dd;color:#15543e;font-weight:600;box-shadow:inset 3px 0 #176650}.sidebar-foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.mobile-toggle,.nav-close{display:none}
+.layout{margin-left:258px;padding:35px 50px 48px;max-width:1640px}.topline{display:flex;gap:15px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:18px;font-size:11px;letter-spacing:1.2px;color:var(--muted)}.top-actions{display:flex;gap:10px;align-items:center}.small-button{background:transparent;border:1px solid var(--line);border-radius:7px;padding:5px 11px;color:var(--ink);font-size:12px;letter-spacing:0}.document-grid{display:grid;grid-template-columns:minmax(0,820px) 150px;gap:48px;margin-top:43px}.document{min-width:0}.eyebrow{font:11px/1.5 var(--mono);letter-spacing:2px;color:var(--accent);margin-bottom:15px}.hero-title{font:600 clamp(30px,3vw,44px)/1.3 var(--serif);letter-spacing:-1.1px;margin:0 0 19px}.intro{font-size:16px;line-height:1.85;color:var(--muted);max-width:690px;margin:0}.meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:22px 0 31px;font-size:11px;color:var(--muted)}.badge{display:inline-flex;align-items:center;gap:7px;background:#e2ede3;color:#226246;padding:3px 10px;border-radius:20px}.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#3b7e54}.hero{border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:33px}.fact-row{display:flex;gap:0;border:1px solid var(--line);background:#fbfcf7;border-radius:10px;margin:0 0 29px}.fact{flex:1;padding:14px 19px;line-height:1.5}.fact+.fact{border-left:1px solid var(--line)}.fact b{font:500 23px/1.3 var(--mono);display:block;color:#265e48}.fact span{font-size:11px;color:var(--muted)}.notice{padding:16px 19px;margin:0 0 25px;background:#f0ece0;border-left:3px solid #a58243;border-radius:0 7px 7px 0;font-size:13px}.notice p{margin:0}.toc{position:sticky;top:30px;align-self:start;padding-top:6px;font-size:11px}.toc-title{font-weight:600;letter-spacing:1.5px;margin:0 0 15px;color:var(--muted)}.toc a{display:block;color:var(--muted);line-height:1.6;padding:5px 0 5px 12px;border-left:1px solid var(--line)}.toc a.active{color:var(--accent);border-left:2px solid var(--accent)}.toc a:hover{text-decoration:none;color:var(--accent)}
+.prose p{margin:0 0 18px}.prose h2{margin:40px 0 19px;padding-top:5px;font:600 25px/1.5 var(--serif);letter-spacing:-.4px}.prose h3{margin:29px 0 13px;font-size:17px;font-weight:600}.prose h4{font-size:15px}.prose a{border-bottom:1px solid #b5cabe;overflow-wrap:anywhere}.prose ul,.prose ol{padding-left:24px;margin:15px 0 24px}.prose li{padding:3px 0}.prose li p{margin:2px 0 9px}.prose li::marker{color:var(--accent)}.prose li input{accent-color:var(--accent)}.prose code{font:12px/1.7 var(--mono);background:#e8ece3;color:#254d43;border-radius:4px;padding:3px 5px;overflow-wrap:anywhere}.code-wrap{margin:20px 0 26px;background:var(--code);border-radius:10px;overflow:hidden;box-shadow:0 5px 15px #1026210a}.code-top{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid #ffffff18;color:#a5c9b7;font:10px/1.5 var(--mono);letter-spacing:1px}.copy-button{border:1px solid #ffffff26;border-radius:5px;background:transparent;color:#dbeade;padding:3px 10px;font:11px var(--sans)}.copy-button:hover{background:#ffffff12}.prose pre{margin:0;padding:18px;overflow:auto;max-width:100%;tab-size:2}.prose pre code{padding:0;background:transparent;color:#e1efe4;font-size:12px;line-height:1.9;white-space:pre;overflow-wrap:normal}.table-wrap{overflow:auto;margin:22px 0 28px;border:1px solid var(--line);border-radius:8px}.prose table{border-collapse:collapse;width:100%;min-width:450px;text-align:left;font-size:13px;line-height:1.7}.prose th{background:#e7ece3;color:#3e5749;font-size:11px;letter-spacing:.7px;font-weight:600}.prose th,.prose td{padding:13px 15px;vertical-align:top;border-bottom:1px solid var(--line)}.prose tr:last-child td{border-bottom:0}.prose tbody tr:nth-child(even){background:#f2f4ee}.prose td code{font-size:11px}.prose blockquote{margin:22px 0;border-left:3px solid #77947b;padding:5px 20px;color:var(--muted)}.prose hr{border:0;border-top:1px solid var(--line);margin:36px 0}.prose strong{font-weight:600;color:#183d31}.workflow{margin:22px 0 28px;padding:23px;background:#e9eee5;border:1px solid #d5dfcf;border-radius:10px}.workflow-title{font-size:11px;color:var(--muted);letter-spacing:1px;margin:0 0 16px}.flow-line{display:flex;align-items:center;justify-content:center;gap:9px}.flow-node{flex:1;text-align:center;background:#fffdf6;border:1px solid #c8d6c5;border-radius:7px;padding:12px 8px;font-size:12px;line-height:1.5}.flow-node.central{background:#215847;color:white;border-color:#215847}.flow-arrow{color:#568165;font-size:18px}.flow-lower{display:flex;gap:10px;justify-content:center;margin-top:17px;padding-top:16px;border-top:1px dashed #b4c7b0}.flow-lower div{flex:1;color:#456a4d;text-align:center;font-size:11px}.flow-caption{font-size:11px;margin:17px 0 0!important;color:var(--muted)}
+.footer{border-top:1px solid var(--line);margin-top:45px;padding-top:19px;display:flex;justify-content:space-between;gap:15px;font-size:11px;color:var(--muted)}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:9px 18px;background:#174b3b;color:white;border-radius:8px;font-size:12px;z-index:20;box-shadow:0 8px 24px #153d2526}.toast:empty{display:none}[hidden]{display:none!important}
+@media(min-width:1650px){.layout{padding-left:74px;padding-right:64px}}@media(max-width:1260px){.document-grid{grid-template-columns:minmax(0,1fr);max-width:840px}.toc{display:none}.layout{padding:30px 43px}.sidebar{width:238px}.layout{margin-left:238px}}@media(max-width:760px){.sidebar{transform:translateX(-100%);transition:transform .18s;box-shadow:12px 0 45px #18332520;width:260px}.sidebar.open{transform:translateX(0)}.layout{margin-left:0;padding:19px 22px 35px}.mobile-toggle{display:inline-flex}.nav-close{display:block;position:absolute;right:13px;top:10px;background:transparent;border:0;font-size:24px;color:var(--muted)}.document-grid{margin-top:30px}.topline{font-size:10px}.hero-title{font-size:31px}.intro{font-size:14px}.prose{font-size:14px}.fact{padding:12px 11px}.fact b{font-size:20px}.flow-line{flex-direction:column}.flow-node{width:100%}.flow-arrow{transform:rotate(90deg)}.flow-lower{flex-direction:column}.footer{flex-direction:column;gap:4px}.meta{gap:8px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sidebar{transition:none}}@media print{body{background:white;color:#14201b;font-size:10pt}.sidebar,.topline,.toc,.copy-button,.toast,.footer{display:none!important}.layout{margin:0;padding:0;max-width:none}.document-grid{display:block;margin:0}.hero-title{font-size:28pt}.hero{margin-bottom:20px}.meta{margin:12px 0}.prose h2{break-after:avoid;font-size:17pt}.prose pre{white-space:pre-wrap;overflow:visible}.prose pre code{white-space:pre-wrap;overflow-wrap:anywhere;color:#152d23}.code-wrap{background:#f1f4ed;box-shadow:none;break-inside:avoid;border:1px solid #cdd7c8}.code-top{color:#334d3b;border-bottom:1px solid #cdd7c8}.table-wrap{overflow:visible}.prose table{min-width:0;font-size:9pt}.prose a{color:inherit}.notice{background:#f5f2ea}.fact-row{break-inside:avoid}@page{margin:17mm 18mm}}
+</style></head><body><a class="skip" href="#content">跳到正文</a><aside class="sidebar" id="navigation" aria-label="文档导航"><button class="nav-close" type="button" aria-label="关闭目录">×</button><a class="brand" href="README.html"><span class="brand-mark" aria-hidden="true">↗</span>Project Dev</a><p class="brand-sub">DEVELOPER FIELD GUIDE</p><nav><p class="nav-group">开始使用</p><a class="nav-link active" href="README.html" aria-current="page">产品与能力</a>
+<a class="nav-link" href="docs/codex-setup.html">安装与日常使用</a>
+<p class="nav-group">机制与约定</p><a class="nav-link" href="docs/knowledge-review.html">经验与知识审查</a>
+<a class="nav-link" href="docs/data-contract.html">任务与数据契约</a>
+<p class="nav-group">验证与团队</p><a class="nav-link" href="docs/verification.html">验证记录与边界</a>
+<a class="nav-link" href="docs/pilot-guide.html">真实需求试用</a>
+<a class="nav-link" href="docs/sharing-outline.html">团队分享提纲</a>
+<p class="nav-group">设计与计划</p><a class="nav-link" href="docs/plans/2026-10-13-personal-delivery.html">个人交付实施记录</a>
+<a class="nav-link" href="docs/plans/technical-plan-v0.1.html">初步技术方案</a>
+<a class="nav-link" href="docs/plans/implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 开始使用</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">OVERVIEW</div><h1 class="hero-title">Project Dev Agent</h1><p class="intro">让 Codex 带着项目依据完成开发，并把有价值的纠正留给下一次任务。</p><div class="meta"><span class="badge">v0.2.1 · HTML 文档版</span><span>2026.10.13</span><span>约 3 分钟阅读</span></div></header><article class="prose"><p>接入 Codex 的项目开发工具包：检索项目惯例和业务约束，记录关联改动清单，把纠正经验保存为可审查的知识。入口是 Codex 中的 <code>project-dev</code> Skill，状态和检索由本地 STDIO MCP 服务提供。</p>
+<p>当前 v0.2 提供个人安装、同一工作目录内的多仓库使用、任务恢复、项目初始化与命令行审查。核心工具不依赖某个业务项目、模型 API Key、数据库或向量服务。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>工具</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>project_prepare</code></td>
+<td>检查当前仓库，按需准备 Git 忽略的本机记录，保留业务改动</td>
+</tr>
+<tr>
+<td><code>knowledge_search</code></td>
+<td>按模块、路径和关键词检索规则，返回来源、版本和复核提示</td>
+</tr>
+<tr>
+<td><code>task_open</code></td>
+<td>从干净 Git 基线建立任务和验收项</td>
+</tr>
+<tr>
+<td><code>task_update</code></td>
+<td>保存关联清单、核对证据、纠正理由和已使用的知识版本</td>
+</tr>
+<tr>
+<td><code>task_check</code></td>
+<td>恢复活动任务，比对清单与实际变化，报告待核对项、清单外文件和基线异常</td>
+</tr>
+<tr>
+<td><code>experience_propose</code></td>
+<td>从具体纠正生成候选草稿，保留适用范围和待确认点</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-1">快速开始</h2>
+<p>需要 Node.js 20.19+、npm、Git，以及已登录的 Codex。在长期保留的目录安装分发包，然后执行一次连接：</p>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm install --prefix /absolute/tool-home /absolute/project-dev-agent-0.2.1.tgz --ignore-scripts
+node /absolute/tool-home/node_modules/project-dev-agent/dist/src/cli.js connect --workspace /absolute/workspace --apply
+</code></pre></div>
+<p>若 Codex 不在 PATH，增加 <code>--codex /absolute/path/to/codex</code>。不带 <code>--apply</code> 可先看预览。安装器添加一个 MCP 连接和全局 Skill，其他连接保持原样；<code>workspace</code> 可以是单个仓库或多个独立仓库的父目录。</p>
+<p>安装后在具体仓库新建 Codex 会话并输入：</p>
+<div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>$project-dev 帮我实现这个需求：……
+先找已有实现和业务约束，检查关联代码，再修改并验证。
+</code></pre></div>
+<p>切换会话后可以说“<code>$project-dev 继续当前仓库上次未完成的任务</code>”。第一批知识未整理时会使用已有代码、AGENTS.md 和文档。个人接入仅按需准备本地忽略的任务记录，不要求修改或提交团队配置。</p>
+<p>详细安装、使用、卸载和团队接入见 <a href="docs/codex-setup.html">Codex 接入</a>。</p>
+<p>从源码开发或运行独立示例：</p>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm ci --ignore-scripts
+npm run check
+node dist/src/cli.js doctor
+node dist/src/cli.js sample create --destination /tmp/account-agent-demo
+</code></pre></div>
+<p>样例会创建独立 Git 仓库，目标目录须尚不存在。<code>doctor</code> 只验证运行环境，不验证桌面当前会话。示例只展示机制，不能作为真实业务效果证据。</p>
+<h2 id="section-2">项目数据</h2>
+<div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>.project-dev/
+  project.yaml         # 知识目录、模块范围和排除路径
+  knowledge/*.md       # Git 管理的共享知识
+  local/               # Git 忽略的本机数据
+    tasks/*.json       # 修订号、清单、证据、纠正记录
+    proposals/*.md     # 尚未确认的经验草稿
+    codex.toml         # 当前工作树对应的连接配置
+    plugin/            # 包含当前工作树绑定的本地插件目录
+</code></pre></div>
+<p>知识有 <code>candidate/confirmed/needs_review/disabled</code> 状态。默认检索返回来源仍有效的已确认规则。代码和文档保存内容哈希，文件变化或缺失会提示复核；经验来源保留人的审查记录。规则适用条件仍需 Codex 或开发者结合当前任务判断。</p>
+<p>模板见 <a href="templates/knowledge.md">templates/knowledge.md</a>，经验审查见 <a href="docs/knowledge-review.html">docs/knowledge-review.md</a>。第一批知识可从已有代码惯例、业务文档和同事已确认的经验中整理；工具不会自动归纳并确认整库业务规则。</p>
+<h2 id="section-3">验证与边界</h2>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm run typecheck
+npm test
+npm run test:integration
+</code></pre></div>
+<p>测试覆盖关联待核对项、陈旧修订号、冲突基线、任务恢复、知识范围和来源变化、纠正复用、初始化幂等及真实 STDIO 客户端调用。实测状态见 <a href="docs/verification.html">验证报告</a>。</p>
+<p>同一工作树只允许一个活动任务。任务开始前须干净且已有提交；任务中的正常提交仍与原基线比较。关闭任务要求清单与验收有证据；中止保留历史。工具核对结构化记录与文件覆盖，无法独立证明业务正确，也无法发现所有未登记的业务关联。核对后若再次修改代码，需要重新审查相关证据。</p>
+<p>检索使用范围筛选与关键词排序，尚未提供 AST 影响分析、向量语义搜索或跨仓库影响分析（workspace 模式只提供隔离路由）。审查人字段记录来源，不提供身份认证。真实团队的纠偏、漏改和额外负担，需要试用后才能得出结论。</p>
+<p>后续使用 <a href="docs/pilot-guide.html">试用指南</a> 与 <a href="docs/sharing-outline.html">分享提纲</a>。</p>
+</article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc"  aria-label="本页目录"><p class="toc-title">本页内容</p><a href="#section-1">快速开始</a><a href="#section-2">项目数据</a><a href="#section-3">验证与边界</a></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>
+const sidebar=document.querySelector('.sidebar');const menu=document.querySelector('.mobile-toggle');document.querySelector('.nav-close')?.addEventListener('click',()=>{sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');menu?.focus();});
+menu?.addEventListener('click',()=>{const open=sidebar.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');}});
+document.querySelector('[data-print]').addEventListener('click',()=>window.print());
+let toastTimer;function notify(message){document.querySelector('.toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>document.querySelector('.toast').textContent='',2200);}
+document.querySelectorAll('.copy-button').forEach(button=>button.addEventListener('click',async()=>{const code=button.closest('.code-wrap').querySelector('code');const text=code.textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);}else{const area=document.createElement('textarea');area.value=text;area.style.cssText='position:fixed;opacity:0;left:-10000px';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();if(!ok)throw Error('copy');}button.textContent='已复制';notify('内容已复制');setTimeout(()=>button.textContent='复制',1600);}catch{const range=document.createRange();range.selectNodeContents(code);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);notify('内容已选中，请按 ⌘C 或 Ctrl+C 复制');}}));
+const headings=[...document.querySelectorAll('.prose h2,.prose h3')];if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;document.querySelectorAll('.toc a').forEach(a=>a.classList.toggle('active',a.hash==='#'+entry.target.id));}},{rootMargin:'-10% 0px -72% 0px'});headings.forEach(h=>observer.observe(h));}
+</script></body></html>

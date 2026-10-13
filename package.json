@@ -1,6 +1,6 @@
 {
   "name": "project-dev-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Codex project development workflow and local task evidence contracts",
   "type": "module",
@@ -19,7 +19,7 @@
     "templates",
     "examples",
     "plugin.json",
-    "README.md"
+    "README.html"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -36,7 +36,11 @@ export async function initializeProject(project: string, apply: boolean) {
     ? current : `${current}${current.endsWith("\n") ? "" : "\n"}/.project-dev/local/\n`);
   await plan(".project-dev/project.yaml", stringify(DEFAULT_CONFIG, { lineWidth: 0 }));
   await plan("AGENTS.md", GUIDANCE, (current) => current.includes(MARKER) ? current : `${current}\n${GUIDANCE}`);
-  await plan(".project-dev/README.md", `# 项目开发知识\n\n共享知识目录：\`${config.knowledge_dir}\`。规则采用 YAML 元数据和 Markdown 正文；通过 Git 审查维护。任务记录、经验草稿和本机配置放在 Git 忽略的 \`local/\`。\n\n先阅读工具包的 docs/knowledge-review.md。只有经过明确审查的规则才能标记为 confirmed；代码或文档来源改变后需重新核对。\n`);
+  const knowledgeDirectory = config.knowledge_dir.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]!);
+  await plan(".project-dev/README.html", (await readFile(join(toolRoot, "templates/project-readme.html"), "utf8"))
+    .replaceAll("{{knowledge_directory}}", knowledgeDirectory));
   for (const name of SKILL_FILES) await plan(`.agents/skills/project-dev/${name}`, await readFile(join(toolRoot, "skills/project-dev", name), "utf8"));
   const cli = join(toolRoot, "dist/src/cli.js");
   const args = [cli, "serve", "--project", binding.root];

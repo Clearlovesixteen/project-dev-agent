@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="description" content="保留最初的设计依据与取舍，供回顾实现过程。"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><title>Codex 项目开发 Agent：初步技术方案 v0.1 · Project Dev</title><style>
+:root{--paper:#f8f7f3;--panel:#efeee8;--ink:#203331;--muted:#62726d;--line:#dcded4;--accent:#116654;--white:#fff;--code:#172e2b;--serif:"Iowan Old Style","Songti SC","Noto Serif CJK SC",serif;--sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;--mono:"SFMono-Regular",Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:30px}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.85 var(--sans);-webkit-font-smoothing:antialiased}a{color:var(--accent);text-decoration:none;text-underline-offset:4px}a:hover{text-decoration:underline}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #d19629;outline-offset:4px}.skip{position:fixed;left:12px;top:-80px;z-index:20;padding:10px;background:white}.skip:focus{top:12px}
+.sidebar{position:fixed;inset:0 auto 0 0;width:258px;padding:34px 24px 24px;background:var(--panel);border-right:1px solid var(--line);overflow:auto;z-index:5}.brand{display:flex;align-items:center;gap:11px;font-size:17px;font-weight:650;color:var(--ink);letter-spacing:-.5px}.brand-mark{display:grid;place-items:center;width:31px;height:31px;background:var(--accent);color:white;border-radius:9px;font:16px var(--mono)}.brand-sub{font:10px/1.5 var(--mono);color:var(--muted);letter-spacing:2px;margin:11px 0 29px}.nav-group{margin:23px 0 9px;color:#6b7871;font-size:11px;font-weight:600;letter-spacing:1.5px}.nav-link{display:block;padding:7px 11px;margin:3px 0;border-radius:7px;color:#495c54;font-size:13px;line-height:1.6}.nav-link:hover{background:#e2e6dc;text-decoration:none}.nav-link.active{background:#dce8dd;color:#15543e;font-weight:600;box-shadow:inset 3px 0 #176650}.sidebar-foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.mobile-toggle,.nav-close{display:none}
+.layout{margin-left:258px;padding:35px 50px 48px;max-width:1640px}.topline{display:flex;gap:15px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:18px;font-size:11px;letter-spacing:1.2px;color:var(--muted)}.top-actions{display:flex;gap:10px;align-items:center}.small-button{background:transparent;border:1px solid var(--line);border-radius:7px;padding:5px 11px;color:var(--ink);font-size:12px;letter-spacing:0}.document-grid{display:grid;grid-template-columns:minmax(0,820px) 150px;gap:48px;margin-top:43px}.document{min-width:0}.eyebrow{font:11px/1.5 var(--mono);letter-spacing:2px;color:var(--accent);margin-bottom:15px}.hero-title{font:600 clamp(30px,3vw,44px)/1.3 var(--serif);letter-spacing:-1.1px;margin:0 0 19px}.intro{font-size:16px;line-height:1.85;color:var(--muted);max-width:690px;margin:0}.meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:22px 0 31px;font-size:11px;color:var(--muted)}.badge{display:inline-flex;align-items:center;gap:7px;background:#e2ede3;color:#226246;padding:3px 10px;border-radius:20px}.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:#3b7e54}.hero{border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:33px}.fact-row{display:flex;gap:0;border:1px solid var(--line);background:#fbfcf7;border-radius:10px;margin:0 0 29px}.fact{flex:1;padding:14px 19px;line-height:1.5}.fact+.fact{border-left:1px solid var(--line)}.fact b{font:500 23px/1.3 var(--mono);display:block;color:#265e48}.fact span{font-size:11px;color:var(--muted)}.notice{padding:16px 19px;margin:0 0 25px;background:#f0ece0;border-left:3px solid #a58243;border-radius:0 7px 7px 0;font-size:13px}.notice p{margin:0}.toc{position:sticky;top:30px;align-self:start;padding-top:6px;font-size:11px}.toc-title{font-weight:600;letter-spacing:1.5px;margin:0 0 15px;color:var(--muted)}.toc a{display:block;color:var(--muted);line-height:1.6;padding:5px 0 5px 12px;border-left:1px solid var(--line)}.toc a.active{color:var(--accent);border-left:2px solid var(--accent)}.toc a:hover{text-decoration:none;color:var(--accent)}
+.prose p{margin:0 0 18px}.prose h2{margin:40px 0 19px;padding-top:5px;font:600 25px/1.5 var(--serif);letter-spacing:-.4px}.prose h3{margin:29px 0 13px;font-size:17px;font-weight:600}.prose h4{font-size:15px}.prose a{border-bottom:1px solid #b5cabe;overflow-wrap:anywhere}.prose ul,.prose ol{padding-left:24px;margin:15px 0 24px}.prose li{padding:3px 0}.prose li p{margin:2px 0 9px}.prose li::marker{color:var(--accent)}.prose li input{accent-color:var(--accent)}.prose code{font:12px/1.7 var(--mono);background:#e8ece3;color:#254d43;border-radius:4px;padding:3px 5px;overflow-wrap:anywhere}.code-wrap{margin:20px 0 26px;background:var(--code);border-radius:10px;overflow:hidden;box-shadow:0 5px 15px #1026210a}.code-top{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid #ffffff18;color:#a5c9b7;font:10px/1.5 var(--mono);letter-spacing:1px}.copy-button{border:1px solid #ffffff26;border-radius:5px;background:transparent;color:#dbeade;padding:3px 10px;font:11px var(--sans)}.copy-button:hover{background:#ffffff12}.prose pre{margin:0;padding:18px;overflow:auto;max-width:100%;tab-size:2}.prose pre code{padding:0;background:transparent;color:#e1efe4;font-size:12px;line-height:1.9;white-space:pre;overflow-wrap:normal}.table-wrap{overflow:auto;margin:22px 0 28px;border:1px solid var(--line);border-radius:8px}.prose table{border-collapse:collapse;width:100%;min-width:450px;text-align:left;font-size:13px;line-height:1.7}.prose th{background:#e7ece3;color:#3e5749;font-size:11px;letter-spacing:.7px;font-weight:600}.prose th,.prose td{padding:13px 15px;vertical-align:top;border-bottom:1px solid var(--line)}.prose tr:last-child td{border-bottom:0}.prose tbody tr:nth-child(even){background:#f2f4ee}.prose td code{font-size:11px}.prose blockquote{margin:22px 0;border-left:3px solid #77947b;padding:5px 20px;color:var(--muted)}.prose hr{border:0;border-top:1px solid var(--line);margin:36px 0}.prose strong{font-weight:600;color:#183d31}.workflow{margin:22px 0 28px;padding:23px;background:#e9eee5;border:1px solid #d5dfcf;border-radius:10px}.workflow-title{font-size:11px;color:var(--muted);letter-spacing:1px;margin:0 0 16px}.flow-line{display:flex;align-items:center;justify-content:center;gap:9px}.flow-node{flex:1;text-align:center;background:#fffdf6;border:1px solid #c8d6c5;border-radius:7px;padding:12px 8px;font-size:12px;line-height:1.5}.flow-node.central{background:#215847;color:white;border-color:#215847}.flow-arrow{color:#568165;font-size:18px}.flow-lower{display:flex;gap:10px;justify-content:center;margin-top:17px;padding-top:16px;border-top:1px dashed #b4c7b0}.flow-lower div{flex:1;color:#456a4d;text-align:center;font-size:11px}.flow-caption{font-size:11px;margin:17px 0 0!important;color:var(--muted)}
+.footer{border-top:1px solid var(--line);margin-top:45px;padding-top:19px;display:flex;justify-content:space-between;gap:15px;font-size:11px;color:var(--muted)}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:9px 18px;background:#174b3b;color:white;border-radius:8px;font-size:12px;z-index:20;box-shadow:0 8px 24px #153d2526}.toast:empty{display:none}[hidden]{display:none!important}
+@media(min-width:1650px){.layout{padding-left:74px;padding-right:64px}}@media(max-width:1260px){.document-grid{grid-template-columns:minmax(0,1fr);max-width:840px}.toc{display:none}.layout{padding:30px 43px}.sidebar{width:238px}.layout{margin-left:238px}}@media(max-width:760px){.sidebar{transform:translateX(-100%);transition:transform .18s;box-shadow:12px 0 45px #18332520;width:260px}.sidebar.open{transform:translateX(0)}.layout{margin-left:0;padding:19px 22px 35px}.mobile-toggle{display:inline-flex}.nav-close{display:block;position:absolute;right:13px;top:10px;background:transparent;border:0;font-size:24px;color:var(--muted)}.document-grid{margin-top:30px}.topline{font-size:10px}.hero-title{font-size:31px}.intro{font-size:14px}.prose{font-size:14px}.fact{padding:12px 11px}.fact b{font-size:20px}.flow-line{flex-direction:column}.flow-node{width:100%}.flow-arrow{transform:rotate(90deg)}.flow-lower{flex-direction:column}.footer{flex-direction:column;gap:4px}.meta{gap:8px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sidebar{transition:none}}@media print{body{background:white;color:#14201b;font-size:10pt}.sidebar,.topline,.toc,.copy-button,.toast,.footer{display:none!important}.layout{margin:0;padding:0;max-width:none}.document-grid{display:block;margin:0}.hero-title{font-size:28pt}.hero{margin-bottom:20px}.meta{margin:12px 0}.prose h2{break-after:avoid;font-size:17pt}.prose pre{white-space:pre-wrap;overflow:visible}.prose pre code{white-space:pre-wrap;overflow-wrap:anywhere;color:#152d23}.code-wrap{background:#f1f4ed;box-shadow:none;break-inside:avoid;border:1px solid #cdd7c8}.code-top{color:#334d3b;border-bottom:1px solid #cdd7c8}.table-wrap{overflow:visible}.prose table{min-width:0;font-size:9pt}.prose a{color:inherit}.notice{background:#f5f2ea}.fact-row{break-inside:avoid}@page{margin:17mm 18mm}}
+</style></head><body><a class="skip" href="#content">跳到正文</a><aside class="sidebar" id="navigation" aria-label="文档导航"><button class="nav-close" type="button" aria-label="关闭目录">×</button><a class="brand" href="../../README.html"><span class="brand-mark" aria-hidden="true">↗</span>Project Dev</a><p class="brand-sub">DEVELOPER FIELD GUIDE</p><nav><p class="nav-group">开始使用</p><a class="nav-link" href="../../README.html">产品与能力</a>
+<a class="nav-link" href="../codex-setup.html">安装与日常使用</a>
+<p class="nav-group">机制与约定</p><a class="nav-link" href="../knowledge-review.html">经验与知识审查</a>
+<a class="nav-link" href="../data-contract.html">任务与数据契约</a>
+<p class="nav-group">验证与团队</p><a class="nav-link" href="../verification.html">验证记录与边界</a>
+<a class="nav-link" href="../pilot-guide.html">真实需求试用</a>
+<a class="nav-link" href="../sharing-outline.html">团队分享提纲</a>
+<p class="nav-group">设计与计划</p><a class="nav-link" href="2026-10-13-personal-delivery.html">个人交付实施记录</a>
+<a class="nav-link active" href="technical-plan-v0.1.html" aria-current="page">初步技术方案</a>
+<a class="nav-link" href="implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 设计与计划</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">TECHNICAL / PLAN</div><h1 class="hero-title">Codex 项目开发 Agent：初步技术方案 v0.1</h1><p class="intro">保留最初的设计依据与取舍，供回顾实现过程。</p><div class="meta"><span class="badge">历史记录</span><span>2026.10.13</span><span>约 9 分钟阅读</span></div></header><aside class="notice"><p><strong>历史设计记录。</strong> 以下保留制定时的内容和进度；当前安装与使用方式请以<a href="../codex-setup.html">安装指南</a>为准。</p></aside><article class="prose"><p>日期：2026-10-13。状态：方向已确定，进入任务拆分，尚未实现或验证。工具面向本地 Codex 与不同 Git 仓库，项目语言和框架作为接入信息配置。</p>
+<p>实施启动方式：先独立开发通用工具包并使用小型 Git 样例验证，真实项目用于后续试用和效果评估，不是开始开发的前提。具体顺序见 <a href="implementation-plan-v0.1.html">实施计划 v0.1</a>。</p>
+<p>目标是减少三类人工纠偏：实现不符合项目惯例、遗漏业务约束、只改局部而遗漏关联位置。首版通过项目依据检索、结构化改动清单、逐项核对和经验复用改善开发过程，效果用真实任务验证。</p>
+<h2 id="section-1">1. 产品形态与首版范围</h2>
+<p>产品是 Codex 中的“项目开发”技能，后续将技能与本地工具配置打包为团队插件。同事通过 Codex 对话提出需求、纠正方案、查看结果，代码修改与验证沿用 Codex。</p>
+<p>一次任务提供三种结果：开发前给出相关依据、业务待确认项和预计影响范围；完成后给出逐项核对结果、遗漏线索与验证记录；收到有价值的纠正后生成经验草稿，人工审查后进入共享知识。</p>
+<p>首版限定一个仓库、一个模块或一类常见需求，例如“给现有接口增加行为或字段”。首版交付项目约定与经验检索、改动清单、完成核对、经验草稿和任务效果记录。多仓协作、独立管理网站、全仓调用图、向量数据库、自动确认经验和运行时强制门禁留作后续选择。</p>
+<h2 id="section-2">2. Codex 接入依据</h2>
+<p>Codex 可以使用项目级 <code>AGENTS.md</code>、显式调用 Skills，并连接本地 STDIO MCP 服务。这些是接入基础；本文的工具、数据结构和流程均为拟议设计。参考官方的 <a href="https://learn.chatgpt.com/docs/agent-configuration/agents-md">AGENTS.md</a>、<a href="https://learn.chatgpt.com/docs/build-skills">Skills</a> 和 <a href="https://learn.chatgpt.com/docs/extend/mcp?surface=cli">MCP</a> 文档。</p>
+<p>试点先使用仓库级 Skill 和本地 MCP 配置，验证接入与工作流；稳定后按官方 <a href="https://developers.openai.com/plugins/build/plugins">插件打包文档</a> 通过团队或仓库 marketplace 分发。优先验证 Codex 桌面端与 CLI。当前官方 <a href="https://learn.chatgpt.com/docs/plugins">插件文档</a> 将 IDE 扩展的插件支持排除在外；IDE 如需试用，单独验证直接配置 Skill 与 MCP 的方式。</p>
+<p>首版由用户显式选择“项目开发”技能启动。<code>AGENTS.md</code> 增补简短入口指引与稳定约定，保留已有项目指令；详细知识按需求加载。Skills 是流程引导，MCP 是工具接口，接入本身不构成每次修改必经的强制门禁。</p>
+<h2 id="section-3">3. 系统结构与职责</h2>
+<figure class="workflow" aria-label="Codex 项目开发 Agent 的职责关系"><figcaption class="workflow-title">从需求到依据、清单与证据</figcaption><div class="flow-line"><div class="flow-node">同事提出需求<br>并纠正实现</div><span class="flow-arrow" aria-hidden="true">→</span><div class="flow-node central">Codex + Skill<br>理解、修改、验证</div><span class="flow-arrow" aria-hidden="true">↔</span><div class="flow-node">本地 MCP<br>检索、记录、核对</div></div><div class="flow-lower"><div>Codex ↔ 源码、Git diff、验证工具</div><div>MCP ↔ Git 管理的项目知识</div><div>MCP ↔ 本地任务状态</div></div><p class="flow-caption">业务判断和代码修改由 Codex 完成；MCP 保存依据、清单及证据。</p></figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>部分</th>
+<th>职责</th>
+<th>边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Codex</td>
+<td>查找与阅读实现、理解需求、分析影响、修改代码、执行验证</td>
+<td>语义判断由 Codex 或同事完成，并保留依据</td>
+</tr>
+<tr>
+<td>项目开发 Skill</td>
+<td>组织开发步骤、调用工具、处理待确认项、汇总结果</td>
+<td>流程执行率需要实际验证</td>
+</tr>
+<tr>
+<td>AGENTS.md</td>
+<td>稳定的项目约定、技能入口与知识位置</td>
+<td>控制长度，不堆放全部业务材料</td>
+</tr>
+<tr>
+<td>本地 MCP</td>
+<td>筛选知识、保存清单、采集 Git 变更元数据、检查记录完整性、保存经验草稿</td>
+<td>文件被修改不能直接判定业务要求已满足</td>
+</tr>
+<tr>
+<td>项目知识</td>
+<td>已确认惯例、业务规则、业务关联及参考实现</td>
+<td>记录来源、范围与复核状态</td>
+</tr>
+</tbody></table></div>
+<p>推荐 TypeScript/Node 实现本地 STDIO MCP 服务。使用固定版本的运行包，以明确的工作树绝对路径启动服务，不能根据插件安装目录推测项目位置。独立 worktree 初始化时重新绑定对应路径。启动时解析真实路径并检查 Git 仓库身份，所有读写限定在该工作树及约定的本地状态目录；STDIO 的标准输出用于协议，诊断日志输出到标准错误。</p>
+<p>模型推理沿用 Codex。首版检索采用模块、路径范围、标签和关键词筛选，不引入独立推理服务或复杂索引。源码搜索、阅读及完整 diff 分析仍使用 Codex 原生能力；MCP 只补充可靠的知识与任务状态管理。</p>
+<h2 id="section-4">4. 知识与任务数据</h2>
+<p>建议项目目录如下，名称均为设计示例：</p>
+<div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>repo/
+  AGENTS.md
+  .agents/skills/project-dev/SKILL.md
+  .codex/config.toml                 # 试点 MCP 接入配置
+  docs/project-dev/
+    project.yaml                    # 模块、路径与知识分类
+    knowledge/*.md                  # 经审查共享的规则与经验
+  .project-dev/local/                # Git 忽略，按工作树与任务隔离
+    tasks/&lt;task-id&gt;.json
+    proposals/&lt;proposal-id&gt;.md
+</code></pre></div>
+<p>知识文件使用 Markdown 正文和 YAML 元数据。每条至少包括 <code>id</code>、<code>type</code>、<code>status</code>、适用模块或路径、适用条件、规则、原因、来源、确认人和复核日期。类型包括代码惯例、业务约束和关联改动经验；状态包括候选、已确认、需复核和已停用。</p>
+<p>来源应指向代码位置、设计记录或同事确认过的经验。源码归纳结果先作为候选，避免把偶然实现当作全项目约定。来源文件变化时提示复核；遇到规则之间、规则与现有代码之间的冲突，返回相关依据，由 Codex 或同事判断。首版不承诺自动识别全部语义冲突。</p>
+<p>每项改动清单记录：目标组件或位置、需要修改或验证的内容、为何相关、来源、处理状态、核对者和结果证据。状态建议为待处理、已核对、无需处理；“已核对”和“无需处理”均需要理由或证据。</p>
+<p>任务记录还包括 <code>schema_version</code>、任务 ID、工作树标识、起始 HEAD、需求与验收条件、采用的知识版本、清单、验证记录、人工纠偏及修订号。使用任务锁、修订号检查和原子文件写入，避免同一任务的更新互相覆盖。共享知识进入 Git；本地任务记录用于恢复与效果统计。</p>
+<h2 id="section-5">5. 拟议 MCP 工具</h2>
+<p>下表为产品自定义接口草案，不是 Codex 内置工具。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>工具</th>
+<th>输入重点</th>
+<th>输出与行为</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>task_open</code></td>
+<td>需求、任务范围</td>
+<td>检查仓库起始状态，记录 HEAD，返回任务 ID</td>
+</tr>
+<tr>
+<td><code>knowledge_search</code></td>
+<td>关键词、模块、相关路径、结果上限</td>
+<td>返回适用知识、来源、确认状态和复核提示</td>
+</tr>
+<tr>
+<td><code>task_update</code></td>
+<td>任务 ID、修订号、约束与清单、核对记录</td>
+<td>校验结构并保存新的任务版本</td>
+</tr>
+<tr>
+<td><code>task_check</code></td>
+<td>任务 ID</td>
+<td>获取实际变更路径，返回未核对项、缺少证据项、清单外变更和归属异常</td>
+</tr>
+<tr>
+<td><code>experience_propose</code></td>
+<td>任务 ID、纠正理由、适用范围、来源</td>
+<td>保存本地候选经验，返回可审查草稿</td>
+</tr>
+</tbody></table></div>
+<p>MCP 做筛选、结构校验、存储和确定性的清单比对。影响范围的语义分析与业务判断由 Codex 完成，不能把关键词匹配包装成完整的影响分析。</p>
+<p><code>task_check</code> 将“文件是否变化”和“要求是否得到核对”分别报告。例如，文件虽然修改，但相关业务约束仍缺验证证据，清单项应保持待核对。逻辑正确性仍需要相关测试、代码依据和必要的人工判断。</p>
+<h2 id="section-6">6. 一次开发的执行流程</h2>
+<ol>
+<li>同事显式启动技能并描述需求。Codex 整理验收条件，调用 <code>task_open</code> 建立任务。</li>
+<li>检索匹配的项目知识，阅读相关源码与同类实现。Codex 形成方案和改动清单，经 <code>task_update</code> 保存；关键业务不确定点通过对话确认。</li>
+<li>Codex 实施修改、执行验证。发现新的关联点或收到纠正时，更新清单，记录修改原因。</li>
+<li>调用 <code>task_check</code> 获取结构性差异和未核对事项，结合完整 diff 与验证结果逐项核对；完成报告注明仍待确认或未完成的事项。</li>
+<li>对有复用价值的纠正调用 <code>experience_propose</code>。同事审查后，由 Codex 形成共享知识文件变更，按团队既有 Git 审查方式确认和发布。</li>
+</ol>
+<p>只保存与当前需求有关的经验草稿，不自动采集整个对话。经验积累体现为共享知识的新增与修订，后续任务通过检索使用；不涉及模型权重训练。</p>
+<h2 id="section-7">7. 起始版本、故障与维护</h2>
+<p>首版任务采用已有提交的干净、专用工作树，优先使用独立 Git worktree，并记录起始 HEAD。这样可以将从起始版本至当前工作区的差异以及新增未跟踪文件作为本次变更候选。每个工作树只进行一个受跟踪任务，启动与恢复时检查任务锁；任务期间由开发者保证不并发进行其他修改。</p>
+<p><code>task_open</code> 检测已有未提交修改，不自动暂存、重置或归入新任务；先隔离任务再建立基线。脏工作区的精确快照与归属分析留到后续扩展。服务能检测分支变化、起始版本不再可达等明确异常；任务内正常提交仍以起始版本比较，不因 HEAD 正常推进直接判定失效。Git 元数据无法识别所有外部修改来源。对未显露于元数据的并发改动不保证自动识别，发现或获知后需人工核实基线与变更归属。</p>
+<p>MCP 不可用时，Skill 明确显示经验检索或清单核对未执行，Codex 可以继续使用现有项目文件；完成结果标记为核对不完整。任务状态有版本号，失败后可恢复。代码引用与知识状态定期复核；停用记录保留历史来源。</p>
+<p>本地服务仅在绑定项目内读取必要内容、写入状态和草稿；代码修改由 Codex 的现有权限机制处理。知识不保存凭据或无关对话。索引与任务记录在本地保存；提交给 Codex 的相关上下文仍受既有模型使用方式和团队政策约束，不能据此声称代码完全不离开本机。</p>
+<h2 id="section-8">8. 关键决策与取舍</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>决策</th>
+<th>理由</th>
+<th>取舍</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ADR-01：沿用 Codex 对话与执行能力</td>
+<td>同事已有使用习惯，集中解决项目依据与变更完整性</td>
+<td>首版依赖 Skill 的流程遵循；执行是否完整需要记录</td>
+</tr>
+<tr>
+<td>ADR-02：本地 MCP + Git 知识文件</td>
+<td>部署轻，知识可审查，任务状态可恢复</td>
+<td>团队需同步知识版本并承担少量维护工作</td>
+</tr>
+<tr>
+<td>ADR-03：先规则筛选与人工确认</td>
+<td>可用已有代码和少量经验起步，便于追溯</td>
+<td>召回不全、隐含经验缺失，需要试用补充</td>
+</tr>
+<tr>
+<td>ADR-04：先单仓、干净工作树</td>
+<td>变更归属明确，减少首版复杂度</td>
+<td>暂不覆盖已有大量未提交修改与跨仓任务</td>
+</tr>
+</tbody></table></div>
+<h2 id="section-9">9. 实施与验证建议</h2>
+<p>按一名研发在熟悉的仓库中推进，建议分为约 4–6 周的试点；这是初步估算，需在确定语言、任务类型与投入后调整。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>工作</th>
+<th>可检查成果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>第 1 周</td>
+<td>选择常见需求，整理少量真实案例与关键规则；验证仓库 Skill + 本地 MCP 接入</td>
+<td>可运行的接入样例、Skill 基线、知识样例</td>
+</tr>
+<tr>
+<td>第 2–3 周</td>
+<td>实现知识检索、任务状态、清单核对与经验草稿</td>
+<td>在试点任务中跑通完整流程</td>
+</tr>
+<tr>
+<td>第 4–5 周</td>
+<td>同事试用，补充遗漏规则，调整提醒与检索，打包团队插件</td>
+<td>实际使用记录与可分发安装包</td>
+</tr>
+<tr>
+<td>第 6 周或试点结束时</td>
+<td>对比效果、复盘局限、整理分享</td>
+<td>评估结果、改进清单、至少一次内容分享</td>
+</tr>
+</tbody></table></div>
+<p>建议先选约 8–12 个历史或真实需求做回放，再进入日常试用。至少比较“当前 Codex”“Codex + 同一份项目知识与 Skill”“增加 MCP 状态管理后的完整方案”，区分知识整理、流程引导和工具服务各自的收益。回放固定起始版本、需求、模型与关键配置，并由熟悉业务的同事独立核对；小样本用于发现问题，不据此承诺普遍提升比例。</p>
+<p>记录人工纠偏的类型与次数、关联漏改及补改、纠偏与返工时间、提醒误报、额外阅读或确认负担，以及流程步骤实际执行率。完成次数、知识条数和安装人数作为使用信息，不能替代开发质量改善。</p>
+<p>技术验证重点包括工具可用性、路径隔离、任务更新与恢复、Git 基线识别、规则状态过滤，以及“文件已改但业务未核对”仍保持未完成的情况。产品验证重点是同事是否少纠正、少补漏，新增提醒是否值得处理。</p>
+<h2 id="section-10">10. 首版完成标准与后续评审点</h2>
+<p>首版应满足：同事能在 Codex 启动技能；能找到带来源的适用规则；每次任务有可追踪的改动清单；能暴露未核对和疑似遗漏；能生成经人工审查的经验变更；真实任务中有可核查的效果记录，并完成一次实践分享。</p>
+<p>通用工具开发从自建 Git 样例开始。进入真实试用前确定试点仓库、常见需求类别、主语言、同事使用的 Codex 客户端和实际投入；这些信息影响项目接入与效果验证，不阻塞通用能力开发。方案在样例接入与真实任务验证后继续修订。</p>
+</article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc"  aria-label="本页目录"><p class="toc-title">本页内容</p><a href="#section-1">1. 产品形态与首版范围</a><a href="#section-2">2. Codex 接入依据</a><a href="#section-3">3. 系统结构与职责</a><a href="#section-4">4. 知识与任务数据</a><a href="#section-5">5. 拟议 MCP 工具</a><a href="#section-6">6. 一次开发的执行流程</a><a href="#section-7">7. 起始版本、故障与维护</a><a href="#section-8">8. 关键决策与取舍</a><a href="#section-9">9. 实施与验证建议</a><a href="#section-10">10. 首版完成标准与后续评审点</a></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>
+const sidebar=document.querySelector('.sidebar');const menu=document.querySelector('.mobile-toggle');document.querySelector('.nav-close')?.addEventListener('click',()=>{sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');menu?.focus();});
+menu?.addEventListener('click',()=>{const open=sidebar.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');}});
+document.querySelector('[data-print]').addEventListener('click',()=>window.print());
+let toastTimer;function notify(message){document.querySelector('.toast').textContent=message;clearTimeout(toastTimer);toastTimer=setTimeout(()=>document.querySelector('.toast').textContent='',2200);}
+document.querySelectorAll('.copy-button').forEach(button=>button.addEventListener('click',async()=>{const code=button.closest('.code-wrap').querySelector('code');const text=code.textContent;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);}else{const area=document.createElement('textarea');area.value=text;area.style.cssText='position:fixed;opacity:0;left:-10000px';document.body.append(area);area.select();const ok=document.execCommand('copy');area.remove();if(!ok)throw Error('copy');}button.textContent='已复制';notify('内容已复制');setTimeout(()=>button.textContent='复制',1600);}catch{const range=document.createRange();range.selectNodeContents(code);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);notify('内容已选中，请按 ⌘C 或 Ctrl+C 复制');}}));
+const headings=[...document.querySelectorAll('.prose h2,.prose h3')];if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;document.querySelectorAll('.toc a').forEach(a=>a.classList.toggle('active',a.hash==='#'+entry.target.id));}},{rootMargin:'-10% 0px -72% 0px'});headings.forEach(h=>observer.observe(h));}
+</script></body></html>
