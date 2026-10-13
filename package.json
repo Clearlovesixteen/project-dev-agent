@@ -1,6 +1,6 @@
 {
   "name": "project-dev-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Codex project development workflow and local task evidence contracts",
   "type": "module",
@@ -24,8 +24,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test dist/tests/*.test.js",
-    "test:integration": "npm run build && node --test dist/tests/*.integration.test.js",
+    "test": "npm run build && node --test --test-concurrency=4 dist/tests/*.test.js",
+    "test:integration": "npm run build && node --test --test-concurrency=4 dist/tests/*.integration.test.js",
     "sample:create": "npm run build && node dist/src/cli.js sample create",
     "check": "npm run typecheck && npm test"
   },

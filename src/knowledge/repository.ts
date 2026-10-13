@@ -10,10 +10,10 @@ export interface Diagnostic { code: string; message: string }
 export interface KnowledgeEntry { file: string; version: string; knowledge: Knowledge }
 export interface SourceState { reference: string; state: "current" | "changed" | "missing" | "untracked" | "attested" | "unverifiable"; message?: string }
 
-export async function loadKnowledge(files: ProjectFiles): Promise<{ config: ProjectConfig; entries: KnowledgeEntry[]; diagnostics: Diagnostic[] }> {
+export async function loadKnowledge(files: ProjectFiles): Promise<{ config: ProjectConfig; defaulted: boolean; entries: KnowledgeEntry[]; diagnostics: Diagnostic[] }> {
   const { config, defaulted } = await loadConfig(files);
   const entries: KnowledgeEntry[] = [];
-  const diagnostics: Diagnostic[] = defaulted ? [{ code: "CONFIG_MISSING", message: "Using default knowledge directory; run project init to configure this repository" }] : [];
+  const diagnostics: Diagnostic[] = [];
   let count = 0;
   let bytes = 0;
   async function walk(relative: string, depth: number): Promise<void> {
@@ -38,13 +38,16 @@ export async function loadKnowledge(files: ProjectFiles): Promise<{ config: Proj
     }
   }
   try { await walk(config.knowledge_dir, 0); } catch (error) {
-    diagnostics.push({ code: hasCode(error, "ENOENT") ? "KNOWLEDGE_DIRECTORY_MISSING" : error instanceof AppError ? error.code : "KNOWLEDGE_READ_FAILED",
-      message: error instanceof Error ? error.message : String(error) });
+    // A first-use repository has no configured library. An explicitly configured missing directory is still a diagnostic.
+    if (!(defaulted && hasCode(error, "ENOENT"))) {
+      diagnostics.push({ code: hasCode(error, "ENOENT") ? "KNOWLEDGE_DIRECTORY_MISSING" : error instanceof AppError ? error.code : "KNOWLEDGE_READ_FAILED",
+        message: error instanceof Error ? error.message : String(error) });
+    }
   }
   const occurrences = new Map<string, number>();
   for (const entry of entries) occurrences.set(entry.knowledge.id, (occurrences.get(entry.knowledge.id) ?? 0) + 1);
   for (const [id, number] of occurrences) if (number > 1) diagnostics.push({ code: "DUPLICATE_KNOWLEDGE_ID", message: `Excluded all ${number} documents using duplicate ID ${id}` });
-  return { config, entries: entries.filter((entry) => occurrences.get(entry.knowledge.id) === 1).sort((a, b) => a.file.localeCompare(b.file)), diagnostics };
+  return { config, defaulted, entries: entries.filter((entry) => occurrences.get(entry.knowledge.id) === 1).sort((a, b) => a.file.localeCompare(b.file)), diagnostics };
 }
 
 export function sourcePath(source: Source): string | undefined {

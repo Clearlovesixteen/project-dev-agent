@@ -91,8 +91,11 @@ export class TaskService {
 
   async check(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
-      const { task_id } = TaskCheckInputSchema.parse(input);
-      const task = await this.store.load(task_id);
+      const request = TaskCheckInputSchema.parse(input);
+      const task = request.task_id ? await this.store.load(request.task_id) : await this.store.active();
+      if (!task) return { outcome: "ok", code: "NO_ACTIVE_TASK", data: { project: this.binding.root, active_task: null }, diagnostics: [] };
+      const task_id = task.id;
+      if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "Task belongs to a different repository");
       if (task.phase !== "active") {
         return { outcome: "incomplete", code: "TASK_INACTIVE", data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task },
           diagnostics: [{ code: "TASK_INACTIVE", message: "This task has ended. Its records are historical; current worktree changes are not attributed to it." }] };
@@ -103,7 +106,7 @@ export class TaskService {
         changed = await changedPaths(this.binding, task.baseline_head);
       } catch (error: unknown) {
         const code = error instanceof AppError ? error.code : "BASELINE_UNAVAILABLE";
-        return { outcome: "incomplete", code, data: { task_id, revision: task.revision, phase: task.phase },
+        return { outcome: "incomplete", code, data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task },
           diagnostics: [{ code, message: error instanceof Error ? error.message : String(error) }] };
       }
       const paths = new Set(changed);

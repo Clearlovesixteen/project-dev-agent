@@ -19,7 +19,7 @@ export const TaskUpdateInputSchema = z.object({
   abort_reason: TextSchema.optional(),
 }).strict();
 
-export const TaskCheckInputSchema = z.object({ task_id: IdSchema }).strict();
+export const TaskCheckInputSchema = z.object({ task_id: IdSchema.optional() }).strict();
 
 export type TaskOpenInput = z.infer<typeof TaskOpenInputSchema>;
 export type TaskUpdateInput = z.infer<typeof TaskUpdateInputSchema>;

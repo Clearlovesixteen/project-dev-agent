@@ -7,6 +7,8 @@ import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { DEFAULT_CONFIG, loadConfig } from "./knowledge/config.js";
 import { findToolRoot } from "./package-root.js";
 
+import { VERSION } from "./version.js";
+
 const MARKER = "<!-- project-dev-agent -->";
 const GUIDANCE = `${MARKER}\nFor tracked project changes, use the project-dev skill with the project_dev MCP server. Read applicable project knowledge and existing code before choosing an implementation. Record related paths and review evidence. Keep generated task state and draft experience in .project-dev/local/. Confirm shared rules through the team's review process.\n<!-- /project-dev-agent -->\n`;
 const SKILL_FILES = ["SKILL.md", "references/task-inputs.md"];
@@ -42,7 +44,7 @@ export async function initializeProject(project: string, apply: boolean) {
   await plan(".project-dev/local/codex.toml", toml);
   // Per-project generated plugin: concrete absolute paths avoid guessing host-specific variable expansion.
   await plan(".project-dev/local/plugin/plugin.json", `${JSON.stringify({
-    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: "project-dev-agent", version: "0.1.0",
+    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: "project-dev-agent", version: VERSION,
     description: "Project rules, related-change checklists, and reviewable development experience for Codex",
   }, null, 2)}\n`);
   await plan(".project-dev/local/plugin/mcp.json", `${JSON.stringify({

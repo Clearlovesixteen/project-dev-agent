@@ -89,6 +89,29 @@ export class TaskStore {
     return task;
   }
 
+  async active(): Promise<Task | undefined> {
+    let paths: StatePaths;
+    try { paths = await this.prepare(false); } catch (error) {
+      if (error instanceof AppError && error.code === "TASK_NOT_FOUND") return undefined;
+      throw error;
+    }
+    const directory = await opendir(paths.tasks);
+    let count = 0;
+    let active: Task | undefined;
+    for await (const entry of directory) {
+      if (++count > MAX_TASK_ENTRIES) throw new AppError("STATE_LIMIT", "Too many task directory entries");
+      if (!entry.name.endsWith(".json")) continue;
+      const id = taskId(entry.name.slice(0, -5));
+      const task = await this.readTask(join(paths.tasks, entry.name));
+      if (task.id !== id) throw new AppError("STATE_CORRUPT", "Stored task ID does not match its filename");
+      this.assertBinding(task, paths.root);
+      if (task.phase !== "active") continue;
+      if (active) throw new AppError("MULTIPLE_ACTIVE_TASKS", "Multiple active tasks need explicit task IDs and manual reconciliation");
+      active = task;
+    }
+    return active;
+  }
+
   async update(id: string, expectedRevision: number, mutator: (current: Task) => Task): Promise<Task> {
     const safeId = taskId(id);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {

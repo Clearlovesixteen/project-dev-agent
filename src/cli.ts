@@ -8,19 +8,30 @@ import { KnowledgeSchema } from "./domain/knowledge.js";
 import { ToolResultSchema } from "./domain/result.js";
 import { TaskSchema } from "./domain/task.js";
 import { createSample } from "./sample/create.js";
-import { startServer } from "./server.js";
+import { VERSION } from "./version.js";
+import { prepareProject } from "./personal-setup.js";
+import { startServer, startWorkspaceServer } from "./server.js";
 import { initializeProject } from "./setup.js";
 import { reviewKnowledge } from "./knowledge/review.js";
 import { KnowledgeService } from "./knowledge/service.js";
 import { bindWorktree } from "./git/index.js";
+import { connectCodex } from "./codex-install.js";
 
-const HELP = `project-dev-agent — prototype v0.1
+const HELP = `project-dev-agent — personal delivery v0.2
 
 Commands:
+  connect --workspace <absolute-directory> [--codex <executable>] [--apply]
+    Preview or install a global Skill and a workspace MCP connection using the Codex CLI.
+  disconnect --workspace <absolute-directory> [--codex <executable>] [--apply]
+    Remove only matching installed Skill files and this MCP connection; keep project records.
   doctor
     Check Node, Git and MCP SDK initialization. This does not test a Codex connection.
   serve --project <absolute-worktree-path>
     Start the local STDIO MCP service with task, knowledge and experience tools.
+  serve --workspace <absolute-directory>
+    Route tools to explicit Git project paths inside one configured workspace.
+  project prepare --project <absolute-worktree-path> [--apply]
+    Inspect readiness; --apply ignores local task records without editing shared files.
   project init --project <absolute-worktree-path> [--apply]
     Preview project setup; --apply writes the shown project files and local Codex configuration.
   knowledge search --project <absolute-worktree-path> --query <words>
@@ -66,6 +77,8 @@ async function main(): Promise<void> {
       type: { type: "string" },
       file: { type: "string" },
       project: { type: "string" },
+      workspace: { type: "string" },
+      codex: { type: "string", default: "codex" },
       apply: { type: "boolean", default: false },
       reviewer: { type: "string" },
       query: { type: "string" },
@@ -77,16 +90,27 @@ async function main(): Promise<void> {
     return;
   }
   if (positionals.length === 1 && positionals[0] === "doctor") {
-    const server = new McpServer({ name: "project-dev-agent-foundation", version: "0.1.0" });
+    const server = new McpServer({ name: "project-dev-agent-foundation", version: VERSION });
     await server.close();
-    print({ outcome: "ok", stage: "prototype", node: process.version,
+    print({ outcome: "ok", version: VERSION, node: process.version,
       git: execFileSync("git", ["--version"], { encoding: "utf8" }).trim(), mcp_sdk_initialization: "ok",
       codex_connection: "not_checked" });
     return;
   }
+  if (positionals.length === 1 && ["connect", "disconnect"].includes(positionals[0]!)) {
+    if (!values.workspace) throw new Error("connect/disconnect requires --workspace <absolute-directory>");
+    print(await connectCodex({ workspace: values.workspace, codex: values.codex, apply: values.apply, disconnect: positionals[0] === "disconnect" }));
+    return;
+  }
   if (positionals.length === 1 && positionals[0] === "serve") {
-    if (!values.project) throw new Error("serve requires --project <absolute-worktree-path>");
-    await startServer(values.project);
+    if (Boolean(values.project) === Boolean(values.workspace)) throw new Error("serve requires exactly one of --project or --workspace");
+    if (values.workspace) await startWorkspaceServer(values.workspace);
+    else await startServer(values.project!);
+    return;
+  }
+  if (positionals.length === 2 && positionals[0] === "project" && positionals[1] === "prepare") {
+    if (!values.project) throw new Error("project prepare requires --project");
+    print(await prepareProject(await bindWorktree(values.project), { apply: values.apply }));
     return;
   }
   if (positionals.length === 2 && positionals[0] === "project" && positionals[1] === "init") {

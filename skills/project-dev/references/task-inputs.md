@@ -1,6 +1,10 @@
 # Task tool inputs
 
-The server exposes `task_open`, `task_update`, `task_check`, `knowledge_search` and `experience_propose`. Tool descriptions advertise their schemas. Examples are shapes to adapt to the actual project, not a checklist of business requirements.
+The server exposes `project_prepare`, `task_open`, `task_update`, `task_check`, `knowledge_search` and `experience_propose`. Tool descriptions advertise their schemas. Examples are shapes to adapt to the actual project, not a checklist of business requirements.
+
+Workspace mode requires `"project": "/absolute/current/repository"` on **every** example below. First inspect readiness with `{ "project": "/absolute/current/repository" }` passed to `project_prepare`; add `"apply": true` to prepare local ignores. Readiness includes `state_ignored`, `worktree_clean`, `ready_to_open` and `active_task`. Preparing a dirty worktree preserves its changes and does not make it ready to open.
+
+To recover after a new chat or process restart, call `task_check` with just `project`. It returns the full unique active task, or `NO_ACTIVE_TASK`. Always use the recovered revision for updates. An explicit ID reads historical closed/aborted tasks too. Keep the same project for every call belonging to that task.
 
 ```json
 {

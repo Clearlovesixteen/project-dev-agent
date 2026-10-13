@@ -35,7 +35,7 @@ function scopeMatch(knowledge: Knowledge, modules: string[], paths: string[], co
 
 export async function searchKnowledge(files: ProjectFiles, input: unknown): Promise<ToolResult> {
   const request = KnowledgeSearchInputSchema.parse(input);
-  const { config, entries, diagnostics } = await loadKnowledge(files);
+  const { config, defaulted, entries, diagnostics } = await loadKnowledge(files);
   const paths = request.paths.filter((path) => !config.exclude_paths.some((pattern) => matchesPath(pattern, path)));
   if (request.paths.length && !paths.length) return { outcome: "ok", code: "PATHS_EXCLUDED", data: { results: [], notices: [], truncated: false }, diagnostics: [] };
   const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
@@ -70,5 +70,6 @@ export async function searchKnowledge(files: ProjectFiles, input: unknown): Prom
   }
   return { outcome: diagnostics.length ? "incomplete" : "ok", code: diagnostics.length ? "KNOWLEDGE_PARTIAL" : "KNOWLEDGE_SEARCHED",
     data: { results, notices: notices.slice(0, 20), notices_truncated: notices.length > 20, eligible_count: eligible, truncated,
-      knowledge_directory: config.knowledge_dir }, diagnostics };
+      knowledge_directory: config.knowledge_dir, configuration: defaulted ? "defaults" : "project",
+      next_step: entries.length === 0 ? "No reusable rules found. Read existing project instructions, relevant documents and reference implementations; do not invent confirmed rules." : null }, diagnostics };
 }

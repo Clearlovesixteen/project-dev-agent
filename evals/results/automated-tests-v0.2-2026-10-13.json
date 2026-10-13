@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-13",
+  "version": "0.2.0",
+  "command": "npm run check",
+  "typecheck": "passed",
+  "tests": 70,
+  "passed": 70,
+  "failed": 0,
+  "cancelled": 0,
+  "skipped": 0,
+  "duration_ms": 56508.055834,
+  "test_concurrency": 4,
+  "scope": "Contract, Git, state, knowledge, installer, real STDIO workspace integration; no claim of real business productivity."
+}
