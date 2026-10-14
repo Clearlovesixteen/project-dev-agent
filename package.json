@@ -19,7 +19,8 @@
     "templates",
     "examples",
     "plugin.json",
-    "README.html"
+    "README.md",
+    "guide.html"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

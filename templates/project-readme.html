@@ -14,7 +14,7 @@
   <header><div class="label">PROJECT DEV / PROJECT KNOWLEDGE</div><h1>项目开发知识</h1><p class="intro">把可复用的项目惯例、业务约束和关联改动经验保存下来，供下一次开发检索与核对。</p></header>
   <section><h2>文件放在哪里</h2><div class="paths"><p><strong>共享知识</strong><br><code>{{knowledge_directory}}</code><br>通过 Git 审查维护，记录来源、适用范围和确认状态。</p><p><strong>本机记录</strong><br><code>.project-dev/local/</code><br>保存任务、经验草稿与本机配置，应被 Git 忽略。</p></div></section>
   <section><h2>从经验到共享规则</h2><ol><li>先在具体任务中记录纠正内容、原因和来源。</li><li>将适合复用的经验保存为候选草稿，明确适用范围与待确认问题。</li><li>经过明确审查后，才可将规则标记为 <code>confirmed</code> 并通过团队的 Git 流程共享。</li></ol><div class="note">来源代码或文档变化后，需要重新核对规则。工具不会自动确认业务规则，也不会用文件已修改代替业务验收。</div></section>
-  <section><h2>继续阅读</h2><p>工具包入口：<code>README.html</code>。经验审查说明：<code>docs/knowledge-review.html</code>。</p><p>说明页面使用 HTML。知识文件仍采用 YAML 元数据与 Markdown 正文，这是检索和审查使用的数据格式；Skill 和 AGENTS 指令文件也保留各自规定格式。</p></section>
+  <section><h2>继续阅读</h2><p>工具包入口：<code>README.md</code>；浏览器版使用指南：<code>guide.html</code>。经验审查说明：<code>docs/knowledge-review.html</code>。</p><p>工具仓库首页使用 Markdown，详细说明页面使用 HTML。知识文件仍采用 YAML 元数据与 Markdown 正文，这是检索和审查使用的数据格式；Skill 和 AGENTS 指令文件也保留各自规定格式。</p></section>
   <footer>Project Dev Agent · 说明用于阅读，任务与规则保留可检查的记录。</footer>
 </main>
 </body>
