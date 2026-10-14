@@ -1,0 +1,13 @@
+{
+  "name": "project-dev-agent",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "description": "Codex project development with local conversation habit discovery and related-change evidence",
+  "bin": {
+    "project-dev-agent": "runtime/cli.mjs"
+  }
+}

@@ -11,6 +11,8 @@ Use the project's existing implementations and business constraints to carry a c
 
 Determine the current Git worktree root. A parent folder containing several repositories is not a project; use the repository relevant to the user's request. In workspace mode, pass its absolute path as `project` on every MCP call, including updates and searches. If the server reports a scope mismatch, correct the project selection; do not change the configured workspace automatically.
 
+When installed as a Codex plugin, `plugin_status` reports its version and saved workspace. If project tools return `PLUGIN_NOT_CONFIGURED`, follow the bundled `project-dev-setup` skill. The workspace belongs to this user and persists across plugin updates. Never change it just to bypass a scope error. Older manual MCP installations have no setup tools; keep using their existing workspace.
+
 Call `project_prepare` to inspect readiness. On first use for an authorized development task, `apply: true` adds a Git-local ignore for `.project-dev/local/`; it does not modify shared instructions or commit files. If `active_task` is present, call `task_check` without an ID to recover it. Continue it only when it matches the user's request; do not silently abort unrelated work. Baseline warnings include the old records for recovery.
 
 ## Map the project and deepen understanding as needed
@@ -55,7 +57,7 @@ Call `task_check`, inspect the complete diff and pending items, and account for 
 
 Close the task with `task_update` only when the checklist and acceptance have evidence and recorded validation has passed. If the task cannot be completed, report the unfinished items; use `phase: aborted` with a reason when stopping it. Never report a failed or unavailable check as completed.
 
-Write human-facing analysis, usage instructions and delivery reports as readable HTML. Machine entrypoints (`SKILL.md`, `AGENTS.md`) and structured knowledge retain their required formats.
+Write human-facing analysis, usage instructions and delivery reports as readable HTML. Repository README files use readable Markdown. Machine entrypoints (`SKILL.md`, `AGENTS.md`) and structured knowledge retain their required formats.
 
 When the user corrects an approach and the reason would help a similar task, first record the correction with its source. Then use `experience_propose` with that correction ID, a narrow scope and concrete open review questions. Show the draft and its questions to the user. Keep it a candidate until the user or team explicitly reviews it; never invent a reviewer or run `knowledge review` on your own authority. Routine task execution does not authorize confirming reusable policy. No automatic commit, push or sharing is performed.
 

@@ -17,3 +17,8 @@ export async function findToolRoot(): Promise<string> {
     }
   }
 }
+
+export async function findCliPath(root: string): Promise<string> {
+  const bundled = join(root, "runtime/cli.mjs");
+  try { await access(bundled); return bundled; } catch { return join(root, "dist/src/cli.js"); }
+}

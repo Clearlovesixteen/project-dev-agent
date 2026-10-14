@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { AppError } from "./domain/error.js";
-import { findToolRoot } from "./package-root.js";
+import { findToolRoot, findCliPath } from "./package-root.js";
 import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { Workspace } from "./workspace.js";
 
@@ -27,7 +27,7 @@ export async function connectCodex(options: Options) {
   const home = await realpath(options.userHome ?? homedir());
   const files = new ProjectFiles(home);
   const toolRoot = await findToolRoot();
-  const args = [join(toolRoot, "dist/src/cli.js"), "serve", "--workspace", workspace.root];
+  const args = [await findCliPath(toolRoot), "serve", "--workspace", workspace.root];
   const run: CodexRunner = options.runCodex ?? (async (arguments_) => {
     try {
       return (await execFileAsync(options.codex, arguments_, { cwd: home, encoding: "utf8", maxBuffer: 2_000_000, timeout: 20_000 })).stdout;
@@ -53,7 +53,7 @@ export async function connectCodex(options: Options) {
     if (before !== undefined && before !== content) {
       // Upgrade only an exact bundled predecessor. Never replace local customizations.
       const predecessors: string[] = [];
-      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0"]) {
+      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0", "v0.4.0"]) {
         try { predecessors.push(await readFile(join(toolRoot, "templates/previous-skills", version, name), "utf8")); }
         catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
       }

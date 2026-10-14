@@ -5,7 +5,7 @@ import { bindWorktree, assertStateIgnored } from "./git/index.js";
 import { AppError } from "./domain/error.js";
 import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { DEFAULT_CONFIG, loadConfig } from "./knowledge/config.js";
-import { findToolRoot } from "./package-root.js";
+import { findToolRoot, findCliPath } from "./package-root.js";
 
 import { VERSION } from "./version.js";
 
@@ -42,7 +42,7 @@ export async function initializeProject(project: string, apply: boolean) {
   await plan(".project-dev/README.html", (await readFile(join(toolRoot, "templates/project-readme.html"), "utf8"))
     .replaceAll("{{knowledge_directory}}", knowledgeDirectory));
   for (const name of SKILL_FILES) await plan(`.agents/skills/project-dev/${name}`, await readFile(join(toolRoot, "skills/project-dev", name), "utf8"));
-  const cli = join(toolRoot, "dist/src/cli.js");
+  const cli = await findCliPath(toolRoot);
   const args = [cli, "serve", "--project", binding.root];
   const toml = `[mcp_servers.project_dev]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ${JSON.stringify(args)}\nstartup_timeout_sec = 20\ntool_timeout_sec = 30\n`;
   await plan(".project-dev/local/codex.toml", toml);

@@ -10,7 +10,8 @@ import { TaskSchema } from "./domain/task.js";
 import { createSample } from "./sample/create.js";
 import { VERSION } from "./version.js";
 import { prepareProject } from "./personal-setup.js";
-import { startServer, startWorkspaceServer } from "./server.js";
+import { startServer, startWorkspaceServer, startPluginServer } from "./server.js";
+import { PluginSettings } from "./plugin-settings.js";
 import { initializeProject } from "./setup.js";
 import { reviewKnowledge } from "./knowledge/review.js";
 import { KnowledgeService } from "./knowledge/service.js";
@@ -19,9 +20,15 @@ import { connectCodex } from "./codex-install.js";
 import { HistoryService } from "./history/service.js";
 import { UnderstandingService } from "./understanding/service.js";
 
-const HELP = `project-dev-agent — project understanding v0.4
+const HELP = `project-dev-agent — Codex plugin v0.5
 
 Commands:
+  plugin status
+    Show plugin version and workspace saved outside the plugin cache.
+  plugin configure --workspace <absolute-directory> [--apply --expected-revision <uuid|null>]
+    Preview or save workspace scope; take expected-revision from the preview.
+  serve --plugin
+    Start plugin MCP using persistent per-user settings; setup tools work before configuration.
   connect --workspace <absolute-directory> [--codex <executable>] [--apply]
     Preview or install a global Skill and a workspace MCP connection using the Codex CLI.
   disconnect --workspace <absolute-directory> [--codex <executable>] [--apply]
@@ -94,6 +101,8 @@ async function main(): Promise<void> {
       file: { type: "string" },
       project: { type: "string" },
       workspace: { type: "string" },
+      plugin: { type: "boolean", default: false },
+      "expected-revision": { type: "string" },
       codex: { type: "string", default: "codex" },
       apply: { type: "boolean", default: false },
       reviewer: { type: "string" },
@@ -123,9 +132,19 @@ async function main(): Promise<void> {
     return;
   }
   if (positionals.length === 1 && positionals[0] === "serve") {
-    if (Boolean(values.project) === Boolean(values.workspace)) throw new Error("serve requires exactly one of --project or --workspace");
-    if (values.workspace) await startWorkspaceServer(values.workspace);
+    if ([values.project, values.workspace, values.plugin].filter(Boolean).length !== 1) throw new Error("serve requires exactly one of --project, --workspace or --plugin");
+    if (values.plugin) await startPluginServer();
+    else if (values.workspace) await startWorkspaceServer(values.workspace);
     else await startServer(values.project!);
+    return;
+  }
+  if (positionals.length === 2 && positionals[0] === "plugin") {
+    const settings = new PluginSettings(values["codex-home"]);
+    if (positionals[1] === "status") print(await settings.status());
+    else if (positionals[1] === "configure" && values.workspace) {
+      print(await settings.configure({ workspace: values.workspace, apply: values.apply,
+        expected_revision: values["expected-revision"] === "null" ? null : values["expected-revision"] }));
+    } else throw new Error("Use plugin status or plugin configure --workspace");
     return;
   }
   if (positionals.length === 2 && positionals[0] === "project" && positionals[1] === "prepare") {

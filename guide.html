@@ -17,8 +17,8 @@
 <a class="nav-link" href="docs/sharing-outline.html">团队分享提纲</a>
 <p class="nav-group">设计与计划</p><a class="nav-link" href="docs/plans/2026-10-13-personal-delivery.html">个人交付实施记录</a>
 <a class="nav-link" href="docs/plans/technical-plan-v0.1.html">初步技术方案</a>
-<a class="nav-link" href="docs/plans/implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 开始使用</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">OVERVIEW</div><h1 class="hero-title">Project Dev Agent</h1><p class="intro">让 Codex 带着项目依据完成开发，并把有价值的纠正留给下一次任务。</p><div class="meta"><span class="badge">v0.4.0 · 项目结构与业务理解</span><span>2026.10.14</span><span>约 3 分钟阅读</span></div></header><article class="prose"><p>接入 Codex 的项目开发工具包：检索项目惯例和业务约束，记录关联改动清单，把纠正经验保存为可审查的知识。入口是 Codex 中的 <code>project-dev</code> Skill，状态和检索由本地 STDIO MCP 服务提供。</p>
-<p>当前 v0.4 增加全项目结构索引和按需业务理解：首次接入扫描模块、入口、公共能力和直接导入关系；开发具体需求时保存带源码依据的模块候选，来源变化后提示复核。历史习惯发现继续保留：首次接入项目时分析本机可归属该项目的 Codex 历史，提取有原话依据的偏好与业务纠正，并接入日常检索。保留个人安装、多仓库隔离、任务恢复与命令行审查。核心工具不依赖某个业务项目、模型 API Key、数据库或向量服务。</p>
+<a class="nav-link" href="docs/plans/implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 开始使用</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">OVERVIEW</div><h1 class="hero-title">Project Dev Agent</h1><p class="intro">让 Codex 带着项目依据完成开发，并把有价值的纠正留给下一次任务。</p><div class="meta"><span class="badge">v0.5.0 · Codex 原生插件</span><span>2026.10.14</span><span>约 3 分钟阅读</span></div></header><article class="prose"><p>接入 Codex 的项目开发工具包：检索项目惯例和业务约束，记录关联改动清单，把纠正经验保存为可审查的知识。入口是 Codex 中的 <code>project-dev</code> Skill，状态和检索由本地 STDIO MCP 服务提供。</p>
+<p>v0.4 增加全项目结构索引和按需业务理解：首次接入扫描模块、入口、公共能力和直接导入关系；开发具体需求时保存带源码依据的模块候选，来源变化后提示复核。历史习惯发现继续保留：首次接入项目时分析本机可归属该项目的 Codex 历史，提取有原话依据的偏好与业务纠正，并接入日常检索。保留个人安装、多仓库隔离、任务恢复与命令行审查。核心工具不依赖某个业务项目、模型 API Key、数据库或向量服务。</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -51,21 +51,8 @@
 <td>从具体纠正生成候选草稿，保留适用范围和待确认点</td>
 </tr>
 <tr><td><code>history_scan</code></td><td>归属项目历史、提取可见文本、复用未变化批次，并报告覆盖范围</td></tr><tr><td><code>history_next</code></td><td>读取下一批待分析对话及来源，恢复中断的进度</td></tr><tr><td><code>history_record</code></td><td>校验用户原话，保存候选与分析进度，生成可翻页的 HTML 报告</td></tr><tr><td><code>project_scan</code></td><td>建立或刷新全仓结构索引，返回覆盖范围及 HTML 报告</td></tr><tr><td><code>project_context</code></td><td>查找参考实现、直接引用与使用方，核对相关文件和模块理解的新鲜度</td></tr><tr><td><code>project_model_record</code></td><td>保存有源码原文、哈希和修订号的模块理解候选</td></tr></tbody></table></div>
-<h2 id="section-1">快速开始</h2>
-<p>需要 Node.js 20.19+、npm、Git、已登录的 Codex，以及 <a href="https://github.com/Clearlovesixteen/project-dev-agent">GitHub 私有仓库</a>的访问权限。首次从仓库获取工具，并把目录长期保留：</p>
-<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>git clone git@github.com:Clearlovesixteen/project-dev-agent.git
-cd project-dev-agent
-npm ci --ignore-scripts
-npm run build
-node dist/src/cli.js connect --workspace /absolute/workspace --apply
-</code></pre></div>
-<p>将 <code>/absolute/workspace</code> 换成自己的项目或工作目录；SSH 需要先配置 GitHub 密钥，也可用已认证的 HTTPS 地址克隆。若 Codex 不在 PATH，增加 <code>--codex /absolute/path/to/codex</code>。安装器注册本机源码目录中的 MCP 服务并安装全局 Skill，目录移动后需要重新连接。更新步骤见 <a href="docs/codex-setup.html#github-update">GitHub 更新</a>。</p>
-<p>安装后在具体仓库新建 Codex 会话并输入：</p>
-<div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>$project-dev 帮我实现这个需求：……
-</code></pre></div>
-<p>切换会话后可以说“<code>$project-dev 继续当前仓库上次未完成的任务</code>”。第一批知识未整理时会使用已有代码、AGENTS.md 和文档。个人接入仅按需准备本地忽略的任务记录，不要求修改或提交团队配置。</p>
-<p>详细安装、使用、卸载和团队接入见 <a href="docs/codex-setup.html">Codex 接入</a>。</p>
-<p>从源码开发或运行独立示例：</p>
+<h2 id="section-1">快速开始 · 原生插件</h2><p>v0.5 通过私有 GitHub Marketplace 分发预构建插件。需要 Node.js 20.19+、Git 和仓库访问权限，同事无需源码构建。</p><div class="code-wrap"><div class="code-top">bash<button class="copy-button" type="button">复制</button></div><pre><code>codex plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+codex plugin add project-dev-agent@project-dev-team</code></pre></div><p>重启 Codex 并新建对话，首次使用 <code>$project-dev-setup</code> 选择自己的工作目录；日常使用 <code>$project-dev</code> 描述需求；更新使用 <code>$project-dev-update 更新到最新版</code>。个人配置和项目记录跨版本保留。详细步骤见<a href="docs/codex-setup.html">安装与更新</a>。</p><p>从源码开发或运行独立示例：</p>
 <div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm ci --ignore-scripts
 npm run check
 node dist/src/cli.js doctor
@@ -81,8 +68,6 @@ node dist/src/cli.js sample create --destination /tmp/account-agent-demo
     understanding/     # 结构索引、模块理解修订与 HTML 报告
     history/           # 私人历史文本、分析进度与 HTML 报告
     proposals/*.md     # 尚未确认的经验草稿
-    codex.toml         # 当前工作树对应的连接配置
-    plugin/            # 包含当前工作树绑定的本地插件目录
 </code></pre></div>
 <p>知识有 <code>candidate/confirmed/needs_review/disabled</code> 状态。默认检索返回来源仍有效的已确认规则。代码和文档保存内容哈希，文件变化或缺失会提示复核；经验来源保留人的审查记录。规则适用条件仍需 Codex 或开发者结合当前任务判断。</p>
 <p>模板见 <a href="templates/knowledge.md">templates/knowledge.md</a>，经验审查见 <a href="docs/knowledge-review.html">经验审查说明</a>。第一批知识可从已有代码惯例、业务文档和同事已确认的经验中整理；工具不会自动归纳并确认整库业务规则。</p>

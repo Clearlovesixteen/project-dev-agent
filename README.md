@@ -4,7 +4,7 @@
 
 这是接入 Codex 的开发辅助工具，适合已经用 Codex 修改项目、但仍需要反复纠正实现思路的开发者。它可以用于不同业务项目，不绑定某一个系统。
 
-当前版本：**v0.4.0，供个人使用和小范围团队验证**。采用 Git 源码安装和更新，尚未提供插件市场一键安装或自动更新。
+当前版本：**v0.5.0，供个人使用和小范围团队验证**。通过私有 GitHub Marketplace 分发原生 Codex 插件，运行代码和依赖已打包。同事无需克隆源码、运行 npm 或手动同步 Skill。
 
 ## 它能帮你做什么
 
@@ -18,79 +18,58 @@
 
 例如，修改一个订单状态的展示时，Agent 会先查找已有状态定义和展示组件，再核对列表、详情、筛选项及测试是否涉及这次变化。需要同步修改的地方和只需验证的地方都会进入清单；实际范围仍需结合当前代码判断。
 
-## 开始前准备
+## 安装前准备
 
-- **Node.js 20.19 或以上版本**，以及 npm、Git。
-- 已安装并登录 Codex，能够使用它的 CLI 配置 MCP。
-- 拥有本私有仓库的访问权限。使用 SSH 克隆时，本机需已配置 GitHub SSH 密钥。
-- 准备一个已有 Git 提交的业务仓库，或一个包含多个 Git 仓库的工作目录。
+- **Node.js 20.19+ 和 Git**，两者应能被 Codex 进程找到。插件已包含 JavaScript 依赖，但不包含 Node 本身。
+- 已登录 Codex，CLI 支持 `codex plugin` 命令。如果提示未知命令，请先更新 Codex。
+- 本私有 GitHub 仓库的访问权限；SSH 安装使用本机已配置的 GitHub SSH 身份。
+- 一个已有提交的业务 Git 仓库，或包含多个 Git 仓库的工作目录。
 
-工具无需单独的模型 API Key、数据库或向量服务。理解需求和分析代码使用当前 Codex 会话，会消耗该会话的额度。
+无需额外模型 API Key、数据库或向量服务。语义分析使用当前 Codex 会话及其额度。
 
-## 首次安装
+## 首次安装：只做一次
 
-### 1. 获取并构建工具
-
-在终端执行。工具目录需要长期保留，Codex 会从这里启动本地服务。
+### 1. 添加插件源并安装
 
 ```bash
-mkdir -p "$HOME/Tools"
-git clone git@github.com:Clearlovesixteen/project-dev-agent.git "$HOME/Tools/project-dev-agent"
-cd "$HOME/Tools/project-dev-agent"
-npm ci --ignore-scripts && npm run build
+codex plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+codex plugin add project-dev-agent@project-dev-team
 ```
 
-如果使用 HTTPS，可将克隆地址替换为 `https://github.com/Clearlovesixteen/project-dev-agent.git`，使用自己已配置的 GitHub 认证方式。
+第一条把私有 GitHub 仓库登记为插件源；第二条安装其中的插件。下载、版本缓存和启用状态由 Codex 管理。**不用把工具仓库克隆到自己的工作目录，也不用执行 npm install。**
 
-### 2. 连接你的业务工作目录
+若团队使用 HTTPS 认证，可把第一条的仓库地址替换为 `https://github.com/Clearlovesixteen/project-dev-agent.git`。连接 GitHub 插件账号和本机 Git 的 SSH/HTTPS 认证是两件事，本次下载使用后者。
 
-下面的 `/absolute/workspace` 是占位符，**必须替换成你电脑上已有的绝对路径**。路径包含空格时保留引号。
-
-例如，你有两个仓库 `/Users/your-name/Projects/project-a` 和 `/Users/your-name/Projects/project-b`，可以将 workspace 设置为 `/Users/your-name/Projects`；也可以只设置一个仓库的路径。
-
-先预览，再应用：
+如果终端找不到 `codex`，可以使用桌面应用内已有的 CLI 路径。部分 macOS 安装可执行：
 
 ```bash
-node dist/src/cli.js connect --workspace "/absolute/workspace"
-node dist/src/cli.js connect --workspace "/absolute/workspace" --apply
+"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin add project-dev-agent@project-dev-team
 ```
 
-这一步会：
+以实际安装位置为准；后文命令中的 `codex` 同样替换为这个路径。无需为安装修改全局 PATH。
 
-1. 注册名为 `project_dev` 的本地 MCP 服务，绑定你的工作目录。
-2. 将 `project-dev` Skill 安装到 `~/.agents/skills/project-dev`。
-3. 保留已有的其他 MCP 配置；遇到同名配置或自定义 Skill 冲突时停止，提示核对。
+### 2. 选择自己的项目范围
 
-**工具源码目录与业务工作目录是两个不同的用途。** 前者存放这个工具，后者是你希望 Agent 帮助开发的项目范围。日常使用时，在范围内的具体业务仓库打开 Codex 对话。
+安装后重新打开 Codex，并在业务仓库新建对话。输入一次：
 
-如果提示找不到 `codex`，为 `connect` / `disconnect` 命令加上 `--codex`，指定本机实际的 CLI 路径。例如，某些 macOS 桌面安装使用以下路径：
-
-```bash
-node dist/src/cli.js connect \
-  --workspace "/absolute/workspace" \
-  --codex "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" \
-  --apply
+```text
+$project-dev-setup 把工作目录设为 /absolute/workspace，接入当前项目。
 ```
 
-CLI 路径以你电脑上的安装位置为准。后续更新和断开时也需要使用同一路径。
+`/absolute/workspace` 必须替换成你自己的现有绝对路径，可以是单个仓库，也可以是包含多个仓库的父目录。无需使用作者电脑的路径。
 
-### 3. 在 Codex 中确认接入
+引导会检查插件版本，预览并保存你选定的目录，然后准备当前仓库。个人设置保存在 `${CODEX_HOME:-~/.codex}/project-dev-agent/settings.json`，独立于插件版本缓存。后续升级继续使用它。
 
-在 workspace 内的**具体业务仓库**新建 Codex 对话，输入：
+### 3. 确认可以调用
 
 ```text
 $project-dev 接入当前项目，生成项目理解报告。
 ```
 
-接入后应能看到 Agent 调用 `project_prepare`、`project_scan` 等工具，并返回项目扫描结果及报告路径。如果工具尚未出现，在 Codex 的 MCP 设置中重启 `project_dev` 连接，再新建对话。
+看到 `project_prepare`、`project_scan` 等实际工具调用和返回的报告路径，说明当前会话接入成功。只看到“已安装”说明安装完成，不等于当前对话已加载工具；工具未出现时，重新启动 Codex 并新建对话。
 
-也可以在工具源码目录运行环境检查：
-
-```bash
-node dist/src/cli.js doctor
-```
-
-`doctor` 成功表示 Node、Git 和 MCP SDK 可以运行；其中 `codex_connection: "not_checked"` 表示它没有检查当前 Codex 对话。**实际接入成功以对话中能够调用工具为准。**
+插件包含三个 Skill：日常开发 `project-dev`、首次配置 `project-dev-setup`、版本更新 `project-dev-update`。原生安装不会再向全局 Skill 目录手动复制文件。
 
 ## 第一次接入项目，会发生什么
 
@@ -132,36 +111,45 @@ PRD 需要以当前 Codex 会话可读取的文本或附件提供。附件解析
 
 ## 更新到最新版本
 
-在**工具源码目录**执行。保留首次连接时的 Node 路径和 workspace；若曾使用 `--codex`，最后一条命令也要加上同样的参数。
+在 Codex 里说：
 
-```bash
-cd "$HOME/Tools/project-dev-agent"
-git pull --ff-only && \
-npm ci --ignore-scripts && \
-npm run build && \
-node dist/src/cli.js connect --workspace "/absolute/workspace" --apply
+```text
+$project-dev-update 更新 Project Dev Agent 到最新版。
 ```
 
-完成后，在 Codex 中重启 `project_dev` 连接并新建对话。**拉取源码和构建会更新服务代码，重新 connect 用于同步 Skill，重启连接才会让服务加载新代码。**
+它会调用 Codex 原生插件管理器刷新配置好的插件源，并核对安装版本。也可以直接执行：
 
-任一步失败都先处理错误再继续。`--ff-only` 会在本地与远端分支分叉时停止，不自动合并你的修改。出现 `SKILL_CONFLICT` 或 `MCP_CONFIG_CONFLICT` 时，先比较现有内容，避免覆盖自定义配置。
+```bash
+codex plugin marketplace upgrade project-dev-team
+codex plugin list --json
+```
 
-`v0.4.0` 标签保留首次团队验证的代码基线；`main` 持续接收修正。团队对比验证时，应记录所用提交，可用 `git rev-parse --short HEAD` 查看。
+已实测：刷新 Git 插件源会更新已启用插件的版本缓存。更新后**新建对话或重启 Codex**，使 MCP 进程和 Skill 加载新版；运行中的旧对话不会自动切换。更新前先完成或保存当前开发任务。
 
-### 从旧安装包迁移到 Git 目录
+工作目录配置、业务仓库里的任务、历史候选和报告会保留。发布者维护源码并提交新的预构建版本，同事只刷新插件源。当前没有额外的本地管理页面。
 
-如果之前已通过安装包连接，先使用**旧安装目录**中的 CLI 执行 `disconnect --workspace "/absolute/workspace" --apply`，再从新的 Git 目录执行上面的 `connect`。只移动文件目录会使旧连接仍指向原路径。
+**本版本验证的是原生插件安装和刷新机制。** 尚未验证所有客户端的“更新”按钮位置，也不承诺后台定时更新或旧会话热更新。支持的客户端可以通过自己的插件界面管理启用和卸载；没有相应入口时使用上面的已验证命令。
 
-项目任务、历史候选和报告会保留，不需要重新复制到工具目录。
+`main` 是更新通道；`v0.5.0` 是固定的验证基线。跟随 `main` 才能持续收到新版本；固定到标签的安装只会保留对应版本。
+
+### 从 v0.4 手动连接迁移
+
+若之前通过源码目录或安装包运行过 `connect`，先在**原安装目录**执行下面的命令。workspace 和 `--codex` 参数保持与旧连接一致：
+
+```bash
+node dist/src/cli.js disconnect --workspace "/absolute/workspace" --apply
+```
+
+它只移除匹配的旧 MCP 连接和未修改的全局 Skill，保留业务项目记录。然后按本文安装原生插件，并设置相同的 workspace。出现自定义 Skill 或连接冲突时先核对，不要删除不相关的配置。业务仓库若还放有旧版 `.agents/skills/project-dev` 或 `.codex/config.toml` 连接，需要单独检查，避免重复加载。
 
 ## 给团队使用
 
 1. 为成员开通本私有仓库的访问权限。
-2. 每人在自己的电脑克隆、构建，并连接自己的业务工作目录。
+2. 每人在自己的 Codex 添加同一个插件源、安装插件，首次选择自己的业务工作目录。
 3. 使用相同版本和真实需求验证，记录需要纠正实现思路、遗漏关联改动以及额外操作的情况。
 4. 将已审查、有复用价值的规则放入业务仓库的 `.project-dev/knowledge/`，通过团队原有 Git 审查流程共享。
 
-各人的本地对话和未确认候选不会因使用同一个工具仓库而自动共享。个人试用无需先执行 `project init`；只有需要统一业务仓库配置、项目 Skill 和知识目录时，才使用该命令预览和写入团队配置。
+各人的本地对话和未确认候选不会因使用同一个插件源而自动共享。插件用户无需执行旧版 `connect` 或 `project init`；后者属于源码模式，会写入项目级 Skill 和 MCP 连接，可能造成重复加载。
 
 ## 技术实现与数据位置
 
@@ -191,32 +179,32 @@ node dist/src/cli.js connect --workspace "/absolute/workspace" --apply
 - **历史分析有来源范围。** 只覆盖本机可读取且能够归属当前项目的 Codex 对话文本，不等于全员历史；历史附件正文暂不解析。
 - **业务理解逐步积累。** 从代码观察到的行为不等于已确认产品规则，后端不可见逻辑和业务歧义仍需确认。
 - **清单与验证记录不保证实现正确。** Skill 是执行指导，不是强制拦截机制；真实项目的测试与代码审查仍然需要。
-- **目前是本地工具。** 没有团队中央服务、插件市场自动安装或自动更新。workspace 模式要求业务仓库及 Git 元数据位于配置范围内，范围外的 worktree 不能直接使用该连接。
+- **插件在本机运行。** GitHub 用于分发工具版本，没有团队中央数据服务。业务仓库及 Git 元数据必须位于配置的 workspace 内，范围外的 worktree 需要正确的目录配置。
 
-v0.4.0 已记录类型检查及 **89 项自动化测试通过**，并完成独立目录的依赖安装、构建和环境检查。测试证明相应机制可运行；减少多少纠偏、返工或遗漏，还需要通过真实开发需求验证。
+v0.5.0 的验证覆盖预构建包独立运行、未配置启动、工作目录隔离、设置并发保护，以及 Codex 原生插件安装和跨版本刷新。完整结果见 [验证记录](docs/verification.html)。测试证明相应机制可运行；减少多少纠偏、返工或遗漏，还需要通过真实需求与同事验证。
 
 ## 常见问题
 
 | 现象 | 处理方式 |
 | --- | --- |
 | GitHub 提示 Repository not found | 检查账号是否已获私有仓库访问权限，以及 Git 使用的 SSH / HTTPS 身份是否正确。 |
-| 找不到 `codex` 或出现 `CODEX_COMMAND_FAILED` | 检查 Codex CLI 是否可执行，必要时用 `--codex` 指定实际路径。 |
-| Skill 或 MCP 工具没有出现 | 确认 `connect --apply` 成功，重启 `project_dev` 连接并新建对话；检查是否有旧的项目级 Skill。 |
+| 找不到 `codex` 或提示未知 `plugin` 命令 | 使用实际 Codex CLI 路径，并检查 Codex 版本是否支持原生插件命令。 |
+| Skill 或 MCP 工具没有出现 | 确认原生插件已安装并启用，Node 与 Git 可用；重启 Codex 并新建对话，检查旧连接或项目级 Skill 是否重复。 |
+| `PLUGIN_NOT_CONFIGURED` | 运行 `project-dev-setup` 选择本机工作目录。 |
+| 更新后仍显示旧运行版本 | 区分安装版本与当前进程版本；更新后重启 Codex 并新建对话。 |
 | `PROJECT_OUTSIDE_WORKSPACE` | 检查当前业务仓库及其 Git 元数据是否位于配置的 workspace 内。 |
 | `WORKTREE_DIRTY` | 保留已有改动，由开发者处理后再建立任务；不要为了通过检查而丢弃代码。 |
 | `ACTIVE_TASK_EXISTS` | 先恢复当前仓库未完成的任务，确认是否与本次需求一致。 |
 | `SKILL_CONFLICT` / `MCP_CONFIG_CONFLICT` | 比较已有配置和新版本，确认安装目录、Node 路径、workspace 与自定义修改；安装器不会覆盖不匹配内容。 |
 | 报告显示未覆盖或未完成 | 根据报告检查排除项、扫描限制或待分析批次，继续相关步骤，不把部分结果当作全量完成。 |
 
-## 断开连接
-
-在原工具目录执行，workspace 与 `--codex` 参数保持和安装时一致：
+## 卸载插件
 
 ```bash
-node dist/src/cli.js disconnect --workspace "/absolute/workspace" --apply
+codex plugin remove project-dev-agent@project-dev-team
 ```
 
-这会移除匹配的 MCP 连接和未经自定义修改的已安装 Skill。项目任务、知识、报告、Git 本地忽略规则和工具目录会保留。
+也可使用 Codex 插件界面的卸载入口。个人 workspace 设置和业务仓库里的任务、知识与报告位于插件缓存之外，会继续保留。重新安装可复用这些数据；如需删除数据，请先核对范围和备份。
 
 ## 开发与详细文档
 
@@ -227,12 +215,13 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-`npm run check` 执行类型检查、构建和自动化测试。
+`npm run check` 执行类型检查、源码构建、插件打包和自动化测试。只修改源码不会向同事发布新版；发布前需要统一修改 `package.json`、锁文件、`plugin.json` 和 `src/version.ts` 的版本，重新构建并提交 `plugins/project-dev-agent/`。完整发布步骤见 [插件发布与维护](docs/plugin-release.html)。
 
 仓库首页使用 Markdown，可直接在 GitHub 阅读。详细说明保留 HTML，**克隆后用本机浏览器打开对应文件**：
 
 - [完整使用指南](guide.html)
 - [安装与日常使用](docs/codex-setup.html)
+- [插件发布与维护](docs/plugin-release.html)
 - [项目结构与业务理解](docs/project-understanding.html)
 - [历史习惯发现](docs/history-mining.html)
 - [经验与知识审查](docs/knowledge-review.html)

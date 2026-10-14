@@ -1,6 +1,6 @@
 {
   "name": "project-dev-agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Codex project development with local conversation habit discovery and related-change evidence",
   "type": "module",
@@ -20,15 +20,18 @@
     "examples",
     "plugin.json",
     "README.md",
-    "guide.html"
+    "guide.html",
+    "mcp.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm run build && node --test --test-concurrency=4 dist/tests/*.test.js",
+    "test": "npm run build && npm run build:plugin && node --test --test-concurrency=4 dist/tests/*.test.js",
     "test:integration": "npm run build && node --test --test-concurrency=4 dist/tests/*.integration.test.js",
     "sample:create": "npm run build && node dist/src/cli.js sample create",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "test:plugin": "npm run build:plugin && npm run build && node --test dist/tests/plugin*.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -37,6 +40,7 @@
   },
   "devDependencies": {
     "@types/node": "20.19.43",
+    "esbuild": "0.28.2",
     "typescript": "7.0.2"
   }
 }

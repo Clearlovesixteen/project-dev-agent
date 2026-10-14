@@ -1,0 +1,12 @@
+{
+  "name": "project-dev-team",
+  "interface": { "displayName": "Project Dev Team" },
+  "plugins": [
+    {
+      "name": "project-dev-agent",
+      "source": { "source": "local", "path": "./plugins/project-dev-agent" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}
