@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { connectCodex } from "../src/codex-install.js";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
+import { fileURLToPath } from "node:url";
 
 function configuration() {
   const unrelated = { name: "existing", enabled: true, transport: { type: "stdio", command: "other-tool", args: ["--keep"] } };
@@ -72,4 +73,38 @@ test("failed Codex registration rolls back only skill files created in that atte
   };
   await assert.rejects(connectCodex({ workspace: fixture.root, codex: "fake", userHome: home, runCodex, apply: true }), /Simulated registration failure/);
   await assert.rejects(access(join(home, ".agents/skills/project-dev/SKILL.md")), { code: "ENOENT" });
+});
+
+test("known v0.2.1 skill upgrades in place and failed registration restores that exact predecessor", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(await realpath(fixture.root), "upgrade home");
+  const directory = join(home, ".agents/skills/project-dev"); await mkdir(directory, { recursive: true });
+  const old = await readFile(fileURLToPath(new URL("../../templates/previous-skills/v0.2.1/SKILL.md", import.meta.url)), "utf8");
+  const path = join(directory, "SKILL.md"); await writeFile(path, old);
+  const options = { workspace: fixture.root, codex: "fake", userHome: home, apply: true };
+  const failing = async (args: string[]) => { if (args[1] === "list") return "[]"; throw new Error("registration failed"); };
+  await assert.rejects(connectCodex({ ...options, runCodex: failing }), /registration failed/);
+  assert.equal(await readFile(path, "utf8"), old);
+  await assert.rejects(access(join(directory, "references/history-inputs.md")), { code: "ENOENT" });
+  const config = configuration();
+  const preview = await connectCodex({ ...options, runCodex: config.runCodex, apply: false });
+  assert.equal(preview.skill_files.find((file) => file.file === path)?.action, "update");
+  assert.equal(await readFile(path, "utf8"), old);
+  await connectCodex({ ...options, runCodex: config.runCodex });
+  assert.notEqual(await readFile(path, "utf8"), old);
+  await access(join(directory, "references/history-inputs.md"));
+  const repeated = await connectCodex({ ...options, runCodex: config.runCodex });
+  assert.ok(repeated.skill_files.every((file) => file.action === "unchanged"));
+});
+
+test("exact v0.3 skill upgrades with the new project understanding reference", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(await realpath(fixture.root), "v03 home"), directory = join(home, ".agents/skills/project-dev");
+  await mkdir(directory, { recursive: true });
+  const old = await readFile(fileURLToPath(new URL("../../templates/previous-skills/v0.3.0/SKILL.md", import.meta.url)), "utf8");
+  await writeFile(join(directory, "SKILL.md"), old);
+  const config = configuration();
+  await connectCodex({ workspace: fixture.root, codex: "fake", userHome: home, apply: true, runCodex: config.runCodex });
+  assert.match(await readFile(join(directory, "SKILL.md"), "utf8"), /project_scan/);
+  await access(join(directory, "references/understanding-inputs.md"));
 });

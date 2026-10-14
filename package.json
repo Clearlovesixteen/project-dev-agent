@@ -1,8 +1,8 @@
 {
   "name": "project-dev-agent",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "private": true,
-  "description": "Codex project development workflow and local task evidence contracts",
+  "description": "Codex project development with local conversation habit discovery and related-change evidence",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"

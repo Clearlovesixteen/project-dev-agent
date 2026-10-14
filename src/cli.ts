@@ -16,8 +16,10 @@ import { reviewKnowledge } from "./knowledge/review.js";
 import { KnowledgeService } from "./knowledge/service.js";
 import { bindWorktree } from "./git/index.js";
 import { connectCodex } from "./codex-install.js";
+import { HistoryService } from "./history/service.js";
+import { UnderstandingService } from "./understanding/service.js";
 
-const HELP = `project-dev-agent — personal delivery v0.2
+const HELP = `project-dev-agent — project understanding v0.4
 
 Commands:
   connect --workspace <absolute-directory> [--codex <executable>] [--apply]
@@ -34,6 +36,20 @@ Commands:
     Inspect readiness; --apply ignores local task records without editing shared files.
   project init --project <absolute-worktree-path> [--apply]
     Preview project setup; --apply writes the shown project files and local Codex configuration.
+  project scan --project <absolute-worktree-path>
+    Build or refresh the bounded structure map and HTML report; no business code is changed.
+  project context --project <absolute-worktree-path> [--query <words>] [--path <relative-path>]
+    Query reference files, direct imports/consumers and source-checked module candidates.
+  model record --project <absolute-worktree-path> --file <model-json-file>
+    Preserve a scoped business model candidate with verified source quotations and revisions.
+  history scan --project <absolute-worktree-path> [--refresh] [--codex-home <directory>]
+    Discover local project conversation text, retaining coverage and incremental analysis state.
+  history next --project <absolute-worktree-path>
+    Read the next batch for semantic analysis by Codex.
+  history record --project <absolute-worktree-path> --file <analysis-json-file>
+    Save a batch analysis with checked user quotations and update the HTML report.
+  history propose --project <absolute-worktree-path> --id <candidate-id>
+    Export a history candidate into the existing explicit knowledge-review workflow.
   knowledge search --project <absolute-worktree-path> --query <words>
     Find current confirmed project knowledge, with review hints for stale sources.
   knowledge review --project <absolute-worktree-path> --file <relative-markdown-path> --reviewer <name>
@@ -82,6 +98,10 @@ async function main(): Promise<void> {
       apply: { type: "boolean", default: false },
       reviewer: { type: "string" },
       query: { type: "string" },
+      path: { type: "string" },
+      id: { type: "string" },
+      refresh: { type: "boolean", default: false },
+      "codex-home": { type: "string" },
     },
     allowPositionals: true,
   });
@@ -121,6 +141,29 @@ async function main(): Promise<void> {
   if (positionals.length === 2 && positionals[0] === "knowledge" && positionals[1] === "review") {
     if (!values.project || !values.file || !values.reviewer) throw new Error("knowledge review requires --project, --file and --reviewer");
     print({ outcome: "ok", ...(await reviewKnowledge(values.project, values.file, values.reviewer)) });
+    return;
+  }
+  if (positionals.length === 2 && ((positionals[0] === "project" && ["scan", "context"].includes(positionals[1]!)) || (positionals[0] === "model" && positionals[1] === "record"))) {
+    if (!values.project) throw new Error("Project understanding requires --project");
+    const service = new UnderstandingService(await bindWorktree(values.project));
+    let result;
+    if (positionals[1] === "scan") result = await service.scan({});
+    else if (positionals[1] === "context") result = await service.context({ query: values.query ?? "", paths: values.path ? [values.path] : [] });
+    else if (values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
+    else throw new Error("model record requires --file");
+    print(result); if (result.outcome === "error") process.exitCode = 1; return;
+  }
+  if (positionals.length === 2 && positionals[0] === "history") {
+    if (!values.project) throw new Error("history requires --project");
+    const service = new HistoryService(await bindWorktree(values.project), values["codex-home"]);
+    let result;
+    if (positionals[1] === "scan") result = await service.scan({ refresh: values.refresh });
+    else if (positionals[1] === "next") result = await service.next({});
+    else if (positionals[1] === "record" && values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
+    else if (positionals[1] === "propose" && values.id) result = await service.propose(values.id);
+    else throw new Error("Use history scan/next/record --file/propose --id");
+    print(result);
+    if (result.outcome === "error") process.exitCode = 1;
     return;
   }
   if (positionals.length === 2 && positionals[0] === "knowledge" && positionals[1] === "search") {

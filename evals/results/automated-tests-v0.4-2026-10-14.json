@@ -1,0 +1,28 @@
+{
+  "version": "0.4.0",
+  "date": "2026-10-14",
+  "command": "npm run check",
+  "typecheck": "passed",
+  "tests": 89,
+  "passed": 89,
+  "failed": 0,
+  "cancelled": 0,
+  "skipped": 0,
+  "duration_ms": 72526.35675,
+  "log_sha256": "fe7e3eb4f19cfb7dd579cc2999b5c486792f27dec70adb96a81a79d9bc2889ca",
+  "coverage": [
+    "bounded structure inventory and source versions",
+    "literal imports, direct consumers and root aliases",
+    "incremental extraction reuse and new/deleted files",
+    "exact code evidence and model revisions",
+    "changes to all related files invalidate model freshness",
+    "excluded paths, symlinks and nested repositories",
+    "escaped paginated HTML",
+    "STDIO model persistence across process restart",
+    "v0.3 exact Skill upgrade and existing regressions"
+  ],
+  "limitations": [
+    "Navigation hints are not a complete AST or business impact graph.",
+    "Candidate models remain unconfirmed; tests do not establish business truth or productivity benefit."
+  ]
+}

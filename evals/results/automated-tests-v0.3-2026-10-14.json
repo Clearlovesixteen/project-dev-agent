@@ -1,0 +1,29 @@
+{
+  "version": "0.3.0",
+  "date": "2026-10-14",
+  "command": "npm run check",
+  "typecheck": "passed",
+  "tests": 80,
+  "passed": 80,
+  "failed": 0,
+  "cancelled": 0,
+  "skipped": 0,
+  "duration_ms": 64934.656833,
+  "log_sha256": "25e891d6acfe6f08136f357e6af22af23335a66a20792ccc45670b74f9961dbf",
+  "coverage": [
+    "project attribution and archives",
+    "internal transcript and metadata exclusion",
+    "exact user evidence and candidate-only retrieval",
+    "incremental cache and interrupted analysis resume",
+    "dated corrections surfaced alongside older keywords",
+    "bounded multi-page HTML with escaped text",
+    "real STDIO history discovery and persistence",
+    "exact v0.2.1 skill upgrade and rollback",
+    "existing task, workspace and knowledge regression suite",
+    "single-letter formula identifiers do not match unrelated English words"
+  ],
+  "limitations": [
+    "Test success does not establish semantic accuracy of all mined habits or actual team productivity benefit.",
+    "Local Codex text only; attachments and unsynced or deleted conversations are not analyzed."
+  ]
+}

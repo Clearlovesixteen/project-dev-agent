@@ -6,6 +6,8 @@ import { assertClean, assertStateIgnored, bindWorktree, type WorktreeBinding } f
 import { readGit } from "./git/command.js";
 import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { TaskStore } from "./storage/task-store.js";
+import { historyStatus } from "./history/store.js";
+import { understandingStatus } from "./understanding/store.js";
 
 export const ProjectPrepareInputSchema = z.object({ apply: z.boolean().default(false) }).strict();
 
@@ -62,9 +64,18 @@ export async function prepareProject(binding: WorktreeBinding, input: unknown): 
     clean = false;
   }
   const active = await new TaskStore(binding.root).active();
+  let history: unknown;
+  try { history = await historyStatus(new ProjectFiles(binding.root)); } catch (error) {
+    history = { state: "unavailable", message: error instanceof Error ? error.message : String(error) };
+  }
+  let understanding: unknown;
+  try { understanding = await understandingStatus(new ProjectFiles(binding.root)); } catch (error) {
+    understanding = { state: "unavailable", message: error instanceof Error ? error.message : String(error) };
+  }
   return { outcome: "ok", code: "PROJECT_STATUS", data: {
     project: binding.root, applied: apply, state_ignored: ignored, worktree_clean: clean,
     ready_to_open: ignored && clean && !active,
+    history, understanding,
     active_task: active ? { id: active.id, revision: active.revision, requirement: active.requirement } : null,
     local_ignore_change: changeNeeded ? { file: `${binding.repo_identity}/info/exclude`, action: apply ? "appended" : "would_append" } : null,
     next_step: active ? "Call task_check without task_id to recover the active task before continuing."

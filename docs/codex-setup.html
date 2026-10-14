@@ -10,31 +10,33 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sidebar{transition:none}}@media print{body{background:white;color:#14201b;font-size:10pt}.sidebar,.topline,.toc,.copy-button,.toast,.footer{display:none!important}.layout{margin:0;padding:0;max-width:none}.document-grid{display:block;margin:0}.hero-title{font-size:28pt}.hero{margin-bottom:20px}.meta{margin:12px 0}.prose h2{break-after:avoid;font-size:17pt}.prose pre{white-space:pre-wrap;overflow:visible}.prose pre code{white-space:pre-wrap;overflow-wrap:anywhere;color:#152d23}.code-wrap{background:#f1f4ed;box-shadow:none;break-inside:avoid;border:1px solid #cdd7c8}.code-top{color:#334d3b;border-bottom:1px solid #cdd7c8}.table-wrap{overflow:visible}.prose table{min-width:0;font-size:9pt}.prose a{color:inherit}.notice{background:#f5f2ea}.fact-row{break-inside:avoid}@page{margin:17mm 18mm}}
 </style></head><body><a class="skip" href="#content">跳到正文</a><aside class="sidebar" id="navigation" aria-label="文档导航"><button class="nav-close" type="button" aria-label="关闭目录">×</button><a class="brand" href="../README.html"><span class="brand-mark" aria-hidden="true">↗</span>Project Dev</a><p class="brand-sub">DEVELOPER FIELD GUIDE</p><nav><p class="nav-group">开始使用</p><a class="nav-link" href="../README.html">产品与能力</a>
 <a class="nav-link active" href="codex-setup.html" aria-current="page">安装与日常使用</a>
-<p class="nav-group">机制与约定</p><a class="nav-link" href="knowledge-review.html">经验与知识审查</a>
+<p class="nav-group">机制与约定</p><a class="nav-link" href="project-understanding.html">项目结构与业务理解</a><a class="nav-link" href="history-mining.html">历史习惯发现</a><a class="nav-link" href="knowledge-review.html">经验与知识审查</a>
 <a class="nav-link" href="data-contract.html">任务与数据契约</a>
 <p class="nav-group">验证与团队</p><a class="nav-link" href="verification.html">验证记录与边界</a>
 <a class="nav-link" href="pilot-guide.html">真实需求试用</a>
 <a class="nav-link" href="sharing-outline.html">团队分享提纲</a>
 <p class="nav-group">设计与计划</p><a class="nav-link" href="plans/2026-10-13-personal-delivery.html">个人交付实施记录</a>
 <a class="nav-link" href="plans/technical-plan-v0.1.html">初步技术方案</a>
-<a class="nav-link" href="plans/implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 开始使用</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">INSTALL</div><h1 class="hero-title">安装与日常使用</h1><p class="intro">安装一次，在工作目录内的不同仓库使用；任务和知识各自保留。</p><div class="meta"><span class="badge">v0.2.1 · HTML 文档版</span><span>2026.10.13</span><span>约 4 分钟阅读</span></div></header><article class="prose"><h2 id="section-1">个人安装（v0.2）</h2>
-<p>环境要求：Node.js 20.19+、npm、Git、已登录的 Codex。工具本身无需模型 API Key，使用当前 Codex 会话完成代码理解和修改。</p>
-<p>把安装包放到本机，安装到一个长期保留的目录：</p>
-<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm install --prefix &quot;$HOME/Tools/project-dev-agent&quot; /absolute/project-dev-agent-0.2.1.tgz --ignore-scripts
+<a class="nav-link" href="plans/implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 开始使用</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">INSTALL</div><h1 class="hero-title">安装与日常使用</h1><p class="intro">安装一次，在工作目录内的不同仓库使用；任务和知识各自保留。</p><div class="meta"><span class="badge">v0.4.0 · 项目结构与业务理解</span><span>2026.10.14</span><span>约 4 分钟阅读</span></div></header><article class="prose"><h2 id="section-1">从 GitHub 安装（v0.4）</h2>
+<p>环境要求：Node.js 20.19+、npm、Git、已登录的 Codex，以及 <a href="https://github.com/Clearlovesixteen/project-dev-agent">私有仓库</a>的访问权限。工具使用当前 Codex 会话完成代码理解和修改，无需另配模型 API Key。</p>
+<p>首次克隆到长期保留的目录。SSH 方式需要已经配置 GitHub 密钥；也可使用已认证的 HTTPS 地址 <code>https://github.com/Clearlovesixteen/project-dev-agent.git</code>：</p>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>git clone git@github.com:Clearlovesixteen/project-dev-agent.git
+cd project-dev-agent
+npm ci --ignore-scripts
+npm run build
 </code></pre></div>
-<p>注册一次即可用于一个工作目录下的多个独立 Git 仓库。下文 <code>/absolute/workspace</code> 也可以是单个仓库：</p>
-<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>node &quot;$HOME/Tools/project-dev-agent/node_modules/project-dev-agent/dist/src/cli.js&quot; connect --workspace /absolute/workspace
-node &quot;$HOME/Tools/project-dev-agent/node_modules/project-dev-agent/dist/src/cli.js&quot; connect --workspace /absolute/workspace --apply
+<p>注册一次即可用于工作目录下的多个独立 Git 仓库。将下文 <code>/absolute/workspace</code> 换成自己的绝对路径，也可以是单个仓库：</p>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>node dist/src/cli.js connect --workspace /absolute/workspace
+node dist/src/cli.js connect --workspace /absolute/workspace --apply
 </code></pre></div>
-<p>第一条预览，第二条执行。它通过 <code>codex mcp add</code> 添加 <code>project_dev</code>，并将 Skill 安装到 <code>~/.agents/skills/project-dev</code>。其他 MCP 连接保留。同名连接或 Skill 与当前版本不一致时会停止并保留原内容，需先核对差异，不能强行覆盖。</p>
+<p>第一条预览，第二条执行。它通过 <code>codex mcp add</code> 添加 <code>project_dev</code>，并将 Skill 安装到 <code>~/.agents/skills/project-dev</code>。其他 MCP 连接保留。同名连接或自定义 Skill 存在冲突时保留原内容。安装器可识别未经修改的 v0.2.1 / v0.3.0 Skill 并原位升级；其他差异需先核对。</p>
 <p>若终端找不到 <code>codex</code>，给两条命令增加 <code>--codex /absolute/path/to/codex</code>。macOS 的本次桌面安装所用路径为 <code>/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex</code>，其他机器应以实际安装路径为准。</p>
 <p>Codex 桌面、CLI 和 IDE 共享用户 MCP 配置。配置说明见 <a href="https://learn.chatgpt.com/docs/extend/mcp">官方 MCP 文档</a>。安装后在目标仓库新建 Codex 会话；若还没有工具，在 Settings → MCP servers 中重启 <code>project_dev</code> 连接，再开始新会话。</p>
 <h2 id="section-2">直接开始一个需求</h2>
 <p>在工作目录内的具体仓库打开会话，例如：</p>
 <div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>$project-dev 帮我实现这个需求：……
-先找项目里已有的实现方式，梳理涉及的入口和关联代码，再修改并验证。
 </code></pre></div>
-<p>Codex 会读取当前仓库规则和相关实现，检查任务状态，建立验收项和关联清单，然后改代码并记录验证。在第一批知识尚未整理时，直接利用已有代码、AGENTS.md 和业务文档。</p>
+<p>Codex 会先建立项目结构索引，寻找模块、公共组件和直接引用；随后自动扫描本机该仓库的历史对话，逐批提取带来源的习惯候选，并恢复已完成的分析进度；随后读取当前代码与规则，建立验收项和关联清单，再修改并验证。在第一批知识尚未整理时，直接利用已有代码、AGENTS.md 和业务文档。</p>
 <p>首次使用时，<code>project_prepare</code> 只向 Git 本地的 <code>info/exclude</code> 追加 <code>/.project-dev/local/</code>；它不修改业务文件、共享 AGENTS.md 或 .gitignore。任务和候选经验随后写到忽略目录。可以只预览：</p>
 <div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>node /absolute/installed-package/dist/src/cli.js project prepare --project /absolute/repository
 </code></pre></div>
@@ -43,12 +45,22 @@ node &quot;$HOME/Tools/project-dev-agent/node_modules/project-dev-agent/dist/src
 <div class="code-wrap"><div class="code-top"><span>text</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>$project-dev 继续当前仓库上次未完成的任务，先恢复记录。
 </code></pre></div>
 <p><code>task_check</code> 不传任务 ID 时恢复当前仓库的唯一活动任务。一个仓库的任务不会自动转移到另一个仓库；每次工具调用都传当前 Git 根目录。根目录含多个项目时，应打开具体项目或在请求中点明项目。</p>
-<h2 id="section-3">纠正与知识积累</h2>
+<p>仅希望先看项目习惯时可输入 <code>$project-dev 分析当前项目的历史习惯，给我查看报告</code>。历史分析允许工作区已有业务改动；正式任务仍要求干净基线。已扫描但未完成分析的批次会续接处理。原始历史只读，候选与报告写入本地忽略目录，细节见 <a href="history-mining.html">历史习惯发现</a>。</p><p>只做项目接入时可输入 <code>$project-dev 接入当前项目，生成项目理解报告</code>。具体需求再逐步记录术语、业务流程、职责与源码依据；相关文件变化后会提示复核。结构扫描与历史整理均允许已有业务改动，正式任务仍要求干净基线。详见 <a href="project-understanding.html">首次扫描与业务理解</a>。</p><h2 id="section-3">纠正与知识积累</h2>
 <p>直接在对话中指出实现方式及原因，例如“这里应复用现有封装，另外两个入口也要同步处理”。Agent 会更新当前任务，并可把适合复用的经验写成候选草稿。候选内容不会自动升级为团队规则。</p>
 <p>需要共享时，按 <a href="knowledge-review.html">经验审查</a> 核对适用范围、来源和问题，再显式审查。共享知识放入项目的 <code>.project-dev/knowledge/</code>，通过普通 Git 审查维护。团队成员安装相同工具并拉取知识即可使用，不需要中央服务。</p>
 <h2 id="section-4">团队接入</h2>
 <p>先让个人试用经过真实需求验证，再按 <a href="pilot-guide.html">试用指南</a> 收集纠偏次数、关联遗漏及额外操作成本；不能以测试通过替代团队收益评估。</p>
-<p>每位同事安装同一版本的 tgz 并执行上面的 connect，workspace 使用自己的本地路径。若需统一项目配置、Skill 和共享说明，可执行原有 <code>project init --project /absolute/repository</code> 预览，再带 <code>--apply</code> 写入；这会产生团队需要审查的 Git 变更。个人模式不要求先执行该命令。团队级 Skill 与全局 Skill 应保持同一版本，避免旧的项目 Skill 遮蔽新版本。</p>
+<p>每位同事获得私有仓库访问权限后，从 GitHub 克隆、构建并执行上面的 connect，workspace 使用自己的本地路径。MCP 服务运行在各自电脑，项目历史、扫描结果和任务记录保存在各自项目的本地忽略目录。若需统一项目配置、Skill 和共享说明，可执行原有 <code>project init --project /absolute/repository</code> 预览，再带 <code>--apply</code> 写入；这会产生团队需要审查的 Git 变更。个人模式不要求先执行该命令。团队级 Skill 与全局 Skill 应保持同一版本，避免旧的项目 Skill 遮蔽新版本。</p>
+<h2 id="github-update">从 GitHub 更新</h2>
+<p>在工具源码目录执行以下命令，依次完成每一步，任何一步报错都先处理后再继续。<code>--ff-only</code> 会在本地分支有分叉时停止。更新后重新连接是为了同步 Skill，随后在 Codex 中重启 <code>project_dev</code> 并新建会话，让 MCP 使用新代码：</p>
+<div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>git pull --ff-only
+npm ci --ignore-scripts
+npm run build
+node dist/src/cli.js connect --workspace /absolute/workspace --apply
+</code></pre></div>
+<p>保留首次连接时的工具目录、Node 路径和 workspace。遇到 <code>SKILL_CONFLICT</code> 或 <code>MCP_CONFIG_CONFLICT</code> 时先核对差异；安装器会保留自定义内容。发布者在修改 Skill 时需同时提供对上一版本的升级支持。仓库中的 <code>v0.4.0</code> 标签记录本次共同验证的基线。</p>
+<p>已通过安装包接入的人，若要迁移到 GitHub 目录，应先使用原安装目录的 <code>disconnect --workspace /absolute/workspace --apply</code> 断开匹配的旧连接，再从新目录执行 <code>connect</code>。项目任务和历史记录会保留。</p>
+<p>当前交付方式为 Git 源码安装与更新；Codex 插件市场的一键安装、自动更新入口尚未提供。说明文件使用 HTML，克隆后用浏览器打开 <code>README.html</code> 即可阅读。</p>
 <h2 id="section-5">断开与保留数据</h2>
 <div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>node /absolute/installed-package/dist/src/cli.js disconnect --workspace /absolute/workspace
 node /absolute/installed-package/dist/src/cli.js disconnect --workspace /absolute/workspace --apply
@@ -65,7 +77,7 @@ node /absolute/installed-package/dist/src/cli.js disconnect --workspace /absolut
 <li><code>SKILL_CONFLICT</code> / <code>MCP_CONFIG_CONFLICT</code>：同名配置不一致；保留原内容后比较，不覆盖未知配置。</li>
 <li><code>doctor</code> 只验证 Node/Git/SDK 初始化；它不证明桌面当前会话已加载连接。</li>
 </ul>
-</article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc"  aria-label="本页目录"><p class="toc-title">本页内容</p><a href="#section-1">个人安装（v0.2）</a><a href="#section-2">直接开始一个需求</a><a href="#section-3">纠正与知识积累</a><a href="#section-4">团队接入</a><a href="#section-5">断开与保留数据</a><a href="#section-6">排查</a></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>
+</article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc"  aria-label="本页目录"><p class="toc-title">本页内容</p><a href="#section-1">从 GitHub 安装（v0.4）</a><a href="#section-2">直接开始一个需求</a><a href="#section-3">纠正与知识积累</a><a href="#section-4">团队接入</a><a href="#github-update">从 GitHub 更新</a><a href="#section-5">断开与保留数据</a><a href="#section-6">排查</a></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>
 const sidebar=document.querySelector('.sidebar');const menu=document.querySelector('.mobile-toggle');document.querySelector('.nav-close')?.addEventListener('click',()=>{sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');menu?.focus();});
 menu?.addEventListener('click',()=>{const open=sidebar.classList.toggle('open');menu.setAttribute('aria-expanded',String(open));});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){sidebar.classList.remove('open');menu?.setAttribute('aria-expanded','false');}});

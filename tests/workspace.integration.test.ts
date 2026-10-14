@@ -126,7 +126,7 @@ test("one STDIO connection routes independent projects and recovers tasks after 
   const client = await connect();
   const call = async (name: string, arguments_: Record<string, unknown>) => ToolResultSchema.parse((await client.callTool({ name, arguments: arguments_ })).structuredContent);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 6);
+  assert.equal(tools.length, 12);
   assert.ok(tools.every((tool) => tool.inputSchema.required?.includes("project")));
   assert.equal((await call("task_check", { project: outside.path })).code, "PROJECT_OUTSIDE_WORKSPACE");
   await symlink(outside.path, join(fixture.root, "linked-project"));

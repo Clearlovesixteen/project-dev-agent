@@ -9,6 +9,10 @@ import { ProjectFiles } from "../storage/project-files.js";
 import { TaskStore } from "../storage/task-store.js";
 import { renderKnowledge } from "./document.js";
 import { searchKnowledge } from "./search.js";
+import { KnowledgeSearchInputSchema } from "./search.js";
+import { searchHistoryHints } from "../history/search.js";
+import { projectContext } from "../understanding/context.js";
+import { loadConfig, matchesPath } from "./config.js";
 
 export const ExperienceProposeInputSchema = z.object({
   task_id: IdSchema,
@@ -34,7 +38,22 @@ export class KnowledgeService {
   }
 
   async search(input: unknown): Promise<ToolResult> {
-    return this.execute(() => searchKnowledge(this.files, input));
+    return this.execute(async () => {
+      const request = KnowledgeSearchInputSchema.parse(input);
+      const result = await searchKnowledge(this.files, request);
+      if (result.code === "PATHS_EXCLUDED") return result;
+      const { config } = await loadConfig(this.files);
+      const paths = request.paths.filter((path) => !config.exclude_paths.some((pattern) => matchesPath(pattern, path)));
+      let understanding: unknown;
+      try { understanding = await projectContext(this.files, { query: request.query, paths: paths.slice(0, 30), modules: request.modules.slice(0, 20), limit: Math.min(request.limit, 5) }); }
+      catch (error) { understanding = { state: "unavailable", message: error instanceof Error ? error.message : String(error) }; }
+      try {
+        return { ...result, data: { ...(result.data as object), history: await searchHistoryHints(this.files, request.query, paths, request.limit), understanding } };
+      } catch (error) {
+        return { ...result, outcome: "incomplete", diagnostics: [...result.diagnostics,
+          { code: "HISTORY_HINTS_UNAVAILABLE", message: error instanceof Error ? error.message : String(error) }] };
+      }
+    });
   }
 
   async propose(input: unknown): Promise<ToolResult> {

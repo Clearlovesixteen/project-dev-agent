@@ -10,14 +10,14 @@
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sidebar{transition:none}}@media print{body{background:white;color:#14201b;font-size:10pt}.sidebar,.topline,.toc,.copy-button,.toast,.footer{display:none!important}.layout{margin:0;padding:0;max-width:none}.document-grid{display:block;margin:0}.hero-title{font-size:28pt}.hero{margin-bottom:20px}.meta{margin:12px 0}.prose h2{break-after:avoid;font-size:17pt}.prose pre{white-space:pre-wrap;overflow:visible}.prose pre code{white-space:pre-wrap;overflow-wrap:anywhere;color:#152d23}.code-wrap{background:#f1f4ed;box-shadow:none;break-inside:avoid;border:1px solid #cdd7c8}.code-top{color:#334d3b;border-bottom:1px solid #cdd7c8}.table-wrap{overflow:visible}.prose table{min-width:0;font-size:9pt}.prose a{color:inherit}.notice{background:#f5f2ea}.fact-row{break-inside:avoid}@page{margin:17mm 18mm}}
 </style></head><body><a class="skip" href="#content">跳到正文</a><aside class="sidebar" id="navigation" aria-label="文档导航"><button class="nav-close" type="button" aria-label="关闭目录">×</button><a class="brand" href="../../README.html"><span class="brand-mark" aria-hidden="true">↗</span>Project Dev</a><p class="brand-sub">DEVELOPER FIELD GUIDE</p><nav><p class="nav-group">开始使用</p><a class="nav-link" href="../../README.html">产品与能力</a>
 <a class="nav-link" href="../codex-setup.html">安装与日常使用</a>
-<p class="nav-group">机制与约定</p><a class="nav-link" href="../knowledge-review.html">经验与知识审查</a>
+<p class="nav-group">机制与约定</p><a class="nav-link" href="../project-understanding.html">项目结构与业务理解</a><a class="nav-link" href="../history-mining.html">历史习惯发现</a><a class="nav-link" href="../knowledge-review.html">经验与知识审查</a>
 <a class="nav-link" href="../data-contract.html">任务与数据契约</a>
 <p class="nav-group">验证与团队</p><a class="nav-link" href="../verification.html">验证记录与边界</a>
 <a class="nav-link" href="../pilot-guide.html">真实需求试用</a>
 <a class="nav-link" href="../sharing-outline.html">团队分享提纲</a>
 <p class="nav-group">设计与计划</p><a class="nav-link active" href="2026-10-13-personal-delivery.html" aria-current="page">个人交付实施记录</a>
 <a class="nav-link" href="technical-plan-v0.1.html">初步技术方案</a>
-<a class="nav-link" href="implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 设计与计划</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">DELIVERY / PLAN</div><h1 class="hero-title">Personal delivery implementation plan</h1><p class="intro">从单仓原型到个人安装、多仓使用和会话恢复的实施安排。</p><div class="meta"><span class="badge">v0.2.1 · HTML 文档版</span><span>2026.10.13</span><span>约 2 分钟阅读</span></div></header><article class="prose"><p><strong>Goal:</strong> 在 gc-web 的多个仓库中，通过 Codex 使用同一份 Project Dev Agent；先完成个人可用交付，再供团队安装。</p>
+<a class="nav-link" href="implementation-plan-v0.1.html">分阶段实施计划</a></nav><div class="sidebar-foot">本地文档 · 无需联网<br>说明页面使用 HTML 维护</div></aside><div class="layout"><header class="topline"><span>PROJECT DEV / 设计与计划</span><div class="top-actions"><button class="small-button mobile-toggle" type="button" aria-controls="navigation" aria-expanded="false">目录</button><button class="small-button" type="button" data-print>打印 / PDF</button></div></header><div class="document-grid"><main class="document" id="content"><header class="hero"><div class="eyebrow">DELIVERY / PLAN</div><h1 class="hero-title">Personal delivery implementation plan</h1><p class="intro">从单仓原型到个人安装、多仓使用和会话恢复的实施安排。</p><div class="meta"><span class="badge">v0.2.1 · HTML 文档版</span><span>2026.10.13</span><span>约 2 分钟阅读</span></div></header><article class="prose"><p><strong>Goal:</strong> 在指定工作区的多个仓库中，通过 Codex 使用同一份 Project Dev Agent；先完成个人可用交付，再供团队安装。</p>
 <p><strong>Architecture:</strong> 保留现有任务、知识和证据合同。新增显式按仓库路由的 workspace 模式，所有请求限制在配置的目录内。全局 Skill 和 MCP 只安装一次；个人接入仅按需写 Git 本地忽略规则和被忽略的任务数据，团队共享知识仍走原有审查流程。</p>
 <p><strong>Tech Stack:</strong> 现有 TypeScript、MCP SDK、Zod、Node、Git；通过 Codex 官方 CLI 管理 MCP 配置，不自行拼改用户配置。</p>
 <ol>
@@ -27,7 +27,7 @@
 <li><code>src/codex-install.ts</code>、<code>src/cli.ts</code>：安装预览、一次连接、可逆断开；预检自定义 Skill/MCP 冲突，保留其它服务器配置。</li>
 <li><code>skills/project-dev/</code>、README 和接入文档：适配 workspace、恢复和空知识库场景，提供中文日常使用入口。</li>
 <li>测试真正的 STDIO 多仓库调用、隔离、预览不写、重复准备、已有改动保留、任务恢复和安装冲突。跑完整类型检查和测试，再从打包产物安装。</li>
-<li>安装到稳定本地工具目录，为 gc-web 注册真实 Codex 连接、验证 Skill 和 MCP，给出个人使用说明及团队分发包。实际业务正确率仍需真实需求试用后评估。</li>
+<li>安装到稳定本地工具目录，为指定工作区注册真实 Codex 连接、验证 Skill 和 MCP，给出个人使用说明及团队分发包。实际业务正确率仍需真实需求试用后评估。</li>
 </ol>
 <p>本次不修改业务功能、不批量初始化全部业务仓库、不伪造业务规则的人工确认。脏工作树仍要求由开发者决定提交、保留或使用干净 worktree；工具不得自动 stash、reset 或 commit。</p>
 </article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc" hidden aria-label="本页目录"><p class="toc-title">本页内容</p></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>

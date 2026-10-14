@@ -11,7 +11,7 @@ import { VERSION } from "./version.js";
 
 const MARKER = "<!-- project-dev-agent -->";
 const GUIDANCE = `${MARKER}\nFor tracked project changes, use the project-dev skill with the project_dev MCP server. Read applicable project knowledge and existing code before choosing an implementation. Record related paths and review evidence. Keep generated task state and draft experience in .project-dev/local/. Confirm shared rules through the team's review process.\n<!-- /project-dev-agent -->\n`;
-const SKILL_FILES = ["SKILL.md", "references/task-inputs.md"];
+const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"];
 
 interface Change { file: string; action: "create" | "append" | "unchanged" | "preserve"; before?: string; after: string }
 
