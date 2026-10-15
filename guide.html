@@ -51,7 +51,7 @@
 <td>从具体纠正生成候选草稿，保留适用范围和待确认点</td>
 </tr>
 <tr><td><code>history_scan</code></td><td>归属项目历史、提取可见文本、复用未变化批次，并报告覆盖范围</td></tr><tr><td><code>history_next</code></td><td>读取下一批待分析对话及来源，恢复中断的进度</td></tr><tr><td><code>history_record</code></td><td>校验用户原话，保存候选与分析进度，生成可翻页的 HTML 报告</td></tr><tr><td><code>project_scan</code></td><td>建立或刷新全仓结构索引，返回覆盖范围及 HTML 报告</td></tr><tr><td><code>project_context</code></td><td>查找参考实现、直接引用与使用方，核对相关文件和模块理解的新鲜度</td></tr><tr><td><code>project_model_record</code></td><td>保存有源码原文、哈希和修订号的模块理解候选</td></tr></tbody></table></div>
-<h2 id="section-1">快速开始 · 原生插件</h2><p>v0.5 通过私有 GitHub Marketplace 分发预构建插件。需要 Node.js 20.19+、Git 和仓库访问权限，同事无需源码构建。</p><div class="code-wrap"><div class="code-top">bash<button class="copy-button" type="button">复制</button></div><pre><code>codex plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+<h2 id="section-1">快速开始 · 原生插件</h2><p>v0.5 通过公开的 GitHub 插件源分发预构建插件。需要 Node.js 20.19+、Git 和 Codex。使用 HTTPS 匿名下载，无需协作者邀请、GitHub 账号或 SSH 密钥，同事无需源码构建。</p><div class="code-wrap"><div class="code-top">bash<button class="copy-button" type="button">复制</button></div><pre><code>codex plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main
 codex plugin add project-dev-agent@project-dev-team</code></pre></div><p>重启 Codex 并新建对话，首次使用 <code>$project-dev-setup</code> 选择自己的工作目录；日常使用 <code>$project-dev</code> 描述需求；更新使用 <code>$project-dev-update 更新到最新版</code>。个人配置和项目记录跨版本保留。详细步骤见<a href="docs/codex-setup.html">安装与更新</a>。</p><p>从源码开发或运行独立示例：</p>
 <div class="code-wrap"><div class="code-top"><span>bash</span><button type="button" class="copy-button" aria-label="复制代码或指令">复制</button></div><pre><code>npm ci --ignore-scripts
 npm run check

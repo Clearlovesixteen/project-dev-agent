@@ -4,7 +4,7 @@
 
 这是接入 Codex 的开发辅助工具，适合已经用 Codex 修改项目、但仍需要反复纠正实现思路的开发者。它可以用于不同业务项目，不绑定某一个系统。
 
-当前版本：**v0.5.0，供个人使用和小范围团队验证**。通过私有 GitHub Marketplace 分发原生 Codex 插件，运行代码和依赖已打包。同事无需克隆源码、运行 npm 或手动同步 Skill。
+当前版本：**v0.5.0，供个人使用和小范围团队验证**。通过公开的 GitHub 插件源分发原生 Codex 插件，运行代码和依赖已打包。同事无需克隆源码、运行 npm 或手动同步 Skill。
 
 ## 它能帮你做什么
 
@@ -22,7 +22,7 @@
 
 - **Node.js 20.19+ 和 Git**，两者应能被 Codex 进程找到。插件已包含 JavaScript 依赖，但不包含 Node 本身。
 - 已登录 Codex，CLI 支持 `codex plugin` 命令。如果提示未知命令，请先更新 Codex。
-- 本私有 GitHub 仓库的访问权限；SSH 安装使用本机已配置的 GitHub SSH 身份。
+- 本机能够通过 HTTPS 访问 GitHub。下载本插件无需协作者邀请、GitHub 账号或 SSH 密钥。
 - 一个已有提交的业务 Git 仓库，或包含多个 Git 仓库的工作目录。
 
 无需额外模型 API Key、数据库或向量服务。语义分析使用当前 Codex 会话及其额度。
@@ -32,18 +32,18 @@
 ### 1. 添加插件源并安装
 
 ```bash
-codex plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+codex plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main
 codex plugin add project-dev-agent@project-dev-team
 ```
 
-第一条把私有 GitHub 仓库登记为插件源；第二条安装其中的插件。下载、版本缓存和启用状态由 Codex 管理。**不用把工具仓库克隆到自己的工作目录，也不用执行 npm install。**
+第一条把公开 GitHub 仓库登记为插件源；第二条安装其中的插件。下载、版本缓存和启用状态由 Codex 管理。**不用把工具仓库克隆到自己的工作目录，也不用执行 npm install。**
 
-若团队使用 HTTPS 认证，可把第一条的仓库地址替换为 `https://github.com/Clearlovesixteen/project-dev-agent.git`。连接 GitHub 插件账号和本机 Git 的 SSH/HTTPS 认证是两件事，本次下载使用后者。
+仓库已公开，以上 HTTPS 地址可匿名下载。无需另外连接 GitHub 插件；使用本工具仍需正常登录 Codex。
 
 如果终端找不到 `codex`，可以使用桌面应用内已有的 CLI 路径。部分 macOS 安装可执行：
 
 ```bash
-"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin marketplace add git@github.com:Clearlovesixteen/project-dev-agent.git --ref main
+"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main
 "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin add project-dev-agent@project-dev-team
 ```
 
@@ -144,7 +144,7 @@ node dist/src/cli.js disconnect --workspace "/absolute/workspace" --apply
 
 ## 给团队使用
 
-1. 为成员开通本私有仓库的访问权限。
+1. 将本仓库的 README 链接发给同事，无需添加协作者。
 2. 每人在自己的 Codex 添加同一个插件源、安装插件，首次选择自己的业务工作目录。
 3. 使用相同版本和真实需求验证，记录需要纠正实现思路、遗漏关联改动以及额外操作的情况。
 4. 将已审查、有复用价值的规则放入业务仓库的 `.project-dev/knowledge/`，通过团队原有 Git 审查流程共享。
@@ -187,7 +187,7 @@ v0.5.0 的验证覆盖预构建包独立运行、未配置启动、工作目录�
 
 | 现象 | 处理方式 |
 | --- | --- |
-| GitHub 提示 Repository not found | 检查账号是否已获私有仓库访问权限，以及 Git 使用的 SSH / HTTPS 身份是否正确。 |
+| GitHub 提示 Repository not found 或下载失败 | 检查是否使用本文完整的 HTTPS 地址，以及本机网络或代理能否访问 GitHub；本仓库无需邀请权限。 |
 | 找不到 `codex` 或提示未知 `plugin` 命令 | 使用实际 Codex CLI 路径，并检查 Codex 版本是否支持原生插件命令。 |
 | Skill 或 MCP 工具没有出现 | 确认原生插件已安装并启用，Node 与 Git 可用；重启 Codex 并新建对话，检查旧连接或项目级 Skill 是否重复。 |
 | `PLUGIN_NOT_CONFIGURED` | 运行 `project-dev-setup` 选择本机工作目录。 |
