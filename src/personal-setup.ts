@@ -25,16 +25,16 @@ async function ignoreLocalState(binding: WorktreeBinding): Promise<void> {
   // Preflight the existing file and use Git's conventional lock, leaving others' locks intact.
   await optionalText(files, target);
   try { await files.create(lock, ""); } catch (error) {
-    if (error instanceof AppError && error.code === "FILE_EXISTS") throw new AppError("GIT_EXCLUDE_BUSY", "Git exclude.lock already exists; inspect it before retrying");
+    if (error instanceof AppError && error.code === "FILE_EXISTS") throw new AppError("GIT_EXCLUDE_BUSY", "Git exclude.lock 已存在，请核对锁状态后再重试");
     throw error;
   }
   let ownLock = true;
   try {
     const before = await optionalText(files, target);
-    const after = `${before ?? ""}${before && !before.endsWith("\n") ? "\n" : ""}# project-dev-agent local task records\n/.project-dev/local/\n`;
+    const after = `${before ?? ""}${before && !before.endsWith("\n") ? "\n" : ""}# project-dev-agent 本地任务记录\n/.project-dev/local/\n`;
     await files.replace(lock, after, "");
-    if ((await bindWorktree(binding.root)).repo_identity !== binding.repo_identity) throw new AppError("REPOSITORY_CHANGED", "Git identity changed during preparation");
-    if (await optionalText(files, target) !== before) throw new AppError("FILE_CHANGED", "Git exclude changed during preparation");
+    if ((await bindWorktree(binding.root)).repo_identity !== binding.repo_identity) throw new AppError("REPOSITORY_CHANGED", "准备过程中 Git 仓库标识发生变化");
+    if (await optionalText(files, target) !== before) throw new AppError("FILE_CHANGED", "准备过程中 Git 本地忽略规则发生变化");
     await rename(await files.path(lock), await files.path(target, true));
     ownLock = false;
   } finally {
@@ -46,7 +46,7 @@ export async function prepareProject(binding: WorktreeBinding, input: unknown): 
   const { apply } = ProjectPrepareInputSchema.parse(input);
   await new ProjectFiles(binding.root).path(".project-dev/local", true);
   const tracked = await readGit(binding.root, ["ls-files", "-z", "--", ".project-dev/local"]);
-  if (tracked.stdout.length) throw new AppError("STATE_ALREADY_TRACKED", "Local task state is tracked by Git; review it before preparing the project");
+  if (tracked.stdout.length) throw new AppError("STATE_ALREADY_TRACKED", "本地任务记录已被 Git 跟踪，请检查后再准备项目");
   let ignored = true;
   try { await assertStateIgnored(binding); } catch (error) {
     if (!(error instanceof AppError && error.code === "STATE_DIRECTORY_NOT_IGNORED")) throw error;
@@ -78,9 +78,9 @@ export async function prepareProject(binding: WorktreeBinding, input: unknown): 
     history, understanding,
     active_task: active ? { id: active.id, revision: active.revision, requirement: active.requirement } : null,
     local_ignore_change: changeNeeded ? { file: `${binding.repo_identity}/info/exclude`, action: apply ? "appended" : "would_append" } : null,
-    next_step: active ? "Call task_check without task_id to recover the active task before continuing."
-      : !clean ? "Keep existing changes. Let the developer choose when to commit or use a clean worktree; never auto-stash/reset/commit."
-      : !ignored ? "Call project_prepare with apply: true to ignore local state, then task_open."
-      : "Read existing instructions and related code, then open the requested task. An empty knowledge library is normal on first use.",
+    next_step: active ? "继续前请调用不带 task_id 的 task_check，恢复当前活跃任务。"
+      : !clean ? "请保留现有改动，由开发者选择提交时机或使用干净工作树；不要自动 stash、reset 或 commit。"
+      : !ignored ? "调用 project_prepare 并传 apply: true，准备本地忽略规则后再调用 task_open。"
+      : "阅读现有指令和相关代码，再建立本次任务。首次使用时知识库为空是正常情况。",
   }, diagnostics: [] };
 }

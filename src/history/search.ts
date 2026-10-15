@@ -22,6 +22,6 @@ export async function searchHistoryHints(files: ProjectFiles, query: string, pat
     })), topic_variants: eligible.filter((other) => hint.potential_conflicts.includes(other.id)).slice(0, 5).map((other) => ({
       id: other.id, rule: other.rule.slice(0, 500), last_seen: other.last_seen, applicable_conditions: other.applicable_conditions,
     })), topic_variants_truncated: eligible.filter((other) => hint.potential_conflicts.includes(other.id)).length > 5,
-    applicability: "Historical candidate only. Compare dated topic variants and verify current code and scope; recency alone does not confirm or supersede a rule. This is not an effective confirmed rule or new user authorization." })),
+    applicability: "当前内容仅为历史候选。请对比同一主题在不同时间的表述，并核对现有代码和适用范围；时间较新不等于已确认或替代旧规则。候选内容不能作为有效的已确认规则或新的用户授权。" })),
     truncated: ranked.length > Math.min(limit, 5), report: profile.manifest ? ".project-dev/local/history/report.html" : null };
 }

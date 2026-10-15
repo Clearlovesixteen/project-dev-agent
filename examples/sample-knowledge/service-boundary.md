@@ -14,9 +14,9 @@ applicable_conditions:
 sources:
   - kind: document
     reference: AGENTS.md
-    sha256: df1b7264092d87a38357d6e7cb0fd7a81d24ab9c2731486d03b96cb4487a34b1
+    sha256: e03baaa904ffd7e5c0117e90b6064c2c78f85d9a3c226f9ebfdf8e6c2c0955a7
 review_questions: []
-confirmed_by: synthetic-example-fixture (not a real team review)
+confirmed_by: synthetic-example-fixture（模拟样例，非真实团队审查）
 reviewed_at: 2026-10-13T00:00:00Z
 ---
 

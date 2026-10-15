@@ -19,16 +19,16 @@ export const ChangeItemSchema = z.object({
   skip_reason: TextSchema.optional(),
 }).strict().superRefine((item, ctx) => {
   if (item.status !== "pending" && !item.reviewed_by) {
-    ctx.addIssue({ code: "custom", path: ["reviewed_by"], message: "A completed decision requires a reviewer" });
+    ctx.addIssue({ code: "custom", path: ["reviewed_by"], message: "已完成的审查决定必须填写审查者" });
   }
   if (item.status === "checked" && item.evidence.length === 0) {
-    ctx.addIssue({ code: "custom", path: ["evidence"], message: "Changed files alone are not review evidence" });
+    ctx.addIssue({ code: "custom", path: ["evidence"], message: "仅有文件改动不能作为审查证据" });
   }
   if (item.status === "skipped" && !item.skip_reason) {
-    ctx.addIssue({ code: "custom", path: ["skip_reason"], message: "Skipping requires an explicit reason" });
+    ctx.addIssue({ code: "custom", path: ["skip_reason"], message: "跳过检查必须填写明确原因" });
   }
   if (item.status !== "skipped" && item.skip_reason !== undefined) {
-    ctx.addIssue({ code: "custom", path: ["skip_reason"], message: "Only a skipped item can have a skip reason" });
+    ctx.addIssue({ code: "custom", path: ["skip_reason"], message: "只有已跳过的检查项才能填写跳过原因" });
   }
 });
 
@@ -39,7 +39,7 @@ export const AcceptanceCriterionSchema = z.object({
   ...ReviewFields,
 }).strict().superRefine((criterion, ctx) => {
   if (criterion.status === "checked" && (!criterion.reviewed_by || criterion.evidence.length === 0)) {
-    ctx.addIssue({ code: "custom", message: "Checked acceptance criteria require a reviewer and evidence" });
+    ctx.addIssue({ code: "custom", message: "已检查的验收项必须填写审查者和证据" });
   }
 });
 
@@ -50,7 +50,7 @@ export const ValidationRecordSchema = z.object({
   evidence: z.array(EvidenceSchema).max(100).default([]),
 }).strict().superRefine((record, ctx) => {
   if (record.outcome !== "not_run" && record.evidence.length === 0) {
-    ctx.addIssue({ code: "custom", path: ["evidence"], message: "Executed validation requires evidence" });
+    ctx.addIssue({ code: "custom", path: ["evidence"], message: "已执行的验证必须提供证据" });
   }
 });
 
@@ -66,7 +66,7 @@ export const TaskSchema = z.object({
   id: IdSchema,
   revision: z.number().int().nonnegative(),
   repo_identity: TextSchema,
-  worktree_path: z.string().max(4_096).refine(isAbsolute, "Worktree path must be absolute"),
+  worktree_path: z.string().max(4_096).refine(isAbsolute, "工作树路径必须是绝对路径"),
   baseline_head: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
   baseline_branch: TextSchema.nullable(),
   phase: z.enum(["active", "closed", "aborted"]),
@@ -83,28 +83,28 @@ export const TaskSchema = z.object({
   for (const key of ["acceptance_criteria", "change_items", "validations", "corrections", "knowledge_versions"] as const) {
     const ids = task[key].map((entry) => entry.id);
     if (new Set(ids).size !== ids.length) {
-      ctx.addIssue({ code: "custom", path: [key], message: "IDs must be unique within each task collection" });
+      ctx.addIssue({ code: "custom", path: [key], message: "同一任务集合中的 ID 必须唯一" });
     }
   }
   if (task.phase === "closed") {
     if (task.change_items.length === 0 || task.change_items.some((item) => item.status === "pending")) {
-      ctx.addIssue({ code: "custom", path: ["change_items"], message: "Closing requires a nonempty, fully reviewed change checklist" });
+      ctx.addIssue({ code: "custom", path: ["change_items"], message: "关闭任务需要非空且已全部审查的关联改动清单" });
     }
     if (task.acceptance_criteria.some((criterion) => criterion.status !== "checked")) {
-      ctx.addIssue({ code: "custom", path: ["acceptance_criteria"], message: "Closing requires all acceptance criteria to be checked" });
+      ctx.addIssue({ code: "custom", path: ["acceptance_criteria"], message: "关闭任务前必须完成所有验收项的检查" });
     }
     if (task.validations.some((record) => record.outcome !== "passed")) {
-      ctx.addIssue({ code: "custom", path: ["validations"], message: "Failed or unexecuted validation must be resolved before closing" });
+      ctx.addIssue({ code: "custom", path: ["validations"], message: "关闭任务前必须处理失败或未执行的验证" });
     }
   }
   if (task.phase === "aborted" && !task.abort_reason) {
-    ctx.addIssue({ code: "custom", path: ["abort_reason"], message: "Aborting requires a reason and preserves incomplete items" });
+    ctx.addIssue({ code: "custom", path: ["abort_reason"], message: "中止任务必须填写原因，并保留未完成项" });
   }
   if (task.phase !== "aborted" && task.abort_reason !== undefined) {
-    ctx.addIssue({ code: "custom", path: ["abort_reason"], message: "Only an aborted task can have an abort reason" });
+    ctx.addIssue({ code: "custom", path: ["abort_reason"], message: "只有已中止的任务才能填写中止原因" });
   }
   if (Date.parse(task.updated_at) < Date.parse(task.created_at)) {
-    ctx.addIssue({ code: "custom", path: ["updated_at"], message: "Update time cannot precede creation time" });
+    ctx.addIssue({ code: "custom", path: ["updated_at"], message: "更新时间不能早于创建时间" });
   }
 });
 

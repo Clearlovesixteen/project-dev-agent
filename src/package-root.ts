@@ -12,7 +12,7 @@ export async function findToolRoot(): Promise<string> {
       return await realpath(current);
     } catch {
       const parent = dirname(current);
-      if (parent === current) throw new Error("Cannot locate the complete project-dev-agent package");
+      if (parent === current) throw new Error("无法找到完整的 project-dev-agent 软件包");
       current = parent;
     }
   }

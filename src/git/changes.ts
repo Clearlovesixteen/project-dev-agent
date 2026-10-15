@@ -6,13 +6,13 @@ import { assertObjectId, decodeGitOutput, readGit } from "./command.js";
 function nulFields(output: Buffer): string[] {
   if (output.length === 0) return [];
   const text = decodeGitOutput(output);
-  if (!text.endsWith("\0")) throw new AppError("GIT_OUTPUT_INVALID", "Expected NUL-terminated Git path output");
+  if (!text.endsWith("\0")) throw new AppError("GIT_OUTPUT_INVALID", "Git 路径输出应以空字符结尾");
   return text.slice(0, -1).split("\0");
 }
 
 function addPath(paths: Set<string>, candidate: string | undefined): void {
   if (candidate === undefined || !RelativePathSchema.safeParse(candidate).success) {
-    throw new AppError("INVALID_REPOSITORY_PATH", "Git returned an unsupported or unsafe repository-relative path");
+    throw new AppError("INVALID_REPOSITORY_PATH", "Git 返回了不支持或不安全的仓库相对路径");
   }
   paths.add(candidate);
 }
@@ -22,7 +22,7 @@ export async function changedPaths(binding: WorktreeBinding, baselineHead: strin
   assertObjectId(baselineHead);
   const unmerged = await readGit(binding.root, ["ls-files", "--unmerged", "-z"]);
   if (unmerged.stdout.length !== 0) {
-    throw new AppError("UNMERGED_CHANGES", "Resolve Git merge conflicts before completing the task review");
+    throw new AppError("UNMERGED_CHANGES", "完成任务审查前，请先解决 Git 合并冲突");
   }
   const diff = await readGit(binding.root, [
     "diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "--find-renames",
@@ -33,7 +33,7 @@ export async function changedPaths(binding: WorktreeBinding, baselineHead: strin
   for (let index = 0; index < fields.length;) {
     const status = fields[index++];
     if (status === undefined || !/^(?:[ACDMRTUXB]|[RC]\d{1,3})$/.test(status)) {
-      throw new AppError("GIT_OUTPUT_INVALID", "Git returned an invalid name-status record");
+      throw new AppError("GIT_OUTPUT_INVALID", "Git 返回的文件变更状态记录无效");
     }
     addPath(paths, fields[index++]);
     if (status.startsWith("R") || status.startsWith("C")) addPath(paths, fields[index++]);

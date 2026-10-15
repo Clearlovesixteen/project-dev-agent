@@ -51,11 +51,14 @@ test("standalone plugin runs without source or node_modules and preserves task/c
     ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
   const tools = (await first.listTools()).tools;
   assert.equal(tools.length, 14);
+  assert.ok(tools.every((tool) => /[\u3400-\u9fff]/.test(tool.description ?? "")));
   assert.ok(tools.find((tool) => tool.name === "project_prepare")?.inputSchema.required?.includes("project"));
   const preview = await call(first, "project_prepare", { project: fixture.path });
   assert.equal((preview.data as { plugin_setup: { action: string } }).plugin_setup.action, "would_initialize");
   assert.equal(((await call(first, "plugin_status")).data as { configured: boolean }).configured, false);
-  assert.equal((await call(first, "task_check", { project: fixture.path })).code, "PLUGIN_NOT_CONFIGURED");
+  const unconfigured = await call(first, "task_check", { project: fixture.path });
+  assert.equal(unconfigured.code, "PLUGIN_NOT_CONFIGURED");
+  assert.ok(unconfigured.diagnostics.every((item) => /[\u3400-\u9fff]/.test(item.message)));
   assert.equal((await call(first, "plugin_status")).code, "PLUGIN_STATUS");
   const prepared = await call(first, "project_prepare", { project: fixture.path, apply: true });
   assert.equal((prepared.data as { plugin_setup: { action: string } }).plugin_setup.action, "initialized");

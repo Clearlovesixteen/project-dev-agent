@@ -97,7 +97,7 @@ test("known v0.2.1 skill upgrades in place and failed registration restores that
   assert.ok(repeated.skill_files.every((file) => file.action === "unchanged"));
 });
 
-for (const version of ["v0.3.0", "v0.4.0", "v0.5.0"]) test(`exact ${version} skill upgrades with project understanding and current startup instructions`, async (t) => {
+for (const version of ["v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0"]) test(`exact ${version} skill upgrades with project understanding and current startup instructions`, async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(await realpath(fixture.root), "v03 home"), directory = join(home, ".agents/skills/project-dev");
   await mkdir(directory, { recursive: true });

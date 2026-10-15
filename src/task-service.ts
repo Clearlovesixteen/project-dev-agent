@@ -29,7 +29,7 @@ export class TaskService {
     return this.execute(async () => {
       const request = TaskOpenInputSchema.parse(input);
       const current = await bindWorktree(this.binding.root);
-      if (current.repo_identity !== this.binding.repo_identity) throw new AppError("REPOSITORY_CHANGED", "The bound repository identity changed");
+      if (current.repo_identity !== this.binding.repo_identity) throw new AppError("REPOSITORY_CHANGED", "当前绑定的仓库标识已变化");
       await assertStateIgnored(current);
       await assertClean(current);
       const now = new Date().toISOString();
@@ -55,23 +55,23 @@ export class TaskService {
           // Previously used versions remain historical evidence after source code is edited.
           if (prior.knowledge_versions.some((entry) => entry.id === version.id && entry.version === version.version)) continue;
           const entry = loaded.entries.find((entry) => entry.knowledge.id === version.id && entry.version === version.version);
-          if (!entry) throw new AppError("KNOWLEDGE_VERSION_UNKNOWN", `Search again for the current knowledge version: ${version.id}`);
+          if (!entry) throw new AppError("KNOWLEDGE_VERSION_UNKNOWN", `请重新查询知识的当前版本：${version.id}`);
           if (entry.knowledge.status !== "confirmed" || (await sourceStates(files, entry.knowledge)).some((source) => !["current", "attested"].includes(source.state))) {
-            throw new AppError("KNOWLEDGE_NEEDS_REVIEW", `Knowledge is not a current confirmed rule: ${version.id}`);
+            throw new AppError("KNOWLEDGE_NEEDS_REVIEW", `该知识不是当前有效的确认规则：${version.id}`);
           }
         }
       }
       if (request.phase === "closed") {
         const expected = new Set((request.change_items ?? prior.change_items).map((item) => item.target_path));
         const unexpected = (await changedPaths(this.binding, prior.baseline_head)).filter((path) => !expected.has(path));
-        if (unexpected.length > 0) throw new AppError("UNREVIEWED_CHANGES", `Add and review unexpected changes before closing: ${unexpected.join(", ")}`);
+        if (unexpected.length > 0) throw new AppError("UNREVIEWED_CHANGES", `关闭任务前请补充并审查清单之外的改动：${unexpected.join(", ")}`);
       }
       const saved = await this.store.update(request.task_id, request.expected_revision, (current) => {
         const collections = ["change_items", "acceptance_criteria", "validations", "corrections", "knowledge_versions"] as const;
         for (const key of collections) {
           const replacement = request[key];
           if (replacement && current[key].some((entry) => !replacement.some((next) => next.id === entry.id))) {
-            throw new AppError("RECORD_REMOVAL_NOT_ALLOWED", `Keep previous ${key} records; revise or resolve them explicitly`);
+            throw new AppError("RECORD_REMOVAL_NOT_ALLOWED", `请保留已有 ${key} 记录，通过明确修订或处理来更新`);
           }
         }
         return TaskSchema.parse({
@@ -95,10 +95,10 @@ export class TaskService {
       const task = request.task_id ? await this.store.load(request.task_id) : await this.store.active();
       if (!task) return { outcome: "ok", code: "NO_ACTIVE_TASK", data: { project: this.binding.root, active_task: null }, diagnostics: [] };
       const task_id = task.id;
-      if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "Task belongs to a different repository");
+      if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "该任务属于其他仓库");
       if (task.phase !== "active") {
         return { outcome: "incomplete", code: "TASK_INACTIVE", data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task },
-          diagnostics: [{ code: "TASK_INACTIVE", message: "This task has ended. Its records are historical; current worktree changes are not attributed to it." }] };
+          diagnostics: [{ code: "TASK_INACTIVE", message: "该任务已结束，其记录仅供历史查询；当前工作树的改动不会归入此任务。" }] };
       }
       let changed: string[];
       try {
@@ -125,9 +125,9 @@ export class TaskService {
           pending_acceptance: acceptance, unresolved_validations: validations,
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
-          limitation: "Recorded review and file coverage do not independently prove business correctness.",
+          limitation: "审查记录和文件覆盖情况不能独立证明业务实现正确。",
         },
-        diagnostics: reviewed ? [] : [{ code: "REVIEW_INCOMPLETE", message: "Some changes, acceptance criteria, or validation remain unreviewed; inspect the task checklist and diff." }],
+        diagnostics: reviewed ? [] : [{ code: "REVIEW_INCOMPLETE", message: "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };
     });
   }

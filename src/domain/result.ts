@@ -14,7 +14,7 @@ export const ToolResultSchema = z.object({
   diagnostics: z.array(DiagnosticSchema).max(100).default([]),
 }).strict().superRefine((result, ctx) => {
   if (result.outcome !== "ok" && result.diagnostics.length === 0) {
-    ctx.addIssue({ code: "custom", path: ["diagnostics"], message: "Incomplete or failed execution must explain what happened" });
+    ctx.addIssue({ code: "custom", path: ["diagnostics"], message: "执行未完成或失败时，必须说明原因" });
   }
 });
 

@@ -19,7 +19,7 @@ export function moduleSummary(entries: MapFile[]) {
 }
 export async function projectContext(files: ProjectFiles, input: unknown) {
   const request = ContextInput.parse(input), map = await readMap(files);
-  if (!map) return { state: "not_scanned", files: [], models: [], modules: [], next_step: "Run project_scan to establish the local structure map." };
+  if (!map) return { state: "not_scanned", files: [], models: [], modules: [], next_step: "请运行 project_scan 建立本地项目结构索引。" };
   const { config } = await loadConfig(files);
   const paths = request.paths.filter((path) => !excluded(path, config));
   if (request.paths.length && !paths.length) return { state: "paths_excluded", files: [], models: [], modules: [] };
@@ -86,5 +86,5 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     modules: modules.slice(0, 40), modules_truncated: modules.length > 40,
     models: modelResults, models_truncated: rankedModels.length > modelResults.length,
     report: ".project-dev/local/understanding/report.html",
-    limitations: "Structure and literal imports are navigation hints, not a complete AST, runtime graph or business model. Only selected sources are checked live; new files require a scan. Read relevant files, actual installed component versions and business documents before deciding. Model candidates are not confirmed policy or authorization." };
+    limitations: "结构和字面导入关系用于定位代码，不能覆盖完整的语法树、运行时关系或业务模型。仅对选中来源实时核验；新增文件需要重新扫描。作出判断前，请阅读相关源码、实际安装的组件版本和业务文档。候选模型未经规则确认，也不构成操作授权。" };
 }

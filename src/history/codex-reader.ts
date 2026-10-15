@@ -25,7 +25,7 @@ async function* lines(file: SessionFile): AsyncGenerator<{ text: string; line: n
   const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await handle.stat();
-    if (!info.isFile()) throw new AppError("HISTORY_SOURCE_UNSAFE", "History source must be a regular file");
+    if (!info.isFile()) throw new AppError("HISTORY_SOURCE_UNSAFE", "历史来源必须是普通文件");
     const buffer = Buffer.alloc(64 * 1024);
     let position = 0, line = 1, bytes = 0, oversized = false;
     let pieces: Buffer[] = [];
@@ -49,7 +49,7 @@ async function* lines(file: SessionFile): AsyncGenerator<{ text: string; line: n
     if (bytes) yield { text: Buffer.concat(pieces).toString("utf8"), line, oversized };
     const after = await handle.stat();
     if (after.size < file.size || (after.size === file.size && after.mtimeMs !== file.mtime)) {
-      throw new AppError("HISTORY_SOURCE_CHANGED", "A history file was rewritten while scanning; retry the scan");
+      throw new AppError("HISTORY_SOURCE_CHANGED", "扫描期间历史文件已被重写，请重新扫描");
     }
   } finally { await handle.close(); }
 }
@@ -58,13 +58,13 @@ export async function discoverSessions(home: string): Promise<{ files: SessionFi
   const files: SessionFile[] = [], diagnostics: ParsedSession["diagnostics"] = [];
   let visited = 0;
   async function walk(directory: string, depth: number): Promise<void> {
-    if (++visited > MAX_FILES || depth > 8) throw new AppError("HISTORY_INVENTORY_LIMIT", "History inventory exceeds 20,000 entries or eight directory levels");
+    if (++visited > MAX_FILES || depth > 8) throw new AppError("HISTORY_INVENTORY_LIMIT", "历史文件清单超过 20,000 个条目或八层目录");
     const info = await lstat(directory);
-    if (info.isSymbolicLink() || !info.isDirectory()) throw new AppError("HISTORY_SOURCE_UNSAFE", "History directories must not be symbolic links");
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new AppError("HISTORY_SOURCE_UNSAFE", "历史目录不能使用符号链接");
     for await (const entry of await opendir(directory)) {
-      if (++visited > MAX_FILES) throw new AppError("HISTORY_INVENTORY_LIMIT", "History inventory exceeds 20,000 entries");
+      if (++visited > MAX_FILES) throw new AppError("HISTORY_INVENTORY_LIMIT", "历史文件清单超过 20,000 个条目");
       const path = join(directory, entry.name);
-      if (entry.isSymbolicLink()) { diagnostics.push({ code: "HISTORY_SOURCE_UNSAFE", message: `Skipped symbolic history entry ${relative(home, path)}` }); continue; }
+      if (entry.isSymbolicLink()) { diagnostics.push({ code: "HISTORY_SOURCE_UNSAFE", message: `已跳过使用符号链接的历史条目 ${relative(home, path)}` }); continue; }
       if (entry.isDirectory()) await walk(path, depth + 1);
       else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         const stat = await lstat(path);
@@ -92,7 +92,7 @@ export async function sessionMeta(file: SessionFile): Promise<SessionMeta> {
     if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id) || !isAbsolute(cwd)) break;
     return { id, cwd, internal: Boolean(object(payload.source).subagent) || /subagent|review|guardian/i.test(JSON.stringify(payload.thread_source ?? "")) };
   }
-  throw new AppError("HISTORY_METADATA_UNKNOWN", `Cannot attribute ${file.relative} from its session metadata`);
+  throw new AppError("HISTORY_METADATA_UNKNOWN", `无法根据会话元数据确定 ${file.relative} 所属的项目`);
 }
 
 /** Exact repository ancestry only. Mentioning a project in another chat is not attribution. */
@@ -116,7 +116,7 @@ export async function belongsToProject(cwd: string, project: string): Promise<bo
 export async function historyHome(configured: string): Promise<string> {
   const home = resolve(configured);
   const info = await lstat(home);
-  if (info.isSymbolicLink() || !info.isDirectory()) throw new AppError("HISTORY_SOURCE_UNSAFE", "Codex history home must be a real directory");
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new AppError("HISTORY_SOURCE_UNSAFE", "Codex 历史记录主目录必须是实际目录");
   return realpath(home);
 }
 
@@ -171,7 +171,7 @@ export async function parseSession(file: SessionFile, meta: SessionMeta, project
     const safe = redact(text);
     result.redactions += safe.count;
     visible += safe.text.length;
-    if (visible > MAX_VISIBLE_TEXT) throw new AppError("HISTORY_TEXT_LIMIT", "A session exceeds 12 million visible text characters");
+    if (visible > MAX_VISIBLE_TEXT) throw new AppError("HISTORY_TEXT_LIMIT", "单个会话的可见文本超过 1,200 万个字符");
     const parts = Math.ceil(safe.text.length / 3_000);
     for (let part = 0; part < parts; part++) result.messages.push({
       id: `msg-${digest(`${meta.id}:${identity}`).slice(0, 24)}-${part + 1}`, role, text: safe.text.slice(part * 3_000, (part + 1) * 3_000),
@@ -183,13 +183,13 @@ export async function parseSession(file: SessionFile, meta: SessionMeta, project
     if (line.oversized) {
       // Huge compaction and tool output records are outside the visible-dialogue contract.
       if (!/"type"\s*:\s*"(?:compacted|world_state|function_call_output|custom_tool_call_output|reasoning)"/.test(line.text.slice(0, 1_024))) {
-        result.diagnostics.push({ code: "HISTORY_LINE_LIMIT", message: `${file.relative}:${line.line} exceeds 8 MB and could not be analyzed` });
+        result.diagnostics.push({ code: "HISTORY_LINE_LIMIT", message: `${file.relative}:${line.line} 超过 8 MB，无法分析` });
       }
       continue;
     }
     let record: RecordValue;
     try { record = object(JSON.parse(line.text)); } catch {
-      result.diagnostics.push({ code: "HISTORY_INVALID_RECORD", message: `${file.relative}:${line.line} is incomplete or invalid JSON` }); continue;
+      result.diagnostics.push({ code: "HISTORY_INVALID_RECORD", message: `${file.relative}:${line.line} 的内容不完整或不是有效的 JSON` }); continue;
     }
     const payload = object(record.payload);
     if (record.type === "turn_context") { cwd = string(payload.cwd) || cwd; turn = string(payload.turn_id) || turn; continue; }

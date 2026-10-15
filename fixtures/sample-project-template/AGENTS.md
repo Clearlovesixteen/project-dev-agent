@@ -1,7 +1,7 @@
-# Account sample project
+# 账户示例项目
 
-Use native ESM JavaScript and Node's built-in test runner. There are no external dependencies.
+使用原生 ESM JavaScript 和 Node 内置测试运行器，不引入外部依赖。
 
-The store owns persistence. The account service owns input validation and account changes. Auth and view code obtain accounts through the service; they must not write the store directly.
+存储层负责持久化。账户服务负责输入校验和账户变更。认证与展示代码通过账户服务读取账户，不能直接写入存储层。
 
-Read the relevant business policy in `docs/account-policy.md` before changing account behavior. Run `node --test` after modifications. Extend behavior with tests rather than bypassing the service's validation.
+修改账户行为前，请先阅读 `docs/account-policy.md` 中的相关业务规则。修改后运行 `node --test`。扩展行为时补充测试，不绕过服务层校验。

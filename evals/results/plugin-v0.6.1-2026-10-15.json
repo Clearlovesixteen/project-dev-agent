@@ -1,0 +1,42 @@
+{
+  "version": "0.6.1",
+  "date": "2026-10-15",
+  "typecheck": "passed",
+  "automated": {
+    "command": "npm run check",
+    "tests": 104,
+    "pass": 104,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 73923.385833,
+    "log_sha256": "7016831baeedf35881d684e4bcb25e9952d228cf63649b9cc3998fa4513e01f5"
+  },
+  "native_plugin": {
+    "scenario": "通过独立临时 Codex 目录和本机 Git 插件源，从合成旧版升级到当前版本",
+    "result": "passed",
+    "installed_runtime_versions": [
+      "0.6.1-upgrade-test.1",
+      "0.6.1"
+    ],
+    "refresh_updates_installed_version": true,
+    "refresh_updates_cached_runtime": true,
+    "workspace_and_task_preserved": true,
+    "returned_errors": [],
+    "local_log_sha256": "cdc78f0ffc0fd9e4dc667abda7c85408a71638cb7d94e4fb4aeca18c7257e7e5"
+  },
+  "skills": "三个 Skill 均通过官方 quick_validate.py 格式校验；v0.6.0 升级识别快照与已发布源码逐文件一致。",
+  "localization": [
+    "三个 Skill 正文与参考说明使用中文，要求新任务、业务模型、习惯候选和经验草稿默认使用简体中文",
+    "实际独立插件的 14 个 MCP 工具说明均为中文",
+    "命令帮助、自定义诊断与 Zod 参数校验提示使用中文",
+    "HTML 报告显示中文文件角色、职责和知识分类；保存的枚举与原始引用不变",
+    "保留已有记录、历史版本、代码标识、字段、命令和第三方许可；v0.2.1 至 v0.6.0 的已知原版 Skill 升级通过检查"
+  ],
+  "limitations": [
+    "中文生成要求由 Skill 和工具指令指导，不是模型语言的强制拦截",
+    "历史原文、已保存记录、已有报告和第三方原始错误不会批量翻译；重新生成的报告使用中文分类",
+    "未对桌面插件入口进行视觉验证，未验证后台自动更新周期",
+    "真实开发收益仍需通过同事试用评估"
+  ]
+}

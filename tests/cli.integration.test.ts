@@ -49,6 +49,26 @@ test("CLI surfaces malformed JSON as a failure instead of a successful result", 
   }
 });
 
+test("CLI uses Chinese help and schema diagnostics while retaining machine fields and codes", async () => {
+  const help = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  assert.match(help, /可用命令/);
+  assert.match(help, /history record --project/);
+  const directory = await mkdtemp(join(tmpdir(), "project-dev-language-"));
+  try {
+    const path = join(directory, "invalid.json");
+    await writeFile(path, JSON.stringify({ schema_version: 1, id: 123 }));
+    const result = spawnSync(process.execPath, [cli, "contract", "check", "--type", "task", "--file", path], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.code, "INVALID_CONTRACT");
+    const issue = output.issues.find((item: { path: string[] }) => item.path.join(".") === "id");
+    assert.equal(issue.code, "invalid_type");
+    assert.match(issue.message, /[\u3400-\u9fff]/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("CLI bounds record reads and rejects special files without trying to consume them", async () => {
   const directory = await mkdtemp(join(tmpdir(), "project-dev-cli-"));
   try {
@@ -56,11 +76,11 @@ test("CLI bounds record reads and rejects special files without trying to consum
     await writeFile(path, Buffer.alloc(1_000_001, 32));
     const large = spawnSync(process.execPath, [cli, "contract", "check", "--type", "task", "--file", path], { encoding: "utf8", timeout: 5_000 });
     assert.equal(large.status, 1);
-    assert.match(JSON.parse(large.stderr).message, /exceeds 1 MB/);
+    assert.match(JSON.parse(large.stderr).message, /超过 1 MB/);
     if (process.platform !== "win32") {
       const special = spawnSync(process.execPath, [cli, "contract", "check", "--type", "task", "--file", "/dev/zero"], { encoding: "utf8", timeout: 5_000 });
       assert.equal(special.status, 1);
-      assert.match(JSON.parse(special.stderr).message, /regular file/);
+      assert.match(JSON.parse(special.stderr).message, /普通文件/);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

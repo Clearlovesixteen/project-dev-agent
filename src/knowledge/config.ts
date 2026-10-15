@@ -8,12 +8,12 @@ export const ProjectConfigSchema = z.object({
   schema_version: z.literal(1),
   knowledge_dir: RelativePathSchema.default(".project-dev/knowledge").refine((path) =>
     !path.split("/").some((part) => [".git", "node_modules", "local"].includes(part)) && !/[\*?\[\]]/.test(path),
-    "Use a concrete shared knowledge directory outside Git internals, node_modules and local state"),
+    "请指定具体的共享知识目录，避开 Git 内部目录、node_modules 和本地状态目录"),
   modules: z.array(z.object({ name: TextSchema, paths: z.array(RelativePathSchema).min(1).max(50) }).strict()).max(100).default([]),
   exclude_paths: z.array(RelativePathSchema).max(100).default(["node_modules", "dist", ".project-dev/local"]),
 }).strict().superRefine((config, ctx) => {
   if (new Set(config.modules.map((entry) => entry.name)).size !== config.modules.length) {
-    ctx.addIssue({ code: "custom", path: ["modules"], message: "Module names must be unique" });
+    ctx.addIssue({ code: "custom", path: ["modules"], message: "模块名称不能重复" });
   }
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

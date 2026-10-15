@@ -99,7 +99,7 @@ test("sample creation refuses a destination inside the tool source", async () =>
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   // Compiled tests run from dist/tests; the actual package root is two levels up.
   const toolRoot = resolve(moduleDirectory, "../..");
-  await assert.rejects(createSample(join(toolRoot, "sample-must-not-be-created")), /outside the tool package/);
+  await assert.rejects(createSample(join(toolRoot, "sample-must-not-be-created")), /工具包之外/);
   await assert.rejects(access(join(toolRoot, "sample-must-not-be-created")));
 });
 

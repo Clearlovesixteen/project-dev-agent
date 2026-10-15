@@ -1,54 +1,52 @@
-# Task tool inputs
+# 任务工具输入
 
-The server exposes `project_prepare`, `task_open`, `task_update`, `task_check`, `knowledge_search` and `experience_propose`. Tool descriptions advertise their schemas. Examples are shapes to adapt to the actual project, not a checklist of business requirements.
+工具包括 `project_prepare`、`task_open`、`task_update`、`task_check`、`knowledge_search` 和 `experience_propose`，具体参数以工具声明为准。以下示例展示数据形状，应按真实项目填写，不能当作业务需求清单。自然语言字段默认使用中文，标识和引用原文保持不变。
 
-Workspace mode requires `"project": "/absolute/current/repository"` on **every** example below. First inspect readiness with `{ "project": "/absolute/current/repository" }` passed to `project_prepare`; add `"apply": true` to prepare local ignores. Readiness includes `state_ignored`, `worktree_clean`, `ready_to_open` and `active_task`. Preparing a dirty worktree preserves its changes and does not make it ready to open.
+工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次插件使用会初始化当前仓库并准备本地忽略规则。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动，不会自动让脏工作树满足建任务条件。
 
-To recover after a new chat or process restart, call `task_check` with just `project`. It returns the full unique active task, or `NO_ACTIVE_TASK`. Always use the recovered revision for updates. An explicit ID reads historical closed/aborted tasks too. Keep the same project for every call belonging to that task.
+新对话或进程重启后，用仅包含 `project` 的 `task_check` 恢复唯一活跃任务；没有任务时返回 `NO_ACTIVE_TASK`。更新使用恢复记录中的最新修订号。指定任务 ID 也可读取已关闭或中止的历史记录。同一任务的所有调用必须使用同一个项目。
+
+创建任务示例：
 
 ```json
 {
-  "requirement": "Implement the user request",
+  "requirement": "实现用户提出的需求",
   "acceptance_criteria": [
-    { "id": "behavior", "description": "Describe the observable result" }
+    { "id": "behavior", "description": "填写可观察、可验证的预期结果" }
   ]
 }
 ```
 
-After opening, use the returned `id` and `revision`:
+使用返回的 `id` 和 `revision` 更新：
 
 ```json
 {
   "task_id": "returned-task-id",
   "expected_revision": 0,
-  "change_items": [
-    {
-      "id": "entry-point",
-      "target_path": "src/entry.js",
-      "action": "modify",
-      "requirement": "Adapt this entry point",
-      "rationale": "Explain why it is affected",
-      "sources": [{ "kind": "code", "reference": "src/entry.js" }],
-      "status": "pending"
-    }
-  ]
+  "change_items": [{
+    "id": "entry-point",
+    "target_path": "src/entry.js",
+    "action": "modify",
+    "requirement": "调整此入口的行为",
+    "rationale": "说明该入口为什么受到本次需求影响",
+    "sources": [{ "kind": "code", "reference": "src/entry.js" }],
+    "status": "pending"
+  }]
 }
 ```
 
-Source kinds: `code/document/experience`. Sources need a reference; an optional description explains it. A checked item adds `reviewed_by` and nonempty `evidence` with `kind: code/test/manual`, `reference` and `summary`. A skipped item adds `reviewed_by` and `skip_reason`.
+来源类型为 `code/document/experience`，必须提供 `reference`，可用 `description` 补充说明。已检查项需填写 `reviewed_by` 和非空 `evidence`；证据包含 `kind: code/test/manual`、`reference`、`summary`。跳过项需填写 `reviewed_by` 和 `skip_reason`。
 
-Acceptance records use `id`, `description`, `status: pending/checked`, `reviewed_by` and `evidence`. Validation records use `id`, `description`, `outcome: passed/failed/not_run` and `evidence`; executed validation needs evidence. Correction records use `id`, `description`, `rationale` and `sources`.
+验收记录包含 `id`、`description`、`status: pending/checked`、`reviewed_by`、`evidence`。验证记录包含 `id`、`description`、`outcome: passed/failed/not_run`、`evidence`；已执行验证必须有证据。纠正记录包含 `id`、`description`、`rationale`、`sources`。
 
-Update only the collections that changed, supplying their full contents and retaining existing IDs. Latest records can be obtained through `task_check`; `pending_acceptance` and `pending_items` are unresolved IDs. Each successful update returns a new revision. Record comparisons are optimistic; a busy store or version conflict requires reading the latest state before deciding whether to retry.
+仅更新发生变化的集合，但每个集合必须传完整内容并保留已有 ID。通过 `task_check` 读取最新记录；`pending_acceptance` 和 `pending_items` 是未完成项的 ID。每次成功更新会返回新修订号。存储繁忙或版本冲突时，先读最新状态再决定是否重试。
 
-Before finishing, call `task_check` with `{ "task_id": "returned-task-id" }`. `structurally_reviewed` concerns recorded decisions and file coverage; it does not independently validate business logic. The full task appears in `recorded_task`.
+结束前用 `task_check` 检查任务。`structurally_reviewed` 只表示记录与文件覆盖符合结构要求，不独立验证业务正确性；完整任务位于 `recorded_task`。工作完成后用最新修订号、有效记录和 `phase: closed` 关闭。停止工作使用 `phase: aborted` 并填写 `abort_reason`。结束的任务是只读历史，后续改动需从干净基线另建任务。
 
-For completed work, set `phase: closed` in an update using the latest revision and valid records. For stopped work, set `phase: aborted` and `abort_reason`. Ended tasks are read-only historical records; create another task from a clean baseline for later changes.
+## 知识与纠正
 
-## Knowledge and corrections
+查询形状：`{ "query": "任务关键词", "paths": ["src/entry.js"], "modules": ["module-name"], "limit": 5 }`。未知模块名省略；同时提供的范围筛选需要全部满足。结果含 ID、文件、内容哈希 `version`、来源、`effective` 和适用条件。`include_unconfirmed: true` 会返回未生效的审查线索。不完整结果带有诊断，不能当作全量知识扫描。
 
-Search shape: `{ "query": "task keywords", "paths": ["src/entry.js"], "modules": ["module-name"], "limit": 5 }`. Omit unknown module names. Scope filters are conjunctive when provided. Results include ID, file, content hash `version`, sources, `effective` and applicable conditions. `include_unconfirmed: true` includes review hints; they remain ineffective. Partial results carry diagnostics and must not be treated as a complete knowledge scan.
+修改来源文件前，用 `task_update` 保存已使用的确认知识：`knowledge_versions: [{ "id": "rule-id", "version": "returned-sha256" }]`，保留已有 ID。任务记录这些历史版本；来源变化后，当前查询可能要求重新审查。
 
-Save used confirmed knowledge with `task_update` using `knowledge_versions: [{ "id": "rule-id", "version": "returned-sha256" }]` before changing source files. Keep previous IDs. Task records retain these as historical versions; current search may request review after source files change.
-
-Propose shape: `{ "task_id": "...", "correction_id": "existing-correction-id", "title": "Reusable lesson", "type": "change_relation", "modules": ["module-name"], "paths": ["src"], "applicable_conditions": ["Specific situation"], "rule": "Proposed behavior", "review_questions": ["What must a colleague verify?"] }`. Types also include `code_convention` and `business_rule`. The tool copies the correction's rationale and sources; it writes only a local draft and returns its relative path. It cannot confirm or publish a rule.
+经验草稿示例：`{ "task_id": "...", "correction_id": "existing-correction-id", "title": "可复用的经验标题", "type": "change_relation", "modules": ["module-name"], "paths": ["src"], "applicable_conditions": ["具体适用情境"], "rule": "拟采用的行为规则", "review_questions": ["需要同事核实哪些问题？"] }`。类型还包括 `code_convention` 和 `business_rule`。工具复制纠正记录的原因与来源，只生成本地草稿并返回相对路径，不确认或发布规则。

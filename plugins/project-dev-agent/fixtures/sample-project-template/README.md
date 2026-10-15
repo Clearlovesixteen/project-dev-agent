@@ -1,7 +1,7 @@
-# Account development sample
+# 账户开发示例
 
-This small application currently supports active accounts. It contains an in-memory store, an account service, authentication, and an account summary view.
+这个小型应用目前支持正常状态的账户，包含内存存储、账户服务、身份认证和账户摘要展示。
 
-Run the existing tests with `node --test`. No installation or external service is required. Public composition is exported by `src/system.js`.
+使用 `node --test` 运行现有测试，无需安装依赖或连接外部服务。对外的组合入口由 `src/system.js` 导出。
 
-Project layering is described in `AGENTS.md`; business rules are in `docs/account-policy.md`.
+项目分层约定见 `AGENTS.md`，业务规则见 `docs/account-policy.md`。

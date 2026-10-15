@@ -32,7 +32,7 @@ async function git(cwd: string, args: readonly string[]): Promise<string> {
 
 /** Create a new external sample repository. Its parent directory must already exist. */
 export async function createSample(destination: string): Promise<{ path: string; head: string }> {
-  if (!destination.trim()) throw new Error("A sample destination is required");
+  if (!destination.trim()) throw new Error("请指定示例项目的目标目录");
   const toolRoot = await findToolRoot();
   const requestedPath = resolve(destination);
   const parent = await realpath(dirname(requestedPath));
@@ -40,7 +40,7 @@ export async function createSample(destination: string): Promise<{ path: string;
   const withinTool = relative(toolRoot, target);
   if (withinTool === "" || (!withinTool.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
     && withinTool !== ".." && !isAbsolute(withinTool))) {
-    throw new Error("The sample destination must be outside the tool package");
+    throw new Error("示例目标目录必须位于工具包之外");
   }
 
   let created = false;
@@ -58,7 +58,7 @@ export async function createSample(destination: string): Promise<{ path: string;
     await rename(join(target, "gitignore.template"), join(target, ".gitignore"));
     await git(target, ["init", "--template=", "--initial-branch=main"]);
     await git(target, ["add", "--all"]);
-    await git(target, ["commit", "--no-gpg-sign", "-m", "Initialize account sample baseline"]);
+    await git(target, ["commit", "--no-gpg-sign", "-m", "初始化账户示例基线"]);
     const head = await git(target, ["rev-parse", "HEAD"]);
     return { path: target, head };
   } catch (error) {

@@ -18,9 +18,9 @@ const Settings = z.object({
 }).strict();
 
 export const PluginConfigureInput = z.object({
-  workspace: z.string().min(1).max(4096).describe("Absolute directory explicitly selected by the user; contains the allowed Git projects"),
+  workspace: z.string().min(1).max(4096).describe("用户明确选择的绝对目录，其中包含允许使用的 Git 项目"),
   apply: z.boolean().default(false),
-  expected_revision: z.uuid().nullable().optional().describe("For apply, pass the revision from status/preview; null means no existing settings"),
+  expected_revision: z.uuid().nullable().optional().describe("应用设置时传入状态或预览的修订号；null 表示尚无配置"),
 }).strict();
 
 /** User configuration is independent of the replaceable plugin installation/cache. */
@@ -28,7 +28,7 @@ export class PluginSettings {
   constructor(private readonly codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")) {}
 
   private async files(): Promise<ProjectFiles> {
-    if (!isAbsolute(this.codexHome)) throw new AppError("PLUGIN_HOME_INVALID", "CODEX_HOME must be an absolute existing directory");
+    if (!isAbsolute(this.codexHome)) throw new AppError("PLUGIN_HOME_INVALID", "CODEX_HOME 必须是已存在目录的绝对路径");
     return new ProjectFiles(await realpath(this.codexHome));
   }
 
@@ -40,7 +40,7 @@ export class PluginSettings {
     }
     const parsed = Settings.safeParse(JSON.parse(raw));
     if (!parsed.success || !isAbsolute(parsed.data.workspace) || !isAbsolute(parsed.data.requested_workspace)) {
-      throw new AppError("PLUGIN_SETTINGS_INVALID", "Plugin settings are invalid; inspect the file before changing it");
+      throw new AppError("PLUGIN_SETTINGS_INVALID", "插件配置无效，请检查文件后再修改");
     }
     return { raw, value: parsed.data };
   }
@@ -51,8 +51,8 @@ export class PluginSettings {
     return { outcome: "ok", code: "PLUGIN_STATUS", diagnostics: [], data: {
       version: VERSION, configured: current !== null, workspace: current?.value.workspace ?? null,
       revision: current?.value.revision ?? null, settings_path: join(files.root, FILE),
-      next_step: current ? "Pass the absolute current Git root as project to project_prepare"
-        : "Call project_prepare with the current absolute Git root and apply: true to initialize automatically; project-dev-setup is only needed to choose a different workspace",
+      next_step: current ? "调用 project_prepare，并将当前 Git 绝对根目录作为 project"
+        : "用当前 Git 绝对根目录调用 project_prepare 并传 apply: true，即可自动初始化；仅调整工作范围时才需使用 project-dev-setup",
     } };
   }
 
@@ -65,19 +65,19 @@ export class PluginSettings {
       return { outcome: "ok", code: "PLUGIN_CONFIGURE_PREVIEW", diagnostics: [], data: {
         workspace: workspace.root, previous_workspace: current?.value.workspace ?? null,
         expected_revision: current?.value.revision ?? null, settings_path: join(files.root, FILE),
-        changes: ["Save this workspace as the scope for project tools; keep all project records"],
+        changes: ["将该目录保存为项目工具的工作范围，并保留全部项目记录"],
       } };
     }
-    if (input.expected_revision === undefined) throw new AppError("PLUGIN_REVISION_REQUIRED", "Preview first, then pass expected_revision (null for first setup)");
+    if (input.expected_revision === undefined) throw new AppError("PLUGIN_REVISION_REQUIRED", "请先预览，再传入 expected_revision；首次设置传 null");
     await files.directory("project-dev-agent");
     try { await files.create(LOCK, JSON.stringify({ pid: process.pid })); } catch (error) {
-      if (error instanceof AppError && error.code === "FILE_EXISTS") throw new AppError("PLUGIN_SETTINGS_BUSY", "Settings are being changed; retry after completion. Inspect a stale settings.lock before removing it");
+      if (error instanceof AppError && error.code === "FILE_EXISTS") throw new AppError("PLUGIN_SETTINGS_BUSY", "其他进程正在修改设置，请完成后重试。疑似遗留的 settings.lock 需检查后再处理");
       throw error;
     }
     try {
       const current = await this.read(files);
       if ((current?.value.revision ?? null) !== input.expected_revision) {
-        throw new AppError("PLUGIN_SETTINGS_CHANGED", "Settings changed after preview; inspect the new workspace before retrying");
+        throw new AppError("PLUGIN_SETTINGS_CHANGED", "预览后配置发生变化，请核对新的工作范围后再重试");
       }
       if (current?.value.workspace !== workspace.root || current.value.requested_workspace !== resolve(input.workspace)) {
         const next = JSON.stringify({ schema_version: 1, revision: randomUUID(), workspace: workspace.root,
@@ -94,7 +94,7 @@ export class PluginSettings {
     const files = await this.files();
     if (await this.read(files)) return prepareProject(await this.bind(project), input);
 
-    if (!project || !isAbsolute(project)) throw new AppError("PROJECT_REQUIRED", "Pass the current absolute Git worktree root to initialize this project");
+    if (!project || !isAbsolute(project)) throw new AppError("PROJECT_REQUIRED", "初始化时请传入当前 Git 工作树的绝对根目录");
     // First use authorizes only this repository, never its parent or the plugin's process cwd.
     const workspace = await Workspace.open(project);
     const binding = await workspace.bind(project);
@@ -102,7 +102,7 @@ export class PluginSettings {
     if (!input.apply) return { ...preview, data: {
       ...preview.data as Record<string, unknown>,
       plugin_setup: { action: "would_initialize", workspace: workspace.root, settings_path: join(files.root, FILE) },
-      next_step: "Call project_prepare with apply: true to initialize this repository and ignore its local records, then continue development",
+      next_step: "调用 project_prepare 并传 apply: true，初始化当前仓库并忽略本地记录后继续开发",
     } };
 
     // Compare against absence under the existing settings lock; a concurrent selection must win.
@@ -116,9 +116,9 @@ export class PluginSettings {
 
   async bind(project?: string) {
     const settings = (await this.read(await this.files()))?.value;
-    if (!settings) throw new AppError("PLUGIN_NOT_CONFIGURED", "Call project_prepare with the current absolute Git root and apply: true to initialize automatically");
+    if (!settings) throw new AppError("PLUGIN_NOT_CONFIGURED", "用当前 Git 绝对根目录调用 project_prepare，并传 apply: true 自动初始化");
     const workspace = await Workspace.open(settings.requested_workspace);
-    if (workspace.root !== settings.workspace) throw new AppError("WORKSPACE_CHANGED", "Configured workspace changed identity; inspect it before reconfiguring");
+    if (workspace.root !== settings.workspace) throw new AppError("WORKSPACE_CHANGED", "已配置工作目录的标识发生变化，请核对后再重新设置");
     return workspace.bind(project);
   }
 }

@@ -93,7 +93,10 @@ test("only exact user quotes can become persistent candidates; restart, idempote
   assert.equal(data.history.hints[0]!.status, "candidate");
   const report = await files.read(".project-dev/local/history/report.html", 65_536);
   assert.ok(report.includes("表单使用项目已有组件"));
+  assert.match(report, /项目规则候选 · 代码约定/);
   const profile = await historyProfile(files);
+  assert.equal(profile.hints[0]!.type, "code_convention");
+  assert.equal(profile.hints[0]!.evidence[0]!.quote, good.evidence[0]!.quote);
   const proposed = await service.propose(profile.hints[0]!.id);
   assert.equal(proposed.outcome, "ok");
   assert.match(await files.read((proposed.data as { file: string }).file), /status: candidate/);

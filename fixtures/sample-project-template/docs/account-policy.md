@@ -1,7 +1,7 @@
-# Account policy
+# 账户业务规则
 
-An account currently has the `active` status and may use the application. The account service validates status values before storage; consumers read accounts through that service.
+账户当前使用 `active` 状态，可正常使用应用。账户服务在存储前校验状态值，使用方通过账户服务读取账户。
 
-Account access depends on its current eligibility. If a future change introduces a status that prevents account use, the restriction must apply immediately to existing sessions as well as new logins. A session does not retain access after its account loses eligibility.
+账户访问权限取决于当前是否具备使用资格。如果后续新增禁止使用账户的状态，限制必须立即作用于已有会话和新登录。账户失去资格后，已有会话也不能继续访问。
 
-The account summary exposes the stored status and a human-readable Chinese status label. The label must describe the actual current status.
+账户摘要展示存储的状态值和便于阅读的中文状态名称。展示名称必须与账户的实际当前状态一致。

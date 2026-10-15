@@ -22,7 +22,7 @@ export async function manifestFor(files: ProjectFiles): Promise<HistoryManifest 
   const raw = await optional(files, `${HISTORY_DIR}/manifest.json`);
   if (!raw) return undefined;
   const manifest = ManifestSchema.parse(JSON.parse(raw));
-  if (manifest.project !== files.root) throw new AppError("HISTORY_PROJECT_MISMATCH", "History belongs to another project");
+  if (manifest.project !== files.root) throw new AppError("HISTORY_PROJECT_MISMATCH", "历史记录属于另一个项目");
   return manifest;
 }
 
@@ -40,8 +40,8 @@ export async function withHistoryLock<T>(files: ProjectFiles, action: () => Prom
           try { process.kill(pid, 0); } catch (probe) { if (hasCode(probe, "ESRCH")) dead = true; }
         }
       } catch { /* Unknown owners require manual reconciliation. */ }
-      if (!dead || attempt > 0) throw new AppError("HISTORY_BUSY", "Another history operation is active or its lock needs inspection");
-      if (await optional(files, path) !== prior) throw new AppError("HISTORY_BUSY", "History lock changed");
+      if (!dead || attempt > 0) throw new AppError("HISTORY_BUSY", "其他历史分析操作正在运行，或其锁文件需要检查");
+      if (await optional(files, path) !== prior) throw new AppError("HISTORY_BUSY", "历史记录的锁文件已变化");
       await unlink(await files.path(path));
     }
   }
@@ -64,12 +64,12 @@ export async function historyProfile(files: ProjectFiles) {
     if (!raw) { pending.push(id); continue; }
     const analysis = AnalysisSchema.parse(JSON.parse(raw));
     const batch = BatchSchema.parse(JSON.parse(await files.read(`${HISTORY_DIR}/batches/${id}.json`, 65_536)));
-    if (analysis.batch_id !== id || batch.id !== id || batch.project !== files.root) throw new AppError("HISTORY_RECORD_MISMATCH", "History batch identity mismatch");
+    if (analysis.batch_id !== id || batch.id !== id || batch.project !== files.root) throw new AppError("HISTORY_RECORD_MISMATCH", "历史批次的身份信息不匹配");
     analyzed++;
     for (const finding of analysis.findings) {
       const evidence = finding.evidence.map((entry) => {
         const source = batch.messages.find((message) => message.id === entry.message_id);
-        if (!source || source.role !== "user" || !source.text.includes(entry.quote)) throw new AppError("HISTORY_EVIDENCE_INVALID", "Saved history evidence no longer matches a user message");
+        if (!source || source.role !== "user" || !source.text.includes(entry.quote)) throw new AppError("HISTORY_EVIDENCE_INVALID", "已保存的历史证据与用户消息不再匹配");
         return { ...entry, source };
       });
       const key = findingId(finding);
@@ -100,7 +100,7 @@ export async function historyStatus(files: ProjectFiles) {
     scan_id: profile.manifest?.scan_id ?? null, total_batches: profile.manifest?.batches.length ?? 0,
     analyzed_batches: profile.analyzed, pending_batches: profile.pending.length, candidate_count: profile.hints.length,
     report: profile.manifest ? `${HISTORY_DIR}/report.html` : null,
-    next_step: !profile.manifest ? "Run history_scan for first-use project history discovery."
-      : profile.pending.length ? "Read history_next and save semantic findings with history_record until all batches are analyzed."
-      : "History candidates are review hints, not confirmed team policy. Scan again to discover newly saved conversations." };
+    next_step: !profile.manifest ? "首次使用时，请运行 history_scan 发现项目历史对话。"
+      : profile.pending.length ? "请读取 history_next，并通过 history_record 保存语义分析结果，直到所有批次分析完成。"
+      : "历史候选供审查参考，尚未确认为团队规则。重新扫描可发现新保存的对话。" };
 }

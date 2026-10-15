@@ -15,9 +15,9 @@ export class ProjectFiles {
 
   async path(relative: string, allowMissing = false): Promise<string> {
     RelativePathSchema.parse(relative);
-    if (relative.split("/").includes(".git")) throw new AppError("PATH_UNSAFE", "Git internals are not project knowledge");
+    if (relative.split("/").includes(".git")) throw new AppError("PATH_UNSAFE", "Git 内部文件不能作为项目知识路径");
     if (await realpath(this.root) !== this.root || !(await lstat(this.root)).isDirectory()) {
-      throw new AppError("PATH_UNSAFE", "Project root must remain a real directory");
+      throw new AppError("PATH_UNSAFE", "项目根路径必须始终是实际目录");
     }
     let path = this.root;
     const parts = relative.split("/");
@@ -26,7 +26,7 @@ export class ProjectFiles {
       try {
         const info = await lstat(path);
         if (info.isSymbolicLink() || (index < parts.length - 1 && !info.isDirectory())) {
-          throw new AppError("PATH_UNSAFE", `Rejecting a symbolic or non-directory path: ${relative}`);
+          throw new AppError("PATH_UNSAFE", `不支持符号链接或非目录路径：${relative}`);
         }
       } catch (error) {
         if (!(allowMissing && hasCode(error, "ENOENT"))) throw error;
@@ -37,12 +37,12 @@ export class ProjectFiles {
 
   async read(relative: string, maximum = 32_768): Promise<string> {
     const path = await this.path(relative);
-    if (!(await lstat(path)).isFile()) throw new AppError("PATH_UNSAFE", `Not a regular file: ${relative}`);
+    if (!(await lstat(path)).isFile()) throw new AppError("PATH_UNSAFE", `该路径不是普通文件：${relative}`);
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const info = await handle.stat();
-      if (!info.isFile()) throw new AppError("PATH_UNSAFE", `Not a regular file: ${relative}`);
-      if (info.size > maximum) throw new AppError("FILE_LIMIT", `File exceeds ${maximum} bytes: ${relative}`);
+      if (!info.isFile()) throw new AppError("PATH_UNSAFE", `该路径不是普通文件：${relative}`);
+      if (info.size > maximum) throw new AppError("FILE_LIMIT", `文件超过 ${maximum} 字节限制：${relative}`);
       const data = Buffer.alloc(maximum + 1);
       let size = 0;
       while (size < data.length) {
@@ -50,7 +50,7 @@ export class ProjectFiles {
         if (bytesRead === 0) break;
         size += bytesRead;
       }
-      if (size > maximum) throw new AppError("FILE_LIMIT", `File exceeds ${maximum} bytes: ${relative}`);
+      if (size > maximum) throw new AppError("FILE_LIMIT", `文件超过 ${maximum} 字节限制：${relative}`);
       return new TextDecoder("utf-8", { fatal: true }).decode(data.subarray(0, size));
     } finally { await handle.close(); }
   }
@@ -80,7 +80,7 @@ export class ProjectFiles {
   }
 
   private async write(relative: string, content: string, previous?: string): Promise<void> {
-    if (Buffer.byteLength(content) > 65_536) throw new AppError("FILE_LIMIT", "Generated file exceeds 64 KiB");
+    if (Buffer.byteLength(content) > 65_536) throw new AppError("FILE_LIMIT", "生成文件超过 64 KiB 限制");
     await this.path(relative, true);
     const parent = dirname(relative);
     if (parent !== ".") await this.directory(parent);
@@ -95,11 +95,11 @@ export class ProjectFiles {
       const target = await this.path(relative, true);
       if (previous === undefined) {
         try { await link(tempPath, target); } catch (error) {
-          if (hasCode(error, "EEXIST")) throw new AppError("FILE_EXISTS", `Preserving existing file: ${relative}`);
+          if (hasCode(error, "EEXIST")) throw new AppError("FILE_EXISTS", `已保留现有文件：${relative}`);
           throw error;
         }
       } else {
-        if (await this.read(relative, 65_536) !== previous) throw new AppError("FILE_CHANGED", `File changed during update: ${relative}`);
+        if (await this.read(relative, 65_536) !== previous) throw new AppError("FILE_CHANGED", `更新过程中文件发生变化：${relative}`);
         await rename(tempPath, target);
       }
     } finally {

@@ -10,7 +10,7 @@ import { findToolRoot, findCliPath } from "./package-root.js";
 import { VERSION } from "./version.js";
 
 const MARKER = "<!-- project-dev-agent -->";
-const GUIDANCE = `${MARKER}\nFor tracked project changes, use the project-dev skill with the project_dev MCP server. Read applicable project knowledge and existing code before choosing an implementation. Record related paths and review evidence. Keep generated task state and draft experience in .project-dev/local/. Confirm shared rules through the team's review process.\n<!-- /project-dev-agent -->\n`;
+const GUIDANCE = `${MARKER}\n跟踪项目改动时，结合 project-dev Skill 和 project_dev MCP 服务工作。选择实现方案前阅读适用知识和现有代码，记录关联路径与审查证据。任务状态和经验草稿保存在 .project-dev/local/。通过团队审查流程确认共享规则。新生成的说明默认使用中文，代码与原话引用保持原样。\n<!-- /project-dev-agent -->\n`;
 const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"];
 
 interface Change { file: string; action: "create" | "append" | "unchanged" | "preserve"; before?: string; after: string }
@@ -18,7 +18,7 @@ interface Change { file: string; action: "create" | "append" | "unchanged" | "pr
 export async function initializeProject(project: string, apply: boolean) {
   const binding = await bindWorktree(project);
   const toolRoot = await findToolRoot();
-  if (binding.root === toolRoot) throw new AppError("TOOL_PROJECT_CONFLICT", "Initialize a target project, not the tool package itself");
+  if (binding.root === toolRoot) throw new AppError("TOOL_PROJECT_CONFLICT", "请选择业务目标项目进行初始化，不能初始化工具包自身");
   const files = new ProjectFiles(binding.root);
   const { config } = await loadConfig(files);
   const changes: Change[] = [];
@@ -29,7 +29,7 @@ export async function initializeProject(project: string, apply: boolean) {
     try { before = await files.read(file, 65_536); } catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
     const after = before !== undefined && append ? append(before) : content;
     const action = before === undefined ? "create" : before === after ? "unchanged" : append ? "append" : "preserve";
-    if (action === "preserve") warnings.push(`Preserved customized file ${file}; compare it with the packaged version before updating.`);
+    if (action === "preserve") warnings.push(`已保留自定义文件 ${file}；更新前请与软件包中的版本对比。`);
     changes.push({ file, action, ...(before !== undefined ? { before } : {}), after: action === "preserve" ? before! : after });
   }
   await plan(".gitignore", "/.project-dev/local/\n", (current) => /^(?:\/)?\.project-dev\/local\/$/m.test(current)
@@ -49,7 +49,7 @@ export async function initializeProject(project: string, apply: boolean) {
   // Per-project generated plugin: concrete absolute paths avoid guessing host-specific variable expansion.
   await plan(".project-dev/local/plugin/plugin.json", `${JSON.stringify({
     "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", name: "project-dev-agent", version: VERSION,
-    description: "Project rules, related-change checklists, and reviewable development experience for Codex",
+    description: "为 Codex 提供项目规则、关联改动清单和可核对的开发经验",
   }, null, 2)}\n`);
   await plan(".project-dev/local/plugin/mcp.json", `${JSON.stringify({
     "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
@@ -68,5 +68,5 @@ export async function initializeProject(project: string, apply: boolean) {
   return { outcome: "ok", applied: apply, project: binding.root,
     changes: changes.map(({ file, action, before, after }) => ({ file, action, ...(apply ? {} : { before, after }) })), warnings,
     codex_config: ".project-dev/local/codex.toml", generated_plugin: ".project-dev/local/plugin",
-    next_step: "Review and commit project setup changes through your usual Git process. Configure the generated MCP connection in Codex and start a new chat. Client plugin loading still requires verification in the target client." };
+    next_step: "按团队原有 Git 流程审查并提交项目接入改动。在 Codex 配置生成的 MCP 连接后新建对话；仍需在目标客户端验证插件实际加载情况。" };
 }

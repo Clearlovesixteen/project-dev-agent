@@ -32,7 +32,7 @@ export async function readGit(
     if (typeof failure.code === "number" && allowedExitCodes.includes(failure.code)) {
       return { stdout: failure.stdout ?? Buffer.alloc(0), exitCode: failure.code };
     }
-    throw new AppError("GIT_COMMAND_FAILED", `Git ${args[0] ?? "read"} failed in the bound worktree`);
+    throw new AppError("GIT_COMMAND_FAILED", `在当前工作树执行 Git ${args[0] ?? "read"} 失败`);
   }
 }
 
@@ -40,7 +40,7 @@ export function decodeGitOutput(output: Buffer): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(output);
   } catch {
-    throw new AppError("GIT_OUTPUT_INVALID", "Git returned a path that is not valid UTF-8");
+    throw new AppError("GIT_OUTPUT_INVALID", "Git 返回的路径不是有效的 UTF-8 文本");
   }
 }
 
@@ -52,6 +52,6 @@ export function gitLine(output: Buffer): string {
 
 export function assertObjectId(value: string): void {
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) {
-    throw new AppError("INVALID_BASELINE_HEAD", "The baseline must be a full Git commit object ID");
+    throw new AppError("INVALID_BASELINE_HEAD", "基线必须使用完整的 Git 提交对象 ID");
   }
 }

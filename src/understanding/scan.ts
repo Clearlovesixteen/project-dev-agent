@@ -19,10 +19,10 @@ export function excluded(path: string, config: ProjectConfig): boolean {
     || config.exclude_paths.some((pattern) => matchesPath(pattern, path));
 }
 export async function safeSource(files: ProjectFiles, path: string, config: ProjectConfig): Promise<string> {
-  if (excluded(path, config)) throw new AppError("PROJECT_SOURCE_EXCLUDED", "Source is excluded from project understanding");
+  if (excluded(path, config)) throw new AppError("PROJECT_SOURCE_EXCLUDED", "该来源已被排除在项目理解范围之外");
   const parts = path.split("/");
   for (let i = 1; i < parts.length; i++) {
-    try { await lstat(`${files.root}/${parts.slice(0, i).join("/")}/.git`); throw new AppError("PROJECT_SOURCE_NESTED", "Nested repositories are scanned independently"); }
+    try { await lstat(`${files.root}/${parts.slice(0, i).join("/")}/.git`); throw new AppError("PROJECT_SOURCE_NESTED", "嵌套仓库需要单独扫描"); }
     catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
   }
   return files.read(path, MAX_SOURCE);
@@ -119,7 +119,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   let totalBytes = 0;
   const diagnostic = (code: string, message: string) => { coverage.complete = false; if (diagnostics.length < 100) diagnostics.push({ code, message: message.slice(0, 500) }); };
   for (const path of eligible) {
-    if (records.length >= 10_000 || totalBytes >= 80_000_000) { diagnostic("PROJECT_SCAN_LIMIT", "Remaining files exceed the 10,000 file or 80 MB read budget; scope is partial"); break; }
+    if (records.length >= 10_000 || totalBytes >= 80_000_000) { diagnostic("PROJECT_SCAN_LIMIT", "剩余文件超出 10,000 个文件或 80 MB 的读取上限；本次扫描仅覆盖部分范围"); break; }
     try {
       const content = await safeSource(files, path, config), bytes = Buffer.byteLength(content); totalBytes += bytes;
       if (content.includes("\0")) { coverage.unsupported++; continue; }
@@ -133,7 +133,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
           const entries = Object.entries({ ...value.dependencies, ...value.devDependencies }).filter(([name, value]) => name.length <= 200 && typeof value === "string" && value.length <= 200);
           const scripts = Object.keys(value.scripts ?? {}).filter((name) => name.length <= 100);
           pkg = { dependencies: entries.slice(0, 120).map(([name, declared]) => ({ name, declared: String(declared) })), scripts: scripts.slice(0, 40), truncated: entries.length > 120 || scripts.length > 40 };
-        } catch { diagnostic("PROJECT_PACKAGE_INVALID", `${path}: package declarations could not be parsed`); }
+        } catch { diagnostic("PROJECT_PACKAGE_INVALID", `${path}：无法解析依赖声明`); }
       }
       records.push(FileSchema.parse({ path, sha256, bytes, module: moduleFor(path, config), role: roleFor(path),
         imports: imports.slice(0, 40).map((entry) => ({ specifier: entry.specifier, line: entry.line, target: resolveImport(path, entry.specifier, all, mappings) })),
@@ -143,12 +143,12 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   // Failed/unsafe targets never become resolved cross-file evidence.
   const indexed = new Set(records.map((record) => record.path));
   for (const record of records) for (const entry of record.imports) if (entry.target && !indexed.has(entry.target)) entry.target = null;
-  if (gitLine((await readGit(binding.root, ["rev-parse", "HEAD"])).stdout) !== before) throw new AppError("PROJECT_SCAN_CHANGED", "HEAD changed while scanning; retry");
+  if (gitLine((await readGit(binding.root, ["rev-parse", "HEAD"])).stdout) !== before) throw new AppError("PROJECT_SCAN_CHANGED", "扫描期间 HEAD 已变化，请重试");
   coverage.indexed = records.length;
   const chunks: string[] = []; let group: MapFile[] = [];
   const flush = async () => { if (!group.length) return; const raw = JSON.stringify(group) + "\n", id = digest(raw);
     const target = `${MAP_DIR}/chunks/${id}.json`, existing = await optional(files, target);
-    if (existing === undefined) await files.create(target, raw); else if (existing !== raw) throw new AppError("PROJECT_MAP_CORRUPT", "Existing immutable chunk differs");
+    if (existing === undefined) await files.create(target, raw); else if (existing !== raw) throw new AppError("PROJECT_MAP_CORRUPT", "现有不可变分块的内容不一致");
     chunks.push(id); group = []; };
   for (const record of records) {
     if (Buffer.byteLength(JSON.stringify([...group, record])) > 48_000) await flush();
@@ -156,7 +156,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   }
   await flush();
   const config_hash = await mapConfigHash(files, config);
-  if (configBefore !== config_hash || digest(JSON.stringify((await loadConfig(files)).config)) !== digest(JSON.stringify(config))) throw new AppError("PROJECT_SCAN_CHANGED", "Project configuration changed while scanning; retry");
+  if (configBefore !== config_hash || digest(JSON.stringify((await loadConfig(files)).config)) !== digest(JSON.stringify(config))) throw new AppError("PROJECT_SCAN_CHANGED", "扫描期间项目配置已变化，请重试");
   const map = MapSchema.parse({ schema_version: 1, project: binding.root, repo_identity: binding.repo_identity, head: before, scanned_at: new Date().toISOString(),
     config_hash, scan_id: digest(JSON.stringify([1, binding.root, before, config_hash, chunks])), chunks, coverage, diagnostics });
   await save(files, `${MAP_DIR}/manifest.json`, map);

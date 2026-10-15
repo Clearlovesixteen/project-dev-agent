@@ -4,7 +4,7 @@ import { IdSchema, RelativePathSchema } from "../domain/common.js";
 export const MAP_DIR = ".project-dev/local/understanding";
 export const HASH = z.string().regex(/^[a-f0-9]{64}$/);
 export const ShortText = z.string().trim().min(1).max(1_000);
-export const ConcretePath = RelativePathSchema.refine((path) => !/[\*?\[\]]/.test(path), "Use a concrete file or directory path");
+export const ConcretePath = RelativePathSchema.refine((path) => !/[\*?\[\]]/.test(path), "请使用具体的文件或目录路径");
 export const FileSchema = z.object({
   path: ConcretePath, sha256: HASH, bytes: z.number().int().nonnegative(), module: z.string(),
   role: z.enum(["entry", "page", "shared", "api", "test", "config", "document", "source"]),

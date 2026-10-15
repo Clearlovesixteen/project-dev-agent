@@ -14,9 +14,9 @@ applicable_conditions:
 sources:
   - kind: document
     reference: docs/account-policy.md
-    sha256: e11c4342daf10a870a14401d1fc893f23c2b871aef559c5ec37fab1a818c7d37
+    sha256: 33813688ecffcbf58aca9d8dd5f51ca65451a86bcb786fc6697610eae3c15ff7
 review_questions: []
-confirmed_by: synthetic-example-fixture (not a real team review)
+confirmed_by: synthetic-example-fixture（模拟样例，非真实团队审查）
 reviewed_at: 2026-10-13T00:00:00Z
 ---
 

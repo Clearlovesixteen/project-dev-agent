@@ -13,7 +13,7 @@ export const KnowledgeSchema = z.object({
   applicable_conditions: z.array(TextSchema).max(50),
   rule: TextSchema,
   rationale: TextSchema,
-  sources: z.array(SourceSchema).min(1, "Knowledge must retain at least one source").max(30),
+  sources: z.array(SourceSchema).min(1, "知识必须保留至少一项来源").max(30),
   review_questions: z.array(TextSchema).max(30).default([]),
   confirmed_by: TextSchema.optional(),
   reviewed_at: z.string().datetime({ offset: true }).optional(),
@@ -23,7 +23,7 @@ export const KnowledgeSchema = z.object({
     context.addIssue({
       code: "custom",
       path: ["applicable_conditions"],
-      message: "Define a scope using a module, path, or applicable condition",
+      message: "请通过模块、路径或适用条件明确作用范围",
     });
   }
 
@@ -32,19 +32,19 @@ export const KnowledgeSchema = z.object({
       context.addIssue({
         code: "custom",
         path: ["confirmed_by"],
-        message: "Reviewed knowledge must identify its confirmer",
+        message: "已审查的知识必须注明确认人",
       });
     }
     if (knowledge.reviewed_at === undefined) {
       context.addIssue({
         code: "custom",
         path: ["reviewed_at"],
-        message: "Reviewed knowledge must retain its review timestamp",
+        message: "已审查的知识必须保留审查时间",
       });
     }
   }
   if (knowledge.status === "confirmed" && knowledge.review_questions.length > 0) {
-    context.addIssue({ code: "custom", path: ["review_questions"], message: "Resolve review questions before confirming knowledge" });
+    context.addIssue({ code: "custom", path: ["review_questions"], message: "确认知识前，请先解决待审查问题" });
   }
 });
 

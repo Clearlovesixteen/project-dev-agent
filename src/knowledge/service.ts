@@ -60,10 +60,10 @@ export class KnowledgeService {
     return this.execute(async () => {
       const request = ExperienceProposeInputSchema.parse(input);
       const task = await new TaskStore(this.binding.root).load(request.task_id);
-      if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "Task belongs to a different repository");
+      if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "该任务属于其他仓库");
       if (task.phase === "active") await assertBaseline(this.binding, task);
       const correction = task.corrections.find((entry) => entry.id === request.correction_id);
-      if (!correction) throw new AppError("CORRECTION_NOT_FOUND", "Record the specific correction on this task before proposing reusable experience");
+      if (!correction) throw new AppError("CORRECTION_NOT_FOUND", "提炼可复用经验前，请先在任务中记录具体纠正内容");
       await assertStateIgnored(this.binding);
       const id = `exp-${randomUUID()}`;
       const knowledge = KnowledgeSchema.parse({ schema_version: 1, id, title: request.title, type: request.type, status: "candidate",
@@ -73,7 +73,7 @@ export class KnowledgeService {
       const file = `.project-dev/local/proposals/${id}.md`;
       await this.files.create(file, renderKnowledge(knowledge));
       return { outcome: "ok", code: "EXPERIENCE_PROPOSED", data: { file, knowledge,
-        next_step: "Review scope, rule, sources and questions with a colleague. Only explicit local knowledge review or the team's Git review should promote this draft. The MCP server has no confirmation tool." }, diagnostics: [] };
+        next_step: "请与同事核对适用范围、规则、来源和待确认问题。只有明确的本地知识审查或团队 Git 审查，才能将草稿提升为已确认规则。MCP 服务不提供确认工具。" }, diagnostics: [] };
     });
   }
 }

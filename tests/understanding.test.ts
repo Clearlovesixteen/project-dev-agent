@@ -70,6 +70,13 @@ test("models validate current exact evidence, preserve revisions and flag all re
   assert.equal((await service.record(model)).code, "PROJECT_MODEL_REVISION_CONFLICT");
   assert.equal((await service.record({ ...model, expected_revision: 1, summary: "审查后的补充理解" })).outcome, "ok");
   assert.equal((await models(files))[0]!.revision, 2);
+  const saved = (await models(files))[0]!;
+  assert.equal(saved.rules[0]!.responsibility, "frontend");
+  assert.equal(saved.sources[0]!.quote, "export const label = state;");
+  const report = await files.read(".project-dev/local/understanding/report.html", 65_536);
+  assert.match(report, /前端：页面读取状态/);
+  assert.match(report, /页面 · src\/pages\/orders/);
+  assert.match(report, /export const label = state;/);
   assert.equal((await readdir(join(binding.root, ".project-dev/local/understanding/models"))).length, 2);
   const search = (await new KnowledgeService(binding).search({ query: "订单", paths: ["src/pages/orders/index.tsx"] })).data as any;
   assert.equal(search.understanding.models[0].status, "candidate"); assert.equal(search.understanding.models[0].effective, false);

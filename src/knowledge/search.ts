@@ -13,7 +13,7 @@ export const KnowledgeSearchInputSchema = z.object({
   include_unconfirmed: z.boolean().default(false),
   limit: z.number().int().min(1).max(10).default(5),
 }).strict().superRefine((input, ctx) => {
-  if (!input.query && !input.modules.length && !input.paths.length) ctx.addIssue({ code: "custom", message: "Provide a query, module or affected path" });
+  if (!input.query && !input.modules.length && !input.paths.length) ctx.addIssue({ code: "custom", message: "请提供查询内容、模块或受影响的路径" });
 });
 
 function scopeMatch(knowledge: Knowledge, modules: string[], paths: string[], config: ProjectConfig): boolean {
@@ -62,7 +62,7 @@ export async function searchKnowledge(files: ProjectFiles, input: unknown): Prom
     eligible++;
     const value = { ...entry.knowledge, status, recorded_status: entry.knowledge.status, effective,
       file: entry.file, version: entry.version, source_status: states, matched_terms: entry.matched_terms,
-      applicability: "Scope and keywords are retrieval hints; verify applicable_conditions against the current task before use." };
+      applicability: "范围和关键词仅用于检索；使用前，请结合当前任务核对 applicable_conditions 中的适用条件。" };
     const size = Buffer.byteLength(JSON.stringify(value));
     if (results.length >= request.limit || resultBytes + size > 48_000) { truncated = true; continue; }
     results.push(value);
@@ -71,5 +71,5 @@ export async function searchKnowledge(files: ProjectFiles, input: unknown): Prom
   return { outcome: diagnostics.length ? "incomplete" : "ok", code: diagnostics.length ? "KNOWLEDGE_PARTIAL" : "KNOWLEDGE_SEARCHED",
     data: { results, notices: notices.slice(0, 20), notices_truncated: notices.length > 20, eligible_count: eligible, truncated,
       knowledge_directory: config.knowledge_dir, configuration: defaulted ? "defaults" : "project",
-      next_step: entries.length === 0 ? "No reusable rules found. Read existing project instructions, relevant documents and reference implementations; do not invent confirmed rules." : null }, diagnostics };
+      next_step: entries.length === 0 ? "未找到可复用的规则。请阅读现有项目说明、相关文档和参考实现，不要编造已确认的规则。" : null }, diagnostics };
 }
