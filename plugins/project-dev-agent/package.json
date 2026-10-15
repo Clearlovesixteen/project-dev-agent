@@ -1,10 +1,10 @@
 {
   "name": "project-dev-agent",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=18.19.0"
   },
   "description": "结合项目代码、业务背景和历史习惯辅助 Codex 开发，检查关联改动并保留项目经验。",
   "bin": {

@@ -1,6 +1,6 @@
 {
   "name": "project-dev-agent",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "结合项目代码、业务背景和历史习惯辅助 Codex 开发，检查关联改动并保留项目经验。",
   "type": "module",
@@ -31,7 +31,8 @@
     "sample:create": "npm run build && node dist/src/cli.js sample create",
     "check": "npm run typecheck && npm test",
     "build:plugin": "node scripts/build-plugin.mjs",
-    "test:plugin": "npm run build:plugin && npm run build && node --test dist/tests/plugin*.test.js"
+    "test:plugin": "npm run build:plugin && npm run build && node --test dist/tests/plugin*.test.js",
+    "test:runtime": "node --test --test-concurrency=4 dist/tests/*.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

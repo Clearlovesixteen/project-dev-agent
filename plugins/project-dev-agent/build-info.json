@@ -1,6 +1,6 @@
 {
-  "version": "0.6.1",
-  "node": ">=20.19.0",
+  "version": "0.6.2",
+  "node": ">=18.19.0",
   "dependencies": [
     {
       "name": "@modelcontextprotocol/sdk",
@@ -117,22 +117,22 @@
     {
       "path": "package.json",
       "bytes": 331,
-      "sha256": "7c1542b8e33f67ccf4da7cd5ddf0f149a60a37475b13211491684f18a14de4ce"
+      "sha256": "ef15035a2396064d544bcf7f58a33a08a93a1a5c4d1c7dbf73124b6547f0c7f1"
     },
     {
       "path": "plugin.json",
-      "bytes": 892,
-      "sha256": "87207953d62dc4f222afdda48d93f8a1f27e4a0065c7da791d86065c0e866814"
+      "bytes": 894,
+      "sha256": "f5346faf2623dbf8e46dc692bcb7b8ee93c53272a9c19074bf4d2de41fba50af"
     },
     {
       "path": "README.md",
-      "bytes": 640,
-      "sha256": "63b16238b94cf4efe54a09a112a9d895c258a2f03bee3aaab7e68e40c5b319ab"
+      "bytes": 723,
+      "sha256": "a4e3cb7d490a57d44319ae5b704a0131cb62fe96a2ee5dfe41d650b9e7cfbfbb"
     },
     {
       "path": "runtime/cli.mjs",
       "bytes": 991008,
-      "sha256": "4099278716670dea0ad3549ca3d0cd63f2305759f8b9575af9ac93e4f5bcbdc3"
+      "sha256": "7c871ae0fd066a397179022ee873b71ad55cf7813941fdcc12f8da2ccdb1f488"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -166,8 +166,8 @@
     },
     {
       "path": "skills/project-dev-setup/SKILL.md",
-      "bytes": 2682,
-      "sha256": "e6158a9b913764694107a5dfc3e86ce78fca44faa60c3b7ffba90d4aeae1d6dd"
+      "bytes": 2923,
+      "sha256": "f213ae580d7b6e8d58957d3d2e701096b840e5e9bcf99675599c7d7d213acca4"
     },
     {
       "path": "skills/project-dev-update/agents/openai.yaml",

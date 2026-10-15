@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const target = join(root, "plugins/project-dev-agent");
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+// 完整源码依赖使用较新的 Node；同事运行的是仅包含 STDIO 所需依赖的预构建插件。
+// 单独维护插件运行门槛，并用同一个版本生成编译目标、安装元数据和说明。
+const runtimeNodeMinimum = "18.19.0";
+const runtimeEngines = { node: `>=${runtimeNodeMinimum}` };
 const manifest = JSON.parse(await readFile(join(root, "plugin.json"), "utf8"));
 const versionSource = await readFile(join(root, "src/version.ts"), "utf8");
 if (manifest.version !== pkg.version || !versionSource.includes(`VERSION = "${pkg.version}"`)) throw new Error("Release versions disagree");
@@ -15,7 +19,7 @@ await rm(target, { recursive: true, force: true });
 await mkdir(join(target, "runtime"), { recursive: true });
 const result = await build({
   absWorkingDir: root, entryPoints: ["src/cli.ts"], outfile: join(target, "runtime/cli.mjs"),
-  bundle: true, platform: "node", target: "node20", format: "esm", minify: true,
+  bundle: true, platform: "node", target: `node${runtimeNodeMinimum}`, format: "esm", minify: true,
   sourcemap: false, legalComments: "eof", metafile: true,
   banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
 });
@@ -24,10 +28,10 @@ for (const name of ["plugin.json", "mcp.json", "skills", "templates", "fixtures"
   await cp(join(root, name), join(target, name), { recursive: true, dereference: false });
 }
 await writeFile(join(target, "package.json"), JSON.stringify({
-  name: pkg.name, version: pkg.version, private: true, type: "module", engines: pkg.engines,
+  name: pkg.name, version: pkg.version, private: true, type: "module", engines: runtimeEngines,
   description: pkg.description, bin: { "project-dev-agent": "runtime/cli.mjs" },
 }, null, 2) + "\n");
-await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js 20.19+ 和 Git。依赖已打包，无需 npm install。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n直接使用 \`project-dev\` 开发，首次运行自动初始化当前 Git 仓库；需要调整工作目录时再使用 \`project-dev-setup\`。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，项目记录在业务仓库的 \`.project-dev/local/\`，不会随插件升级被替换。\n`);
+await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js ${runtimeNodeMinimum}+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n直接使用 \`project-dev\` 开发，首次运行自动初始化当前 Git 仓库；需要调整工作目录时再使用 \`project-dev-setup\`。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，项目记录在业务仓库的 \`.project-dev/local/\`，不会随插件升级被替换。\n`);
 
 const dependencyRoots = new Set();
 for (const input of Object.keys(result.metafile.inputs)) {
@@ -66,6 +70,6 @@ async function inventory(directory) {
   }
 }
 await inventory(target);
-await writeFile(join(target, "build-info.json"), JSON.stringify({ version: pkg.version, node: pkg.engines.node, dependencies, files }, null, 2) + "\n");
+await writeFile(join(target, "build-info.json"), JSON.stringify({ version: pkg.version, node: runtimeEngines.node, dependencies, files }, null, 2) + "\n");
 console.log(JSON.stringify({ version: pkg.version, directory: relative(root, target), files: files.length + 1,
   bytes: files.reduce((sum, file) => sum + file.bytes, 0), bundled_dependencies: dependencies.length }));

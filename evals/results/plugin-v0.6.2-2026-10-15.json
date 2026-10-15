@@ -1,0 +1,67 @@
+{
+  "version": "0.6.2",
+  "date": "2026-10-15",
+  "platform": "macOS arm64",
+  "typecheck": "passed",
+  "plugin_runtime_node": ">=18.19.0",
+  "source_build_node": ">=20.19.0",
+  "automated": [
+    {
+      "node": "20.19.6",
+      "command": "npm run check",
+      "tests": 104,
+      "pass": 104,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "duration_ms": 90594.491541,
+      "log_sha256": "f6646d0fc9f33e2012bcbf3dadc90256bdf3de915354a076072c08dac9cce54d"
+    },
+    {
+      "node": "18.19.0",
+      "command": "node --test --test-concurrency=4 dist/tests/*.test.js",
+      "tests": 104,
+      "pass": 104,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "duration_ms": 18239.311917,
+      "log_sha256": "7ab14b968b846a23e1acab53eb51b6c91833eef392ce126ba20391c5818f21b8"
+    },
+    {
+      "node": "18.19.1",
+      "command": "node --test --test-concurrency=4 dist/tests/*.test.js",
+      "tests": 104,
+      "pass": 104,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "duration_ms": 18578.734625,
+      "log_sha256": "ba3dbea6d415a8b8cd41a57eb47747220064a21d70d7dba1ede581f92995e135"
+    }
+  ],
+  "native_plugin": {
+    "result": "passed",
+    "refresh_updates_installed_version": true,
+    "refresh_updates_cached_runtime": true,
+    "installed_runtime_versions": [
+      "0.6.2-upgrade-test.1",
+      "0.6.2"
+    ],
+    "workspace_and_task_preserved": true,
+    "node": "18.19.1",
+    "scenario": "隔离 Codex 配置与临时回环 Git 插件源，合成旧版升级到 v0.6.2；保留工作范围和当前任务。"
+  },
+  "changes": [
+    "将预构建插件的运行环境与维护者的源码构建环境分开，使用 Node 18.19.0 编译目标和运行元数据。",
+    "保留源码安装与构建的 Node 20.19+ 要求，避免完整依赖中的较高版本要求影响插件使用者。",
+    "扩展独立发布产物测试，验证真实 MCP 扫描、业务模型保存与恢复、历史提取与查询、任务与设置保留。",
+    "增加 GitHub Actions Node 18.19.0、18.19.1、20.19.6 兼容性矩阵。"
+  ],
+  "skill_validation": "project-dev-setup 通过官方 quick_validate.py 校验。",
+  "limitations": [
+    "上述自动化与原生安装升级结果来自 macOS arm64；GitHub Actions Linux 结果以仓库检查为准。",
+    "未承诺 Node 18.19.0 以下版本兼容；插件使用 Codex 进程可找到的 Node。",
+    "不修改业务项目 Node 配置；源码维护者的完整依赖环境与插件运行环境分别管理。"
+  ]
+}
