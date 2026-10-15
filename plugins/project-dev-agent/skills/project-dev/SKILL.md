@@ -1,6 +1,6 @@
 ---
 name: project-dev
-description: Implement project changes using the project structure map, source-backed module understanding, conversation habits and related-change checklists. Use inside the configured project_dev workspace or when requested; preserve scoped corrections and reviewable evidence.
+description: 结合项目结构、源码支持的业务理解和历史习惯开发需求，检查关联改动。用于当前项目开发或用户明确请求使用 Project Dev Agent 时；首次运行自动检测并初始化当前 Git 仓库，之后复用配置，保留纠正记录和可核对的依据。
 ---
 
 # Project development
@@ -11,9 +11,11 @@ Use the project's existing implementations and business constraints to carry a c
 
 Determine the current Git worktree root. A parent folder containing several repositories is not a project; use the repository relevant to the user's request. In workspace mode, pass its absolute path as `project` on every MCP call, including updates and searches. If the server reports a scope mismatch, correct the project selection; do not change the configured workspace automatically.
 
-When installed as a Codex plugin, `plugin_status` reports its version and saved workspace. If project tools return `PLUGIN_NOT_CONFIGURED`, follow the bundled `project-dev-setup` skill. The workspace belongs to this user and persists across plugin updates. Never change it just to bypass a scope error. Older manual MCP installations have no setup tools; keep using their existing workspace.
+When installed as a Codex plugin, start the authorized project task by calling `project_prepare` with the absolute current Git root and `apply: true`. If no workspace is configured, it validates this repository and saves this root as the initial workspace automatically. No separate setup command or repeated permission question is needed. Briefly report the initialized directory and continue the same request. For a status-only request use `apply: false`, which previews initialization without writing. The MCP process starts in the plugin cache, so never use its cwd as the project.
 
-Call `project_prepare` to inspect readiness. On first use for an authorized development task, `apply: true` adds a Git-local ignore for `.project-dev/local/`; it does not modify shared instructions or commit files. If `active_task` is present, call `task_check` without an ID to recover it. Continue it only when it matches the user's request; do not silently abort unrelated work. Baseline warnings include the old records for recovery.
+Existing workspace settings are reused across chats and updates. Do not replace them or expand to a parent just to bypass a scope error. If the current repository cannot be identified or falls outside that scope, explain the concrete issue and obtain the intended directory; `project-dev-setup` is the optional settings workflow for that change. If an earlier plugin returns `PLUGIN_NOT_CONFIGURED`, use the bundled settings workflow to configure the current Git root once and resume the request. Older manual MCP installations keep their existing workspace. On settings contention, inspect `plugin_status` before retrying; do not overwrite a concurrent selection.
+
+`project_prepare` also inspects readiness and, with `apply: true`, adds a Git-local ignore for `.project-dev/local/`. It does not modify shared instructions or commit files. If `active_task` is present, call `task_check` without an ID to recover it. Continue it only when it matches the user's request; do not silently abort unrelated work. Baseline warnings include the old records for recovery.
 
 ## Map the project and deepen understanding as needed
 

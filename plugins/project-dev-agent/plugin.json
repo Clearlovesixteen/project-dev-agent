@@ -1,22 +1,21 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "project-dev-agent",
-  "version": "0.5.0",
-  "description": "Codex development workflow with scoped project history, knowledge and related-change review",
+  "version": "0.6.0",
+  "description": "结合项目代码、业务背景和历史习惯辅助 Codex 开发，检查关联改动并保留项目经验。",
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Project Dev Agent",
         "shortDescription": "按项目惯例开发，追踪关联改动与经验",
-        "longDescription": "在 Codex 中使用项目结构索引、业务理解候选、历史习惯和关联改动清单辅助开发。首次安装选择工作目录，更新保留个人配置与项目记录。需要 Node.js 20.19+ 和 Git。",
+        "longDescription": "在 Codex 中使用项目结构索引、业务理解候选、历史习惯和关联改动清单辅助开发。首次开发自动检测并初始化当前 Git 仓库，更新保留个人配置与项目记录。需要 Node.js 20.19+ 和 Git。",
         "developerName": "Clearlovesixteen",
         "category": "Productivity",
         "capabilities": [
           "Read",
           "Write"
         ]
-      },
-      "onboardingSkill": "./skills/project-dev-setup/SKILL.md"
+      }
     }
   }
 }

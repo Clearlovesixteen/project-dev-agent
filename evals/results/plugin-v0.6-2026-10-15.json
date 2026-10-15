@@ -1,0 +1,42 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-15",
+  "typecheck": "passed",
+  "automated": {
+    "command": "npm run check",
+    "tests": 102,
+    "pass": 102,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 74327.261625,
+    "log_sha256": "687519b359e5f04c8d745a79ea287c3ecd6743fac584c45a1276d97a5e5b9ca8"
+  },
+  "native_plugin": {
+    "scenario": "Synthetic prior release to current release using native Git marketplace",
+    "result": "passed",
+    "installed_runtime_versions": [
+      "0.6.0-upgrade-test.1",
+      "0.6.0"
+    ],
+    "refresh_updates_installed_version": true,
+    "refresh_updates_cached_runtime": true,
+    "workspace_and_task_preserved": true,
+    "returned_errors": []
+  },
+  "skills": "All three Skills passed official quick_validate.py; Chinese display metadata passed YAML parsing and length checks",
+  "first_use": [
+    "Read-only preview leaves settings and ignores untouched",
+    "First development initializes the current Git repository through project_prepare",
+    "Repeated preparation preserves settings and developer edits",
+    "Existing multi-project workspace is reused",
+    "Invalid roots, unsafe state and malformed settings do not initialize",
+    "Concurrent initializers cannot overwrite the winner",
+    "Standalone packaged MCP initializes and recovers tasks after restart"
+  ],
+  "limitations": [
+    "Desktop entry appearance and background auto-update interval were not visually tested",
+    "Default initial scope is one repository; a different or broader workspace remains an explicit settings change",
+    "A real productivity benefit still requires colleague trials"
+  ]
+}

@@ -8,6 +8,7 @@ import type { ToolResult } from "./domain/result.js";
 import { ProjectFiles, hasCode } from "./storage/project-files.js";
 import { VERSION } from "./version.js";
 import { Workspace } from "./workspace.js";
+import { prepareProject, ProjectPrepareInputSchema } from "./personal-setup.js";
 
 const FILE = "project-dev-agent/settings.json";
 const LOCK = "project-dev-agent/settings.lock";
@@ -50,7 +51,8 @@ export class PluginSettings {
     return { outcome: "ok", code: "PLUGIN_STATUS", diagnostics: [], data: {
       version: VERSION, configured: current !== null, workspace: current?.value.workspace ?? null,
       revision: current?.value.revision ?? null, settings_path: join(files.root, FILE),
-      next_step: current ? "Pass the absolute current Git root as project to project_prepare" : "Use project-dev-setup to choose and configure your workspace",
+      next_step: current ? "Pass the absolute current Git root as project to project_prepare"
+        : "Call project_prepare with the current absolute Git root and apply: true to initialize automatically; project-dev-setup is only needed to choose a different workspace",
     } };
   }
 
@@ -87,9 +89,34 @@ export class PluginSettings {
     } finally { await unlink(await files.path(LOCK)); }
   }
 
+  async prepare(project: string | undefined, raw: unknown): Promise<ToolResult> {
+    const input = ProjectPrepareInputSchema.parse(raw);
+    const files = await this.files();
+    if (await this.read(files)) return prepareProject(await this.bind(project), input);
+
+    if (!project || !isAbsolute(project)) throw new AppError("PROJECT_REQUIRED", "Pass the current absolute Git worktree root to initialize this project");
+    // First use authorizes only this repository, never its parent or the plugin's process cwd.
+    const workspace = await Workspace.open(project);
+    const binding = await workspace.bind(project);
+    const preview = await prepareProject(binding, { apply: false });
+    if (!input.apply) return { ...preview, data: {
+      ...preview.data as Record<string, unknown>,
+      plugin_setup: { action: "would_initialize", workspace: workspace.root, settings_path: join(files.root, FILE) },
+      next_step: "Call project_prepare with apply: true to initialize this repository and ignore its local records, then continue development",
+    } };
+
+    // Compare against absence under the existing settings lock; a concurrent selection must win.
+    await this.configure({ workspace: project, apply: true, expected_revision: null });
+    const prepared = await prepareProject(await this.bind(project), input);
+    return { ...prepared, data: {
+      ...prepared.data as Record<string, unknown>,
+      plugin_setup: { action: "initialized", workspace: workspace.root, settings_path: join(files.root, FILE) },
+    } };
+  }
+
   async bind(project?: string) {
     const settings = (await this.read(await this.files()))?.value;
-    if (!settings) throw new AppError("PLUGIN_NOT_CONFIGURED", "Choose your workspace with project-dev-setup before using project tools");
+    if (!settings) throw new AppError("PLUGIN_NOT_CONFIGURED", "Call project_prepare with the current absolute Git root and apply: true to initialize automatically");
     const workspace = await Workspace.open(settings.requested_workspace);
     if (workspace.root !== settings.workspace) throw new AppError("WORKSPACE_CHANGED", "Configured workspace changed identity; inspect it before reconfiguring");
     return workspace.bind(project);

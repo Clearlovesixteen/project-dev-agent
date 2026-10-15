@@ -1,0 +1,3 @@
+interface:
+  display_name: "项目设置"
+  short_description: "查看插件版本与项目配置，按需调整工作目录，日常开发自动初始化。"

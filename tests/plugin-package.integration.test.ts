@@ -52,9 +52,14 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const tools = (await first.listTools()).tools;
   assert.equal(tools.length, 14);
   assert.ok(tools.find((tool) => tool.name === "project_prepare")?.inputSchema.required?.includes("project"));
-  assert.equal((await call(first, "project_prepare", { project: fixture.path })).code, "PLUGIN_NOT_CONFIGURED");
+  const preview = await call(first, "project_prepare", { project: fixture.path });
+  assert.equal((preview.data as { plugin_setup: { action: string } }).plugin_setup.action, "would_initialize");
+  assert.equal(((await call(first, "plugin_status")).data as { configured: boolean }).configured, false);
+  assert.equal((await call(first, "task_check", { project: fixture.path })).code, "PLUGIN_NOT_CONFIGURED");
   assert.equal((await call(first, "plugin_status")).code, "PLUGIN_STATUS");
-  await call(first, "plugin_configure", { workspace: fixture.root, apply: true, expected_revision: null });
+  const prepared = await call(first, "project_prepare", { project: fixture.path, apply: true });
+  assert.equal((prepared.data as { plugin_setup: { action: string } }).plugin_setup.action, "initialized");
+  const savedSettings = await readFile(join(home, "project-dev-agent/settings.json"), "utf8");
   assert.equal((await call(first, "project_prepare", { project: "/outside-workspace" })).code, "PROJECT_OUTSIDE_WORKSPACE");
   const opened = await call(first, "task_open", { project: fixture.path, requirement: "Check plugin upgrade persistence",
     acceptance_criteria: [{ id: "persist", description: "Keep the same active task after restart" }] });
@@ -63,6 +68,8 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const secondPath = join(fixture.root, "plugin v2"); await cp(installed, secondPath, { recursive: true });
   const second = await connect(secondPath);
   assert.equal(((await call(second, "plugin_status")).data as { configured: boolean }).configured, true);
+  await call(second, "project_prepare", { project: fixture.path, apply: true });
+  assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), savedSettings);
   const checked = await call(second, "task_check", { project: fixture.path });
   assert.equal(TaskSchema.parse((checked.data as { recorded_task: unknown }).recorded_task).id, task.id);
 });

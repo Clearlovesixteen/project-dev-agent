@@ -1,0 +1,3 @@
+interface:
+  display_name: "插件更新"
+  short_description: "检查并更新插件到最新版本，保留工作目录配置和已有项目记录。"

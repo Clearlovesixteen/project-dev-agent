@@ -26,14 +26,16 @@ function mcpResult(result: ToolResult) {
 export function createServer(bindingFor: (project?: string) => Promise<WorktreeBinding>, workspace?: string, plugin?: PluginSettings): McpServer {
   const projectField = z.string().min(1).max(4_096).describe("Absolute current Git worktree root");
   const scope = { project: workspace || plugin ? projectField : projectField.optional() };
-  async function run(project: string | undefined, action: (binding: WorktreeBinding) => Promise<ToolResult>) {
-    try { return mcpResult(await action(await bindingFor(project))); } catch (error) {
+  async function operation(action: () => Promise<ToolResult>) {
+    try { return mcpResult(await action()); } catch (error) {
       const code = error instanceof AppError ? error.code : "PROJECT_OPERATION_FAILED";
       return mcpResult({ outcome: "error", code, diagnostics: [{ code, message: error instanceof Error ? error.message : String(error) }] });
     }
   }
+  const run = (project: string | undefined, action: (binding: WorktreeBinding) => Promise<ToolResult>) =>
+    operation(async () => action(await bindingFor(project)));
   const server = new McpServer({ name: "project-dev-agent", version: VERSION }, {
-    instructions: (plugin ? "Plugin mode: use plugin_status to inspect setup. Every project tool requires project as the absolute current Git root inside the saved workspace. If unconfigured, use project-dev-setup. Never widen the workspace without the user's direction. " : workspace ? `Workspace mode: every call must pass project as the absolute current Git root inside ${workspace}. Do not assume the parent workspace is a Git repository. ` : "") + "Track related code changes with an evidence-based checklist. Open a task before edits; record impact analysis, then review the diff and validation results. A changed path is not a completed review. This server does not independently establish business correctness.",
+    instructions: (plugin ? "Plugin mode: start authorized development with project_prepare and apply: true, passing the current absolute Git root. On first use this initializes that repository as the workspace; no separate setup command is needed. Existing settings are reused. Every project tool requires an absolute project inside the saved workspace. Never widen an existing workspace without the user's direction. " : workspace ? `Workspace mode: every call must pass project as the absolute current Git root inside ${workspace}. Do not assume the parent workspace is a Git repository. ` : "") + "Track related code changes with an evidence-based checklist. Open a task before edits; record impact analysis, then review the diff and validation results. A changed path is not a completed review. This server does not independently establish business correctness.",
   });
   if (plugin) {
     const configure = async (action: () => Promise<ToolResult>) => {
@@ -54,10 +56,11 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     }, async (input) => configure(() => plugin.configure(input)));
   }
   server.registerTool("project_prepare", {
-    description: "Check project readiness and active task without writing by default. apply: true adds only a Git-local ignore for task state; preserves existing work and shared project files.",
+    description: "Check project readiness and active task without writing by default. apply: true adds a Git-local ignore for task state and, in an unconfigured plugin, saves only this Git repository as the initial workspace. Reuses existing settings and preserves project files; never expands an existing workspace.",
     inputSchema: ProjectPrepareInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ project, ...input }) => run(project, (binding) => prepareProject(binding, input)));
+  }, async ({ project, ...input }) => plugin ? operation(() => plugin.prepare(project, input))
+    : run(project, (binding) => prepareProject(binding, input)));
   server.registerTool("task_open", {
     description: "Open a tracked development task in the bound, clean Git worktree; specify the request and acceptance criteria before editing.",
     inputSchema: TaskOpenInputSchema.safeExtend(scope),

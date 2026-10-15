@@ -1,6 +1,6 @@
 ---
 name: project-dev-update
-description: Update the installed Project Dev Agent plugin to the newest version from its configured private Codex marketplace. Use when the user asks to update or check this plugin, including 更新 Project Dev Agent 插件. Does not update business projects.
+description: 从已配置的 Codex 插件源检查或更新 Project Dev Agent，保留个人配置和项目记录。用于用户要求检查插件版本或更新插件时，例如“更新 Project Dev Agent 插件”；仅更新插件本身。
 ---
 
 # Update Project Dev Agent
@@ -14,4 +14,4 @@ Use Codex's native plugin manager; no source checkout, npm installation or separ
 5. Run `codex plugin list --json` again and report the installed version. The tested Codex version refreshes the enabled plugin cache as part of marketplace upgrade. If an older compatible CLI requires ensuring installation, use `codex plugin add project-dev-agent@project-dev-team --json` after a successful refresh. Never claim a newer installed version without checking it.
 6. Start a new chat or restart Codex to load the new MCP process and skills. The current chat's `plugin_status` may still report the old running version; distinguish it from the new installed version.
 
-Preserve personal workspace settings, project records, current tasks and unrelated plugins. Never silently add a different marketplace, change its Git ref, run npm lifecycle scripts, or edit the plugin cache manually. A missing marketplace or unsupported CLI command needs a setup/version explanation. Use the existing GitHub identity; never ask for a token in chat. Updates do not authorize commits, pushes or modifications to business code.
+Preserve personal workspace settings, project records, current tasks and unrelated plugins. Never silently add a different marketplace, change its Git ref, run npm lifecycle scripts, or edit the plugin cache manually. A missing marketplace or unsupported CLI command needs a setup/version explanation. The public HTTPS source does not require GitHub authentication; use existing credentials only if the configured source requires them, and never ask for a token in chat. Updates do not authorize commits, pushes or modifications to business code.

@@ -20,7 +20,7 @@ import { connectCodex } from "./codex-install.js";
 import { HistoryService } from "./history/service.js";
 import { UnderstandingService } from "./understanding/service.js";
 
-const HELP = `project-dev-agent — Codex plugin v0.5
+const HELP = `project-dev-agent — Codex plugin v${VERSION}
 
 Commands:
   plugin status
@@ -28,7 +28,7 @@ Commands:
   plugin configure --workspace <absolute-directory> [--apply --expected-revision <uuid|null>]
     Preview or save workspace scope; take expected-revision from the preview.
   serve --plugin
-    Start plugin MCP using persistent per-user settings; setup tools work before configuration.
+    Start plugin MCP; project_prepare initializes the current repository on first development use.
   connect --workspace <absolute-directory> [--codex <executable>] [--apply]
     Preview or install a global Skill and a workspace MCP connection using the Codex CLI.
   disconnect --workspace <absolute-directory> [--codex <executable>] [--apply]
