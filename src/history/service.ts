@@ -16,6 +16,7 @@ const CacheSchema = z.object({ batches: z.array(z.string()).max(1_000), counts: 
   user_messages: z.number(), assistant_messages: z.number(), attachment_messages: z.number(),
   metadata_messages_excluded: z.number(), duplicate_messages_excluded: z.number(), redactions: z.number(),
 }).strict() }).strict();
+/** 按 24 KB 或 60 条消息切批，控制工具返回量；批次 ID 绑定项目、解析版本及文本内容。 */
 function batchMessages(parsed: ParsedSession, project: string): HistoryBatch[] {
   const batches: HistoryBatch[] = [];
   let messages: ParsedSession["messages"] = [], bytes = 0;
@@ -32,6 +33,10 @@ function batchMessages(parsed: ParsedSession, project: string): HistoryBatch[] {
   flush(); return batches;
 }
 
+/**
+ * 读取属于当前项目的本地对话，保存文本批次和分析进度。
+ * 服务不调用模型；Codex 读取 next 的批次后提交 record，服务核验原话并保留候选。
+ */
 export class HistoryService {
   private readonly files: ProjectFiles;
   constructor(private readonly binding: WorktreeBinding, private readonly codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")) {
@@ -43,6 +48,7 @@ export class HistoryService {
       return { outcome: "error", code, diagnostics: [{ code, message: error instanceof Error ? error.message : String(error) }] };
     }
   }
+  /** 发现与解析历史，复用未变来源的缓存；扫描完成不代表批次已经完成语义分析。 */
   async scan(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = HistoryScanInputSchema.parse(input);
@@ -56,6 +62,7 @@ export class HistoryService {
           duplicate_messages_excluded: 0, redactions: 0, cache_hits: 0, source_complete: true };
         const diagnostics = inventory.diagnostics;
         if (!inventory.files.length) diagnostics.push({ code: "HISTORY_SOURCE_EMPTY", message: "未找到可用的本地 Codex 会话记录；仅保存在云端或已删除的对话无法分析" });
+        // 先按会话元数据核对项目归属并排除内部 Agent；同一会话优先保留更大或更新的日志。
         const selected = new Map<string, { file: SessionFile; meta: SessionMeta }>();
         for (const file of inventory.files) {
           try {
@@ -70,6 +77,8 @@ export class HistoryService {
         coverage.project_sessions = selected.size;
         const batches: string[] = [];
         for (const { file, meta } of selected.values()) {
+          // 解析缓存按来源路径、大小、修改时间和解析器版本复用，refresh 可强制重读。
+          // 语义分析则绑定文本批次 ID，因此重新扫描不会自动抹去相同批次的分析。
           const key = digest(JSON.stringify([PARSER_VERSION, this.binding.root, home, file.relative, file.size, file.mtime])).slice(0, 32);
           const cachePath = `${HISTORY_DIR}/cache/${key}.json`;
           try {
@@ -97,6 +106,7 @@ export class HistoryService {
             for (const field of Object.keys(summary.counts) as (keyof typeof summary.counts)[]) coverage[field] += summary.counts[field];
           } catch (error) { diagnostics.push({ code: "HISTORY_SESSION_PARTIAL", message: `${file.relative}: ${error instanceof Error ? error.message : String(error)}` }); }
         }
+        // 某个会话失败仍保留其他可读内容，同时标注不完整，避免把部分扫描称为全量完成。
         coverage.source_complete = diagnostics.length === 0;
         const manifest = ManifestSchema.parse({ schema_version: 1, parser_version: PARSER_VERSION,
           scan_id: digest(JSON.stringify([this.binding.root, home, batches, diagnostics])).slice(0, 32),
@@ -110,6 +120,7 @@ export class HistoryService {
       });
     });
   }
+  /** 返回首个未分析批次，附少量前文和已有主题；batch 为 null 仅表示当前快照已处理完。 */
   async next(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       HistoryNextInputSchema.parse(input);
@@ -128,6 +139,7 @@ export class HistoryService {
       }, diagnostics: [] };
     });
   }
+  /** 在当前扫描范围内核验用户原话并保存分析；同结果重试幂等，不接受改写既有结果。 */
   async record(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = HistoryRecordInputSchema.parse(input);
@@ -136,6 +148,7 @@ export class HistoryService {
         const manifest = await manifestFor(this.files);
         if (!manifest || manifest.scan_id !== request.scan_id || !manifest.batches.includes(request.batch_id)) throw new AppError("HISTORY_SCAN_CHANGED", "保存分析前，请先读取当前历史批次");
         const batch = BatchSchema.parse(JSON.parse(await this.files.read(`${HISTORY_DIR}/batches/${request.batch_id}.json`, 65_536)));
+        // 助手回复和脱敏占位符不能作为偏好证据，引用必须实际出现在该批用户消息中。
         for (const finding of request.findings) for (const evidence of finding.evidence) {
           const message = batch.messages.find((item) => item.id === evidence.message_id);
           if (!message || message.role !== "user" || !message.text.includes(evidence.quote) || evidence.quote.includes("[REDACTED]")) {
@@ -153,7 +166,7 @@ export class HistoryService {
       });
     });
   }
-  /** An explicit request can export a candidate into the existing human review workflow. */
+  /** CLI 的显式导出入口：把历史候选送入已有人工审查流程，不自动确认或共享规则。 */
   async propose(id: string): Promise<ToolResult> {
     return this.execute(async () => {
       await assertStateIgnored(this.binding);

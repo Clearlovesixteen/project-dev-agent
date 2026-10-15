@@ -26,6 +26,7 @@ export const ExperienceProposeInputSchema = z.object({
   review_questions: z.array(TextSchema).min(1).max(30),
 }).strict();
 
+/** 汇总可用规则与待核实线索，并从任务中的具体纠正生成本地经验候选。 */
 export class KnowledgeService {
   private readonly files: ProjectFiles;
   constructor(private readonly binding: WorktreeBinding) { this.files = new ProjectFiles(binding.root); }
@@ -37,13 +38,16 @@ export class KnowledgeService {
     }
   }
 
+  /** 以共享知识查询为基础附加历史和模块理解，各类候选保留自己的状态与来源。 */
   async search(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = KnowledgeSearchInputSchema.parse(input);
       const result = await searchKnowledge(this.files, request);
+      // 主查询拒绝的路径不能借附加历史或模块查询重新进入结果。
       if (result.code === "PATHS_EXCLUDED") return result;
       const { config } = await loadConfig(this.files);
       const paths = request.paths.filter((path) => !config.exclude_paths.some((pattern) => matchesPath(pattern, path)));
+      // 附加线索不可用时暴露其状态或诊断，尽量保留已取得的知识查询结果。
       let understanding: unknown;
       try { understanding = await projectContext(this.files, { query: request.query, paths: paths.slice(0, 30), modules: request.modules.slice(0, 20), limit: Math.min(request.limit, 5) }); }
       catch (error) { understanding = { state: "unavailable", message: error instanceof Error ? error.message : String(error) }; }
@@ -56,6 +60,7 @@ export class KnowledgeService {
     });
   }
 
+  /** 提案必须关联已有纠正记录，以复用真实原因和来源；这里只写本地 candidate 草稿。 */
   async propose(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = ExperienceProposeInputSchema.parse(input);

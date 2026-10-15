@@ -23,7 +23,7 @@ export const PluginConfigureInput = z.object({
   expected_revision: z.uuid().nullable().optional().describe("应用设置时传入状态或预览的修订号；null 表示尚无配置"),
 }).strict();
 
-/** User configuration is independent of the replaceable plugin installation/cache. */
+/** 个人配置保存在 Codex 用户目录，与可替换的插件版本缓存分开，升级后继续复用。 */
 export class PluginSettings {
   constructor(private readonly codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")) {}
 
@@ -35,6 +35,7 @@ export class PluginSettings {
   private async read(files: ProjectFiles) {
     let raw: string;
     try { raw = await files.read(FILE); } catch (error) {
+      // 只有不存在才视为首次使用；损坏内容或读取失败需要显式报错，避免误覆盖。
       if (hasCode(error, "ENOENT")) return null;
       throw error;
     }
@@ -45,6 +46,7 @@ export class PluginSettings {
     return { raw, value: parsed.data };
   }
 
+  /** 返回当前进程的版本和已保存配置；已安装的新版本可能尚未在这个进程生效。 */
   async status(): Promise<ToolResult> {
     const files = await this.files();
     const current = await this.read(files);
@@ -56,6 +58,7 @@ export class PluginSettings {
     } };
   }
 
+  /** 预览只读；应用时用文件锁加预期修订号，避免多个会话覆盖彼此的目录选择。 */
   async configure(raw: unknown): Promise<ToolResult> {
     const input = PluginConfigureInput.parse(raw);
     const workspace = await Workspace.open(input.workspace);
@@ -75,11 +78,13 @@ export class PluginSettings {
       throw error;
     }
     try {
+      // 必须拿到锁后重读；预览与执行之间，其他进程可能已经修改配置。
       const current = await this.read(files);
       if ((current?.value.revision ?? null) !== input.expected_revision) {
         throw new AppError("PLUGIN_SETTINGS_CHANGED", "预览后配置发生变化，请核对新的工作范围后再重试");
       }
       if (current?.value.workspace !== workspace.root || current.value.requested_workspace !== resolve(input.workspace)) {
+        // 同时保留规范路径与用户原路径，后续可发现路径别名被改指向其他目录的情况。
         const next = JSON.stringify({ schema_version: 1, revision: randomUUID(), workspace: workspace.root,
           requested_workspace: resolve(input.workspace) }, null, 2) + "\n";
         if (current) await files.replace(FILE, next, current.raw);
@@ -89,13 +94,14 @@ export class PluginSettings {
     } finally { await unlink(await files.path(LOCK)); }
   }
 
+  /** 首次开发初始化当前仓库；已有配置时只按原范围绑定，不能自动扩展或替换。 */
   async prepare(project: string | undefined, raw: unknown): Promise<ToolResult> {
     const input = ProjectPrepareInputSchema.parse(raw);
     const files = await this.files();
     if (await this.read(files)) return prepareProject(await this.bind(project), input);
 
     if (!project || !isAbsolute(project)) throw new AppError("PROJECT_REQUIRED", "初始化时请传入当前 Git 工作树的绝对根目录");
-    // First use authorizes only this repository, never its parent or the plugin's process cwd.
+    // 首次使用只绑定调用方指定的仓库，不取其父目录或插件进程所在的缓存目录。
     const workspace = await Workspace.open(project);
     const binding = await workspace.bind(project);
     const preview = await prepareProject(binding, { apply: false });
@@ -105,7 +111,7 @@ export class PluginSettings {
       next_step: "调用 project_prepare 并传 apply: true，初始化当前仓库并忽略本地记录后继续开发",
     } };
 
-    // Compare against absence under the existing settings lock; a concurrent selection must win.
+    // 在配置锁内确认“仍未配置”；其他会话若已初始化，这里报版本冲突而不覆盖。
     await this.configure({ workspace: project, apply: true, expected_revision: null });
     const prepared = await prepareProject(await this.bind(project), input);
     return { ...prepared, data: {
@@ -114,6 +120,7 @@ export class PluginSettings {
     } };
   }
 
+  /** 每次调用重读设置并核对原路径，配置变更或目录别名变化不会沿用旧绑定。 */
   async bind(project?: string) {
     const settings = (await this.read(await this.files()))?.value;
     if (!settings) throw new AppError("PLUGIN_NOT_CONFIGURED", "用当前 Git 绝对根目录调用 project_prepare，并传 apply: true 自动初始化");

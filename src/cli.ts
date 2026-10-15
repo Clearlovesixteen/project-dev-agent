@@ -131,6 +131,8 @@ async function main(): Promise<void> {
     return;
   }
   if (positionals.length === 1 && positionals[0] === "serve") {
+    // mcp.json 使用 serve --plugin；另外两个入口兼容手动绑定仓库或工作目录的安装方式。
+    // 三种范围来源互斥，启动后由 STDIO 传输协议消息，不再向 stdout 打印普通命令结果。
     if ([values.project, values.workspace, values.plugin].filter(Boolean).length !== 1) throw new Error("serve 必须且只能指定 --project、--workspace 或 --plugin 中的一项");
     if (values.plugin) await startPluginServer();
     else if (values.workspace) await startWorkspaceServer(values.workspace);

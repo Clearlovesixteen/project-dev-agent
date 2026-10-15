@@ -9,12 +9,14 @@ import { TaskCheckInputSchema, TaskOpenInputSchema, TaskUpdateInputSchema } from
 import { ProjectFiles } from "./storage/project-files.js";
 import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
 
+/** 维护任务生命周期，将 Git 实际改动与显式记录的验收和审查证据关联。 */
 export class TaskService {
   private readonly store: TaskStore;
   constructor(private readonly binding: WorktreeBinding) {
     this.store = new TaskStore(binding.root);
   }
 
+  /** CLI 与 MCP 共用错误约定，协议适配层无需识别存储或 Git 的具体异常。 */
   private async execute(action: () => Promise<ToolResult>): Promise<ToolResult> {
     try {
       return ToolResultSchema.parse(await action());
@@ -25,6 +27,7 @@ export class TaskService {
     }
   }
 
+  /** 从干净工作树建立基线，避免把开发者已有改动误算到新任务中。 */
   async open(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = TaskOpenInputSchema.parse(input);
@@ -43,16 +46,18 @@ export class TaskService {
     });
   }
 
+  /** 校验任务更新；实际落盘、版本递增和并发互斥由 TaskStore 负责。 */
   async update(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = TaskUpdateInputSchema.parse(input);
       const prior = await this.store.load(request.task_id);
+      // 基线失效仍允许显式中止并留下原因，但不能继续把普通更新或关闭记为有效。
       if (request.phase !== "aborted") await assertBaseline(this.binding, prior);
       if (request.knowledge_versions?.length) {
         const files = new ProjectFiles(this.binding.root);
         const loaded = await loadKnowledge(files);
         for (const version of request.knowledge_versions) {
-          // Previously used versions remain historical evidence after source code is edited.
+          // 已使用版本是历史依据，源码修改后仍保留；新引入的知识版本必须重新核验。
           if (prior.knowledge_versions.some((entry) => entry.id === version.id && entry.version === version.version)) continue;
           const entry = loaded.entries.find((entry) => entry.knowledge.id === version.id && entry.version === version.version);
           if (!entry) throw new AppError("KNOWLEDGE_VERSION_UNKNOWN", `请重新查询知识的当前版本：${version.id}`);
@@ -62,11 +67,13 @@ export class TaskService {
         }
       }
       if (request.phase === "closed") {
+        // 关闭前核对完整 Git 改动，不能只检查调用方已经列出的文件。
         const expected = new Set((request.change_items ?? prior.change_items).map((item) => item.target_path));
         const unexpected = (await changedPaths(this.binding, prior.baseline_head)).filter((path) => !expected.has(path));
         if (unexpected.length > 0) throw new AppError("UNREVIEWED_CHANGES", `关闭任务前请补充并审查清单之外的改动：${unexpected.join(", ")}`);
       }
       const saved = await this.store.update(request.task_id, request.expected_revision, (current) => {
+        // 在存储锁内基于最新记录检查集合，防止替换时抹去此前的验收或纠正记录。
         const collections = ["change_items", "acceptance_criteria", "validations", "corrections", "knowledge_versions"] as const;
         for (const key of collections) {
           const replacement = request[key];
@@ -89,6 +96,7 @@ export class TaskService {
     });
   }
 
+  /** 只读核对任务与当前差异；返回完整记录，供新对话恢复或定位未完成项。 */
   async check(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = TaskCheckInputSchema.parse(input);
@@ -105,6 +113,7 @@ export class TaskService {
         await assertBaseline(this.binding, task);
         changed = await changedPaths(this.binding, task.baseline_head);
       } catch (error: unknown) {
+        // 无法比较基线时仍返回原任务，便于恢复或中止；不得宣称检查通过。
         const code = error instanceof AppError ? error.code : "BASELINE_UNAVAILABLE";
         return { outcome: "incomplete", code, data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task },
           diagnostics: [{ code, message: error instanceof Error ? error.message : String(error) }] };
@@ -115,6 +124,7 @@ export class TaskService {
       const validations = task.validations.filter((record) => record.outcome !== "passed").map((record) => record.id);
       const expected = new Set(task.change_items.map((item) => item.target_path));
       const unexpected = changed.filter((path) => !expected.has(path));
+      // 这里只判断记录和文件覆盖是否齐全，不能独立判断证据是否足以证明业务正确。
       const reviewed = task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0;
       return {
         outcome: reviewed ? "ok" : "incomplete", code: reviewed ? "CHECKLIST_REVIEWED" : "REVIEW_INCOMPLETE",
