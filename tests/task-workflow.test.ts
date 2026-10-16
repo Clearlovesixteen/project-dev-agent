@@ -85,10 +85,11 @@ test("a verified change can close, survives restart, and releases the task after
   const path = join(fixture.path, "README.md");
   await writeFile(path, `${await readFile(path, "utf8")}\nImplementation policy: see AGENTS.md and docs/account-policy.md.\n`);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "NODE_TEST_CONTEXT"));
+  const snapshot = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
   const output = execFileSync(process.execPath, ["--test"], { cwd: fixture.path, encoding: "utf8", env });
   assert.match(output, /# fail 0/);
   const evidence = [{ kind: "manual", reference: "README.md", summary: "The added reference names the existing convention and business-policy documents." }];
-  const reviewed = await service.update({ task_id: task.id, expected_revision: 0,
+  const reviewed = await service.update({ task_id: task.id, expected_revision: 0, review_snapshot: snapshot,
     change_items: [{ ...item("readme", "README.md"), status: "checked", reviewed_by: "fixture", evidence }],
     acceptance_criteria: [{ id: "policy", description: "README points readers to the existing project policy", status: "checked", reviewed_by: "fixture", evidence }],
     validations: [{ id: "baseline-tests", description: "node --test", outcome: "passed", evidence: [{ kind: "test", reference: "node --test", summary: "Existing sample tests passed with zero failures" }] }] });
@@ -122,4 +123,63 @@ test("an unresolved merge stays incomplete at the service boundary and cannot be
   assert.equal(checked.outcome, "incomplete");
   assert.equal(checked.code, "UNMERGED_CHANGES");
   assert.equal((await service.update({ task_id: task.id, expected_revision: 0, phase: "closed" })).code, "UNMERGED_CHANGES");
+});
+
+test("代码再次修改后旧验证失效，重新验证才能关闭", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path));
+  const task = TaskSchema.parse((await service.open(request)).data);
+  const path = join(fixture.path, "src/service.js"), original = await readFile(path, "utf8");
+  await writeFile(path, original + "\n// 已审查的注释\n");
+  const snapshot = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
+  const evidence = [{ kind: "test", reference: "node --test", summary: "样例验证通过" }];
+  const review = { task_id: task.id, expected_revision: 0, review_snapshot: snapshot,
+    change_items: [{ ...item("service", "src/service.js"), status: "checked", reviewed_by: "fixture", evidence }],
+    acceptance_criteria: [{ ...request.acceptance_criteria[0], status: "checked", reviewed_by: "fixture", evidence }],
+    validations: [{ id: "tests", description: "node --test", outcome: "passed", evidence }] };
+  const env = { ...process.env }; delete env.NODE_TEST_CONTEXT;
+  execFileSync(process.execPath, ["--test"], { cwd: fixture.path, env, stdio: "pipe" });
+  assert.equal((await service.update(review)).outcome, "ok");
+  await writeFile(path, original + "\nexport const broken = ;\n");
+  assert.throws(() => execFileSync(process.execPath, ["--test"], { cwd: fixture.path, env, stdio: "pipe" }));
+  assert.equal((await service.check({ task_id: task.id })).code, "REVIEW_STALE");
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 1, phase: "closed" })).code, "REVIEW_STALE");
+  assert.equal((await service.update({ ...review, expected_revision: 1 })).code, "REVIEW_SNAPSHOT_CHANGED");
+  await writeFile(path, original + "\n// 修复后重新验证\n");
+  const fresh = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
+  execFileSync(process.execPath, ["--test"], { cwd: fixture.path, env, stdio: "pipe" });
+  assert.equal((await service.update({ ...review, expected_revision: 1, review_snapshot: fresh })).outcome, "ok");
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
+});
+
+test("缺少指纹的旧记录需要复核，回传伪造的单项指纹不能刷新证据", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path));
+  const task = TaskSchema.parse((await service.open(request)).data);
+  const evidence = [{ kind: "manual", reference: "src/service.js", summary: "核对源码行为" }];
+  const reviewed = { ...item("service", "src/service.js"), status: "checked", reviewed_by: "fixture", evidence };
+  const snapshot = ((await service.check({})).data as any).review_snapshot;
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 0, change_items: [{ ...reviewed, review_snapshot: snapshot }] })).code, "REVIEW_SNAPSHOT_REQUIRED");
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 0, review_snapshot: snapshot, change_items: [reviewed] })).outcome, "ok");
+  const path = join(fixture.path, ".project-dev/local/tasks", `${task.id}.json`);
+  const legacy = JSON.parse(await readFile(path, "utf8")); delete legacy.change_items[0].review_snapshot;
+  await writeFile(path, JSON.stringify(legacy));
+  assert.equal((await service.check({})).code, "REVIEW_STALE");
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 1, change_items: [{ ...reviewed, review_snapshot: snapshot }] })).outcome, "ok");
+  const restored = (await service.check({})).data as any;
+  assert.deepEqual(restored.stale_evidence.change_items, ["service"]);
+  assert.equal(restored.recorded_task.change_items[0].review_snapshot, undefined);
+});
+
+test("审查指纹覆盖未跟踪文件的内容，暂存操作不使相同内容失效", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path)); await service.open(request);
+  const path = join(fixture.path, "new.bin");
+  await writeFile(path, Buffer.from([0, 255, 1]));
+  const first = ((await service.check({})).data as any).review_snapshot;
+  await writeFile(path, Buffer.from([0, 254, 1]));
+  const second = ((await service.check({})).data as any).review_snapshot;
+  assert.notEqual(second, first);
+  execFileSync("git", ["add", "new.bin"], { cwd: fixture.path });
+  assert.equal(((await service.check({})).data as any).review_snapshot, second);
 });

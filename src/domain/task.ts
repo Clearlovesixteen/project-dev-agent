@@ -1,10 +1,11 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { EvidenceSchema, IdSchema, RelativePathSchema, SourceSchema, TextSchema } from "./common.js";
+import { EvidenceSchema, IdSchema, RelativePathSchema, ReviewSnapshotSchema, SourceSchema, TextSchema } from "./common.js";
 
 const ReviewFields = {
   reviewed_by: TextSchema.optional(),
   evidence: z.array(EvidenceSchema).max(100).default([]),
+  review_snapshot: ReviewSnapshotSchema.optional(),
 };
 
 export const ChangeItemSchema = z.object({
@@ -48,6 +49,7 @@ export const ValidationRecordSchema = z.object({
   description: TextSchema,
   outcome: z.enum(["passed", "failed", "not_run"]),
   evidence: z.array(EvidenceSchema).max(100).default([]),
+  review_snapshot: ReviewSnapshotSchema.optional(),
 }).strict().superRefine((record, ctx) => {
   if (record.outcome !== "not_run" && record.evidence.length === 0) {
     ctx.addIssue({ code: "custom", path: ["evidence"], message: "已执行的验证必须提供证据" });

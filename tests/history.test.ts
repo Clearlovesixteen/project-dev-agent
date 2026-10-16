@@ -215,3 +215,47 @@ test("all candidates remain readable across bounded HTML pages, including heavil
   for (const hint of (await historyProfile(files)).hints) assert.ok(html.includes(hint.id));
   assert.ok(html.includes("&lt;&gt;&amp;&quot;"));
 });
+
+test("历史误提取可修订和停用，保留旧版且拒绝过期写入", async (t) => {
+  const { home, binding, service, files } = await setup(t);
+  await log(home, "correctable", binding.root, [message("u", "user", "表单使用项目已有组件，仅旧页面保留原生表单")]);
+  await service.scan({}); const n = await next(service), good = finding(n.batch!);
+  const base = { scan_id: n.scan_id, batch_id: n.batch!.id, note: "核对用户原话" };
+  await service.record({ ...base, findings: [{ ...good, rule: "所有页面都保留原生表单" }] });
+  const legacyPath = join(binding.root, `.project-dev/local/history/analysis/${n.batch!.id}.json`);
+  const legacy = JSON.parse(await readFile(legacyPath, "utf8")); delete legacy.revision;
+  await writeFile(legacyPath, JSON.stringify(legacy));
+  const read = (await service.next({ batch_id: n.batch!.id })).data as any;
+  assert.equal(read.analysis.revision, 1);
+  const revision = { ...base, expected_revision: read.analysis.revision, revision_reason: "纠正旧页面限制被漏读的问题", findings: [good] };
+  assert.equal((await service.record(revision)).outcome, "ok");
+  assert.equal((await service.record(revision)).outcome, "ok");
+  assert.equal((await service.record({ ...revision, findings: [] })).code, "HISTORY_REVISION_CONFLICT");
+  const profile = await historyProfile(files);
+  assert.equal(profile.hints[0]?.rule, good.rule);
+  assert.equal((profile.hints[0] as any).analysis_refs[0].revision, 2);
+  const old = JSON.parse(await files.read(`.project-dev/local/history/revisions/${n.batch!.id}/1.json`, 65_536));
+  assert.equal(old.findings[0].rule, "所有页面都保留原生表单");
+  assert.equal((await service.record({ ...base, expected_revision: 2, revision_reason: "用户要求停用这项候选", findings: [] })).outcome, "ok");
+  await new HistoryService(binding, home).scan({ refresh: true });
+  assert.equal((await historyProfile(files)).hints.length, 0);
+  assert.equal((await historyStatus(files)).pending_batches, 0);
+});
+
+test("暂停历史分析保留待处理进度，重启后可继续", async (t) => {
+  const { home, binding, service, files } = await setup(t);
+  await log(home, "pause", binding.root, [message("u", "user", "这是一段完整历史。".repeat(3_000))]);
+  await service.scan({}); const n = await next(service);
+  await service.record({ scan_id: n.scan_id, batch_id: n.batch!.id, findings: [], note: "当前批次无可复用偏好" });
+  const pending = (await historyProfile(files)).pending;
+  assert.ok(pending.length > 0);
+  assert.equal((await service.next({ action: "pause", pause_reason: "budget" })).code, "HISTORY_PAUSED");
+  const restarted = new HistoryService(binding, home);
+  assert.equal((await restarted.next({})).code, "HISTORY_PAUSED");
+  assert.equal((await historyStatus(files)).state, "paused");
+  await restarted.scan({ refresh: true });
+  const resumed = (await restarted.next({ action: "resume" })).data as any;
+  assert.equal(resumed.batch.id, pending[0]);
+  assert.equal(resumed.analyzed_batches, 1);
+  assert.equal(resumed.analysis_complete, false);
+});

@@ -3,7 +3,8 @@
 工作目录模式下，每次工具调用都传入 `project`，即当前 Git 工作树的绝对根目录。
 
 - `project_scan { project }`：在 Git 忽略的本地目录建立结构快照。检查覆盖范围与诊断；此步骤不调用模型。重复扫描重新计算文件哈希，复用未变化的提取结果，并按当前文件清单解析导入关系。
-- `project_context { project, query?, paths?, modules?, limit? }`：返回匹配文件、哈希、静态直接导入/使用方、模块概览和模型候选。`paths` 是具体文件或目录前缀，不是通配符。空参数查询概览，关键词和路径用于缩小范围。结果可能截取，需缩小范围并直接阅读源码。`needs_rescan` 表示选中来源、配置或 HEAD 变化；`unindexed_paths` 可能是新增或不支持的文件。复用前核对相关来源状态。
+- `project_context { project, query?, paths?, modules?, limit?, model_offset? }`：返回匹配文件、哈希、静态直接导入/使用方、模块概览和模型候选。路径匹配模型范围及关联文件；关键词也覆盖流程和待确认问题。`paths` 是具体路径，不是通配符。每页至多 5 个模型，有 `next_model_offset` 时保留原筛选并传该值继续查询。文件线索仍需缩小范围并直接阅读源码。`needs_rescan` 表示选中来源、配置或 HEAD 变化；`unindexed_paths` 可能是新增或不支持的文件。
+- 大模型返回 `content_truncated: true` 的摘要及 `details_request`。用 `project_context { project, model_id, model_revision }` 单独读取完整模型，容量受单个模型的 64 KiB 存储上限约束。详情查询仍检查排除范围、修订号和来源新鲜度；模型版本变化时重新查询摘要。不能把摘要当作完整业务理解。
 
 阅读相关代码和文档后，调用 `project_model_record`。标题、摘要、术语解释、流程、规则和问题默认用中文，代码标识和原始引用保持原样：
 

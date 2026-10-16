@@ -1,9 +1,10 @@
 import { ProjectFiles } from "../storage/project-files.js";
 import { matchesPath } from "../knowledge/config.js";
-import { historyProfile } from "./store.js";
+import { historyControl, historyProfile } from "./store.js";
 
 export async function searchHistoryHints(files: ProjectFiles, query: string, paths: string[], limit: number) {
   const profile = await historyProfile(files);
+  const control = await historyControl(files);
   const terms = [...new Intl.Segmenter("zh", { granularity: "word" }).segment(query.toLowerCase())]
     .filter((part) => part.isWordLike).map((part) => part.segment);
   const eligible = profile.hints.filter((hint) => !paths.length || !hint.paths.length || hint.paths.some((pattern) => paths.some((path) => matchesPath(pattern, path))));
@@ -15,7 +16,7 @@ export async function searchHistoryHints(files: ProjectFiles, query: string, pat
   // Match a topic's historical variants together, so an old keyword cannot hide a later correction.
   const ranked = eligible.map((hint) => ({ hint, score: Math.max(scores.get(hint.id) ?? 0, ...hint.potential_conflicts.map((id) => scores.get(id) ?? 0)) }))
     .filter(({ score }) => !terms.length || score > 0).sort((a, b) => b.score - a.score || (b.hint.last_seen ?? "").localeCompare(a.hint.last_seen ?? "") || a.hint.id.localeCompare(b.hint.id));
-  return { state: !profile.manifest ? "not_scanned" : profile.pending.length ? "analysis_pending" : profile.manifest.coverage.source_complete ? "analyzed" : "partial",
+  return { state: !profile.manifest ? "not_scanned" : profile.pending.length ? control.paused ? "paused" : "analysis_pending" : profile.manifest.coverage.source_complete ? "analyzed" : "partial",
     analyzed_batches: profile.analyzed, total_batches: profile.manifest?.batches.length ?? 0,
     hints: ranked.slice(0, Math.min(limit, 5)).map(({ hint }) => ({ ...hint, evidence: hint.evidence.slice(0, 3).map(({ quote, source }) => ({
       quote, session: source.session, line: source.line, timestamp: source.timestamp, message_id: source.id,

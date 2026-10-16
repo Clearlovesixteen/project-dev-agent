@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -156,4 +157,36 @@ test("concurrent first use in different projects cannot replace the winning work
   assert.equal(saved.workspace, await realpath(winner));
   const failed = attempts.find((result) => result.status === "rejected") as PromiseRejectedResult;
   assert.ok(["PLUGIN_SETTINGS_CHANGED", "PLUGIN_SETTINGS_BUSY", "PROJECT_OUTSIDE_WORKSPACE"].includes(failed.reason.code));
+});
+test("配置遗留锁自动恢复，仍存活或无法识别的锁继续保留", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "codex-lock-recovery"); await mkdir(join(home, "project-dev-agent"), { recursive: true });
+  const lock = join(home, "project-dev-agent/settings.lock");
+  const deadPid = Number(execFileSync(process.execPath, ["-p", "process.pid"], { encoding: "utf8" }).trim());
+  assert.throws(() => process.kill(deadPid, 0), { code: "ESRCH" });
+  await writeFile(lock, JSON.stringify({ pid: deadPid }));
+  const settings = new PluginSettings(home);
+  assert.equal((await settings.configure({ workspace: fixture.path, apply: true, expected_revision: null })).outcome, "ok");
+  await assert.rejects(readFile(lock), { code: "ENOENT" });
+  const revision = ((await settings.status()).data as any).revision;
+  const live = JSON.stringify({ pid: process.pid, token: "live-writer" });
+  await writeFile(lock, live);
+  await assert.rejects(settings.configure({ workspace: fixture.path, apply: true, expected_revision: revision }), { code: "PLUGIN_SETTINGS_BUSY" });
+  assert.equal(await readFile(lock, "utf8"), live);
+});
+
+test("并发恢复遗留配置锁时只允许一个写入者成功", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "recovery-race"); await mkdir(join(home, "project-dev-agent"), { recursive: true });
+  const deadPid = Number(execFileSync(process.execPath, ["-p", "process.pid"], { encoding: "utf8" }).trim());
+  await writeFile(join(home, "project-dev-agent/settings.lock"), JSON.stringify({ pid: deadPid }));
+  await writeFile(join(home, "project-dev-agent/settings.lock.recover"), JSON.stringify({ pid: deadPid }));
+  const attempts = await Promise.allSettled([
+    new PluginSettings(home).configure({ workspace: fixture.root, apply: true, expected_revision: null }),
+    new PluginSettings(home).configure({ workspace: fixture.path, apply: true, expected_revision: null }),
+  ]);
+  assert.equal(attempts.filter((result) => result.status === "fulfilled").length, 1);
+  const failure = attempts.find((result) => result.status === "rejected") as PromiseRejectedResult;
+  assert.ok(["PLUGIN_SETTINGS_BUSY", "PLUGIN_SETTINGS_CHANGED"].includes(failure.reason.code));
+  await assert.rejects(readFile(join(home, "project-dev-agent/settings.lock")), { code: "ENOENT" });
 });

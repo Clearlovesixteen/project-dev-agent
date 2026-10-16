@@ -5,6 +5,7 @@ z.config(zhCN());
 
 export const TextSchema = z.string().trim().min(1).max(8_000);
 export const IdSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/);
+export const ReviewSnapshotSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RelativePathSchema = z.string().min(1).max(1_024).refine(
   (value) => !value.startsWith("/") && !value.includes("\\") && !value.includes("\0")
     && !/^[a-zA-Z]:/.test(value) && value.split("/").every((part) => part !== ".." && part !== "." && part !== ""),

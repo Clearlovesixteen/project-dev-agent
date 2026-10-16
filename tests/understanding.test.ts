@@ -132,3 +132,47 @@ test("interrupted or concurrent writers preserve the published map and reject un
   await put(".project-dev/local/understanding/manifest.json", JSON.stringify({ ...before, project: "/other-project" }));
   assert.equal((await service.context({})).code, "PROJECT_MAP_MISMATCH");
 });
+
+test("模型可按关联文件、流程和待确认问题检索", async (t) => {
+  const { service, input } = await setup(t);
+  await service.scan({});
+  const model = { ...await input(), flows: [{ name: "refundqueue", steps: ["检查状态后进入队列"] }], questions: ["谁负责 settlementowner？"] };
+  assert.equal((await service.record(model)).outcome, "ok");
+  for (const query of [{ paths: ["src/shared/status.ts"] }, { query: "refundqueue" }, { query: "settlementowner" }]) {
+    assert.equal(((await service.context(query)).data as any).models[0]?.id, model.id);
+  }
+});
+
+test("大模型返回摘要且可读取完整详情，后续模型不会被挤掉", async (t) => {
+  const { service, input, files, put } = await setup(t);
+  await service.scan({});
+  const model = { ...await input(), id: "a-large", flows: Array.from({ length: 5 }, (_, i) => ({ name: `流程${i}`, steps: Array(4).fill("分析业务边界".repeat(116)) })) };
+  assert.equal((await service.record(model)).outcome, "ok");
+  assert.ok(Buffer.byteLength(JSON.stringify((await models(files))[0])) > 36_000);
+  for (let i = 0; i < 6; i++) assert.equal((await service.record({ ...await input(), id: `other-${i}` })).outcome, "ok");
+  const page = (await service.context({ paths: ["src/pages/orders"] })).data as any;
+  assert.equal(page.models.length, 5);
+  assert.equal(page.models[0].id, model.id);
+  assert.equal(page.models[0].content_truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(page.models)) <= 36_000);
+  assert.equal(page.next_model_offset, 5);
+  const detail = (await service.context(page.models[0].details_request)).data as any;
+  assert.deepEqual(detail.models[0].flows, model.flows);
+  assert.equal(detail.models[0].effective, false);
+  const tail = (await service.context({ paths: ["src/pages/orders"], model_offset: page.next_model_offset })).data as any;
+  assert.equal(tail.models.length, 2); assert.equal(tail.next_model_offset, null);
+  assert.equal((await service.context({ model_id: model.id, model_revision: 99 })).code, "PROJECT_MODEL_REVISION_CONFLICT");
+  await put(".project-dev/project.yaml", 'schema_version: 1\nexclude_paths:\n  - src/shared/status.ts\n');
+  assert.equal((await service.context({ model_id: model.id })).code, "PROJECT_MODEL_NOT_FOUND");
+});
+
+test("历史读取异常不会丢掉已获取的业务模型", async (t) => {
+  const { service, input, binding, put } = await setup(t);
+  await service.scan({}); await service.record(await input());
+  await put(".project-dev/local/history/manifest.json", "{invalid");
+  const result = await new KnowledgeService(binding).search({ paths: ["src/pages/orders"] });
+  assert.equal(result.outcome, "incomplete");
+  assert.equal((result.data as any).understanding.models[0].id, "order-state");
+  assert.equal((result.data as any).history.state, "unavailable");
+  assert.equal(result.diagnostics[0]?.code, "HISTORY_HINTS_UNAVAILABLE");
+});

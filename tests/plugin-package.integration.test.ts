@@ -32,7 +32,7 @@ test("release inventory matches bundled assets and carries no external dependenc
   assert.deepEqual(mcp.mcpServers.project_dev.args, ["${PLUGIN_ROOT}/runtime/cli.mjs", "serve", "--plugin"]);
 });
 
-test("standalone plugin runs without source or node_modules and preserves task/configuration across relocation", { timeout: 30_000 }, async (t) => {
+test("standalone plugin runs without source or node_modules and preserves task/configuration across relocation", { timeout: 120_000 }, async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "codex"); await mkdir(home);
   const installed = join(fixture.root, "plugin v1"); await cp(packageRoot, installed, { recursive: true });
@@ -91,6 +91,9 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const next = (await call(first, "history_next", { project: fixture.path })).data as {
     scan_id: string; batch: { id: string; messages: { id: string }[] };
   };
+  assert.equal((await call(first, "history_next", { project: fixture.path, action: "pause", pause_reason: "budget" })).code, "HISTORY_PAUSED");
+  const resumed = (await call(first, "history_next", { project: fixture.path, action: "resume" })).data as any;
+  assert.equal(resumed.batch.id, next.batch.id);
   assert.equal((await call(first, "history_record", {
     project: fixture.path, scan_id: next.scan_id, batch_id: next.batch.id,
     findings: [{ topic: "forms", title: "表单封装", type: "code_convention", audience: "project",
@@ -114,12 +117,33 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   assert.equal(restored.models[0]?.id, "runtime-service");
   assert.equal(restored.models[0]?.revision, 1);
   assert.equal(restored.models[0]?.effective, false);
+  const detail = (await call(second, "project_context", { project: fixture.path, model_id: "runtime-service", model_revision: 1 })).data as any;
+  assert.equal(detail.models[0].sources[0].sha256, source.sha256);
   const knowledge = (await call(second, "knowledge_search", { project: fixture.path, query: "表单" })).data as {
     history: { hints: { effective: boolean }[] };
   };
   assert.equal(knowledge.history.hints.length, 1);
   assert.equal(knowledge.history.hints[0]?.effective, false);
   assert.equal(((await call(second, "history_next", { project: fixture.path })).data as { batch: unknown }).batch, null);
+  const batch = (await call(second, "history_next", { project: fixture.path, batch_id: next.batch.id })).data as any;
+  assert.equal(batch.analysis.revision, 1);
+  assert.equal((await call(second, "history_record", { project: fixture.path, scan_id: batch.scan_id, batch_id: next.batch.id,
+    expected_revision: 1, revision_reason: "补充封装可用的条件", note: "核对后缩小范围",
+    findings: batch.analysis.findings.map((finding: any) => ({ ...finding, rule: "现有封装满足需求时，表单优先复用项目封装" })) })).outcome, "ok");
   const checked = await call(second, "task_check", { project: fixture.path });
   assert.equal(TaskSchema.parse((checked.data as { recorded_task: unknown }).recorded_task).id, task.id);
+  const readme = join(fixture.path, "README.md"); await writeFile(readme, "插件协议审查样例\n");
+  const snapshot = ((await call(second, "task_check", { project: fixture.path })).data as any).review_snapshot;
+  const evidence = [{ kind: "manual", reference: "README.md", summary: "已核对样例说明" }];
+  const review = { project: fixture.path, task_id: task.id, expected_revision: 0, review_snapshot: snapshot,
+    change_items: [{ id: "readme", target_path: "README.md", action: "modify", requirement: "补充样例", rationale: "验证插件审查流程",
+      sources: [{ kind: "code", reference: "README.md" }], status: "checked", reviewed_by: "fixture", evidence }],
+    acceptance_criteria: [{ ...task.acceptance_criteria[0], status: "checked", reviewed_by: "fixture", evidence }] };
+  assert.equal((await call(second, "task_update", review)).outcome, "ok");
+  await writeFile(readme, "后续修改，需要重新审查\n");
+  assert.equal((await call(second, "task_check", { project: fixture.path })).code, "REVIEW_STALE");
+  assert.equal((await call(second, "task_update", { project: fixture.path, task_id: task.id, expected_revision: 1, phase: "closed" })).code, "REVIEW_STALE");
+  const current = ((await call(second, "task_check", { project: fixture.path })).data as any).review_snapshot;
+  assert.equal((await call(second, "task_update", { ...review, expected_revision: 1, review_snapshot: current })).outcome, "ok");
+  assert.equal((await call(second, "task_update", { project: fixture.path, task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
 });

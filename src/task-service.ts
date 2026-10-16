@@ -1,13 +1,36 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError } from "./domain/error.js";
-import { TaskSchema } from "./domain/task.js";
+import { TaskSchema, type Task } from "./domain/task.js";
 import { ToolResultSchema, type ToolResult } from "./domain/result.js";
 import { assertBaseline, assertClean, assertStateIgnored, bindWorktree, changedPaths, type WorktreeBinding } from "./git/index.js";
 import { TaskStore } from "./storage/task-store.js";
 import { TaskCheckInputSchema, TaskOpenInputSchema, TaskUpdateInputSchema } from "./tools/inputs.js";
 import { ProjectFiles } from "./storage/project-files.js";
 import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
+import { reviewSnapshot } from "./git/review-snapshot.js";
+
+/** 单项指纹由服务写入，不能通过回传或伪造单项字段刷新旧证据。 */
+function stampReviews<T extends { id: string; review_snapshot?: string | undefined }>(incoming: T[] | undefined, previous: T[], complete: (entry: T) => boolean, token?: string): T[] {
+  if (!incoming) return previous;
+  const content = ({ review_snapshot: _snapshot, ...entry }: T) => entry;
+  return incoming.map((entry) => {
+    const clean = content(entry);
+    if (!complete(entry)) return clean as T;
+    if (token) return { ...clean, review_snapshot: token } as T;
+    const prior = previous.find((old) => old.id === entry.id);
+    if (prior && complete(prior) && JSON.stringify(content(prior)) === JSON.stringify(clean)) return prior;
+    throw new AppError("REVIEW_SNAPSHOT_REQUIRED", "记录完成的审查或验证前，请用 task_check 获取 review_snapshot，在该版本上核验后将指纹传入 task_update");
+  });
+}
+
+function staleReviews(task: Task, snapshot: string) {
+  return {
+    change_items: task.change_items.filter((item) => item.status !== "pending" && item.review_snapshot !== snapshot).map((item) => item.id),
+    acceptance_criteria: task.acceptance_criteria.filter((item) => item.status === "checked" && item.review_snapshot !== snapshot).map((item) => item.id),
+    validations: task.validations.filter((item) => item.outcome === "passed" && item.review_snapshot !== snapshot).map((item) => item.id),
+  };
+}
 
 /** 维护任务生命周期，将 Git 实际改动与显式记录的验收和审查证据关联。 */
 export class TaskService {
@@ -72,7 +95,7 @@ export class TaskService {
         const unexpected = (await changedPaths(this.binding, prior.baseline_head)).filter((path) => !expected.has(path));
         if (unexpected.length > 0) throw new AppError("UNREVIEWED_CHANGES", `关闭任务前请补充并审查清单之外的改动：${unexpected.join(", ")}`);
       }
-      const saved = await this.store.update(request.task_id, request.expected_revision, (current) => {
+      const saved = await this.store.update(request.task_id, request.expected_revision, async (current) => {
         // 在存储锁内基于最新记录检查集合，防止替换时抹去此前的验收或纠正记录。
         const collections = ["change_items", "acceptance_criteria", "validations", "corrections", "knowledge_versions"] as const;
         for (const key of collections) {
@@ -81,16 +104,23 @@ export class TaskService {
             throw new AppError("RECORD_REMOVAL_NOT_ALLOWED", `请保留已有 ${key} 记录，通过明确修订或处理来更新`);
           }
         }
-        return TaskSchema.parse({
+        const snapshot = request.phase === "aborted" ? undefined : await reviewSnapshot(this.binding, current.baseline_head);
+        if (request.review_snapshot && request.review_snapshot !== snapshot?.hash) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "代码已不同于审查或验证时的快照，请重新读取 task_check 并执行受影响的检查");
+        const next = TaskSchema.parse({
           ...current,
-          ...(request.change_items !== undefined ? { change_items: request.change_items } : {}),
-          ...(request.acceptance_criteria !== undefined ? { acceptance_criteria: request.acceptance_criteria } : {}),
-          ...(request.validations !== undefined ? { validations: request.validations } : {}),
+          change_items: stampReviews(request.change_items, current.change_items, (item) => item.status !== "pending", request.review_snapshot),
+          acceptance_criteria: stampReviews(request.acceptance_criteria, current.acceptance_criteria, (item) => item.status === "checked", request.review_snapshot),
+          validations: stampReviews(request.validations, current.validations, (item) => item.outcome !== "not_run", request.review_snapshot),
           ...(request.corrections !== undefined ? { corrections: request.corrections } : {}),
           ...(request.knowledge_versions !== undefined ? { knowledge_versions: request.knowledge_versions } : {}),
           ...(request.phase !== undefined ? { phase: request.phase } : {}),
           ...(request.abort_reason !== undefined ? { abort_reason: request.abort_reason } : {}),
         });
+        if (next.phase === "closed" && snapshot) {
+          if (snapshot.paths.some((path) => !next.change_items.some((item) => item.target_path === path))) throw new AppError("UNREVIEWED_CHANGES", "关闭前出现清单之外的改动，请补充审查");
+          if (Object.values(staleReviews(next, snapshot.hash)).some((ids) => ids.length)) throw new AppError("REVIEW_STALE", "代码已变化或旧记录尚未绑定代码快照，请重新审查和验证后关闭任务");
+        }
+        return next;
       });
       return { outcome: "ok", code: "TASK_UPDATED", data: saved, diagnostics: [] };
     });
@@ -109,9 +139,11 @@ export class TaskService {
           diagnostics: [{ code: "TASK_INACTIVE", message: "该任务已结束，其记录仅供历史查询；当前工作树的改动不会归入此任务。" }] };
       }
       let changed: string[];
+      let snapshot: string;
       try {
         await assertBaseline(this.binding, task);
-        changed = await changedPaths(this.binding, task.baseline_head);
+        const current = await reviewSnapshot(this.binding, task.baseline_head);
+        changed = current.paths; snapshot = current.hash;
       } catch (error: unknown) {
         // 无法比较基线时仍返回原任务，便于恢复或中止；不得宣称检查通过。
         const code = error instanceof AppError ? error.code : "BASELINE_UNAVAILABLE";
@@ -124,20 +156,24 @@ export class TaskService {
       const validations = task.validations.filter((record) => record.outcome !== "passed").map((record) => record.id);
       const expected = new Set(task.change_items.map((item) => item.target_path));
       const unexpected = changed.filter((path) => !expected.has(path));
+      const stale = staleReviews(task, snapshot), outdated = Object.values(stale).some((ids) => ids.length);
       // 这里只判断记录和文件覆盖是否齐全，不能独立判断证据是否足以证明业务正确。
-      const reviewed = task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0;
+      const reviewed = task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
       return {
-        outcome: reviewed ? "ok" : "incomplete", code: reviewed ? "CHECKLIST_REVIEWED" : "REVIEW_INCOMPLETE",
+        outcome: reviewed ? "ok" : "incomplete", code: reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : "REVIEW_INCOMPLETE",
         data: {
           task_id, revision: task.revision, phase: task.phase, baseline_head: task.baseline_head,
           recorded_task: task,
           changed_paths: changed, unexpected_changes: unexpected, pending_items: pending,
           pending_acceptance: acceptance, unresolved_validations: validations,
+          review_snapshot: snapshot, stale_evidence: stale,
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
-          limitation: "审查记录和文件覆盖情况不能独立证明业务实现正确。",
+          limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
-        diagnostics: reviewed ? [] : [{ code: "REVIEW_INCOMPLETE", message: "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
+        diagnostics: reviewed ? [] : [{ code: outdated ? "REVIEW_STALE" : "REVIEW_INCOMPLETE", message: outdated
+          ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，再通过 task_update 提交受影响记录。"
+          : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };
     });
   }

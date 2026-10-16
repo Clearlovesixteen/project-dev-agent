@@ -24,7 +24,11 @@ export const MapSchema = z.object({
 export type ProjectMap = z.infer<typeof MapSchema>;
 export const ScanInput = z.object({}).strict();
 export const ContextInput = z.object({ query: z.string().trim().max(2_000).default(""), paths: z.array(ConcretePath).max(30).default([]),
-  modules: z.array(z.string().max(200)).max(20).default([]), limit: z.number().int().min(1).max(20).default(10) }).strict();
+  modules: z.array(z.string().max(200)).max(20).default([]), limit: z.number().int().min(1).max(20).default(10),
+  model_offset: z.number().int().min(0).max(200).default(0).describe("模型列表的分页起点；使用上次返回的 next_model_offset"),
+  model_id: IdSchema.optional().describe("按 ID 单独读取一个模型的完整详情，仍执行来源排除和版本核验"),
+  model_revision: z.number().int().positive().optional().describe("读取详情时核对摘要中的修订号，防止两次查询间内容变化"),
+}).strict();
 export const ModelContent = z.object({
   id: IdSchema, module: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200),
   scope: z.array(ConcretePath).min(1).max(10), summary: ShortText,

@@ -38,11 +38,18 @@ export const FindingSchema = z.object({
 export type HistoryFinding = z.infer<typeof FindingSchema>;
 export const AnalysisSchema = z.object({
   batch_id: HashSchema, findings: z.array(FindingSchema).max(30), note: z.string().trim().min(1).max(2_000),
-  analyzed_at: z.string(),
+  analyzed_at: z.string(), revision: z.number().int().positive().default(1), revision_reason: TextSchema.optional(),
 }).strict();
 export const HistoryScanInputSchema = z.object({ refresh: z.boolean().default(false) }).strict();
-export const HistoryNextInputSchema = z.object({}).strict();
+export const HistoryControlSchema = z.object({ paused: z.boolean(), pause_reason: z.enum(["user", "budget"]), updated_at: z.string() }).strict();
+export const HistoryNextInputSchema = z.object({
+  batch_id: HashSchema.optional().describe("读取指定批次及其当前分析，用于核对或修订；省略时读取下一个待分析批次"),
+  action: z.enum(["next", "pause", "resume"]).default("next").describe("读取、暂停或恢复历史分析；暂停不代表分析完成"),
+  pause_reason: z.enum(["user", "budget"]).default("user").describe("user 表示用户暂停；budget 表示本轮分析预算用完，可在下一轮继续"),
+}).strict();
 export const HistoryRecordInputSchema = z.object({
   scan_id: HashSchema, batch_id: HashSchema, findings: z.array(FindingSchema).max(30),
   note: z.string().trim().min(1).max(2_000),
+  expected_revision: z.number().int().nonnegative().optional().describe("修订已有批次时必须传当前修订号；首次保存可省略或传 0"),
+  revision_reason: TextSchema.optional().describe("修订或停用候选时必须说明原因；findings 是该批次修订后的完整列表"),
 }).strict();

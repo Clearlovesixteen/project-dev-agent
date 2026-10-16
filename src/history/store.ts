@@ -3,12 +3,13 @@ import { unlink } from "node:fs/promises";
 import { AppError } from "../domain/error.js";
 import { hasCode, ProjectFiles } from "../storage/project-files.js";
 import { digest } from "../knowledge/document.js";
-import { AnalysisSchema, BatchSchema, HISTORY_DIR, ManifestSchema, type HistoryFinding, type HistoryManifest, type HistoryMessage } from "./contracts.js";
+import { AnalysisSchema, BatchSchema, HISTORY_DIR, HistoryControlSchema, ManifestSchema, type HistoryFinding, type HistoryManifest, type HistoryMessage } from "./contracts.js";
 
 export interface HistoryHint extends Omit<HistoryFinding, "evidence"> {
   id: string; effective: false; status: "candidate"; evidence: (HistoryFinding["evidence"][number] & { source: HistoryMessage })[];
   session_count: number; potential_conflicts: string[];
   first_seen: string | null; last_seen: string | null;
+  analysis_refs: { batch_id: string; revision: number }[];
 }
 export async function optional(files: ProjectFiles, path: string): Promise<string | undefined> {
   try { return await files.read(path, 65_536); } catch (error) { if (hasCode(error, "ENOENT")) return undefined; throw error; }
@@ -76,7 +77,9 @@ export async function historyProfile(files: ProjectFiles) {
       const prior = combined.get(key);
       if (prior) {
         for (const item of evidence) if (!prior.evidence.some((old) => old.message_id === item.message_id && old.quote === item.quote)) prior.evidence.push(item);
-      } else combined.set(key, { ...finding, id: key, effective: false, status: "candidate", evidence, session_count: 0, potential_conflicts: [], first_seen: null, last_seen: null });
+        if (!prior.analysis_refs.some((entry) => entry.batch_id === id)) prior.analysis_refs.push({ batch_id: id, revision: analysis.revision });
+      } else combined.set(key, { ...finding, id: key, effective: false, status: "candidate", evidence, session_count: 0, potential_conflicts: [], first_seen: null, last_seen: null,
+        analysis_refs: [{ batch_id: id, revision: analysis.revision }] });
     }
   }
   const hints = [...combined.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -94,13 +97,22 @@ export async function historyProfile(files: ProjectFiles) {
   return { manifest, analyzed, pending, hints };
 }
 
+export async function historyControl(files: ProjectFiles) {
+  const raw = await optional(files, `${HISTORY_DIR}/control.json`);
+  return raw ? HistoryControlSchema.parse(JSON.parse(raw)) : { paused: false, pause_reason: "user" as const, updated_at: "" };
+}
+
 export async function historyStatus(files: ProjectFiles) {
   const profile = await historyProfile(files);
-  return { state: !profile.manifest ? "not_scanned" : profile.pending.length ? "analysis_pending" : profile.manifest.coverage.source_complete ? "analyzed" : "partial",
+  const control = await historyControl(files);
+  return { state: !profile.manifest ? "not_scanned" : profile.pending.length ? control.paused ? "paused" : "analysis_pending" : profile.manifest.coverage.source_complete ? "analyzed" : "partial",
     scan_id: profile.manifest?.scan_id ?? null, total_batches: profile.manifest?.batches.length ?? 0,
     analyzed_batches: profile.analyzed, pending_batches: profile.pending.length, candidate_count: profile.hints.length,
+    paused: control.paused, pause_reason: control.paused ? control.pause_reason : null,
+    analysis_complete: !!profile.manifest && profile.pending.length === 0,
     report: profile.manifest ? `${HISTORY_DIR}/report.html` : null,
     next_step: !profile.manifest ? "首次使用时，请运行 history_scan 发现项目历史对话。"
-      : profile.pending.length ? "请读取 history_next，并通过 history_record 保存语义分析结果，直到所有批次分析完成。"
+      : profile.pending.length ? control.paused ? "历史分析已暂停，仍有待处理批次。调用 history_next 并传 action: resume 后从断点继续；当前需求可依据现有资料开发。"
+        : "请读取 history_next，并通过 history_record 保存当前批次。日常开发可分轮完成全量分析；需要暂停时调用 history_next 并传 action: pause，准确说明剩余批次。"
       : "历史候选供审查参考，尚未确认为团队规则。重新扫描可发现新保存的对话。" };
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpath, unlink } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -9,6 +9,7 @@ import { ProjectFiles, hasCode } from "./storage/project-files.js";
 import { VERSION } from "./version.js";
 import { Workspace } from "./workspace.js";
 import { prepareProject, ProjectPrepareInputSchema } from "./personal-setup.js";
+import { acquireFileLock } from "./storage/file-lock.js";
 
 const FILE = "project-dev-agent/settings.json";
 const LOCK = "project-dev-agent/settings.lock";
@@ -73,10 +74,7 @@ export class PluginSettings {
     }
     if (input.expected_revision === undefined) throw new AppError("PLUGIN_REVISION_REQUIRED", "请先预览，再传入 expected_revision；首次设置传 null");
     await files.directory("project-dev-agent");
-    try { await files.create(LOCK, JSON.stringify({ pid: process.pid })); } catch (error) {
-      if (error instanceof AppError && error.code === "FILE_EXISTS") throw new AppError("PLUGIN_SETTINGS_BUSY", "其他进程正在修改设置，请完成后重试。疑似遗留的 settings.lock 需检查后再处理");
-      throw error;
-    }
+    const release = await acquireFileLock(files, LOCK, "PLUGIN_SETTINGS_BUSY");
     try {
       // 必须拿到锁后重读；预览与执行之间，其他进程可能已经修改配置。
       const current = await this.read(files);
@@ -91,7 +89,7 @@ export class PluginSettings {
         else await files.create(FILE, next);
       }
       return await this.status();
-    } finally { await unlink(await files.path(LOCK)); }
+    } finally { await release(); }
   }
 
   /** 首次开发初始化当前仓库；已有配置时只按原范围绑定，不能自动扩展或替换。 */

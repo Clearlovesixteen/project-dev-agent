@@ -112,7 +112,7 @@ export class TaskStore {
     return active;
   }
 
-  async update(id: string, expectedRevision: number, mutator: (current: Task) => Task): Promise<Task> {
+  async update(id: string, expectedRevision: number, mutator: (current: Task) => Task | Promise<Task>): Promise<Task> {
     const safeId = taskId(id);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new AppError("REVISION_CONFLICT", "预期修订号必须是非负安全整数");
@@ -125,7 +125,7 @@ export class TaskStore {
       if (current.revision !== expectedRevision) {
         throw new AppError("REVISION_CONFLICT", `预期修订号为 ${expectedRevision}，实际为 ${current.revision}`);
       }
-      const candidate = parseTask(mutator(structuredClone(current)));
+      const candidate = parseTask(await mutator(structuredClone(current)));
       for (const field of IMMUTABLE_FIELDS) {
         if (candidate[field] !== current[field]) {
           throw new AppError("IMMUTABLE_TASK_FIELD", `任务字段 ${field} 不允许修改`);

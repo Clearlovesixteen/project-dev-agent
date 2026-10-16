@@ -54,7 +54,8 @@ export class KnowledgeService {
       try {
         return { ...result, data: { ...(result.data as object), history: await searchHistoryHints(this.files, request.query, paths, request.limit), understanding } };
       } catch (error) {
-        return { ...result, outcome: "incomplete", diagnostics: [...result.diagnostics,
+        return { ...result, outcome: "incomplete", data: { ...(result.data as object), understanding,
+          history: { state: "unavailable", hints: [], message: error instanceof Error ? error.message : String(error) } }, diagnostics: [...result.diagnostics,
           { code: "HISTORY_HINTS_UNAVAILABLE", message: error instanceof Error ? error.message : String(error) }] };
       }
     });

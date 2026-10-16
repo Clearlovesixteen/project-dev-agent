@@ -5,6 +5,7 @@ import { gitLine, readGit } from "../git/command.js";
 import { ContextInput, type MapFile, type SavedModel } from "./contracts.js";
 import { mapFiles, models, readMap } from "./store.js";
 import { excluded, mapConfigHash, safeSource } from "./scan.js";
+import { AppError } from "../domain/error.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -59,22 +60,45 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     const bytes = Buffer.byteLength(JSON.stringify(result)); if (fileBytes + bytes > 40_000) break;
     fileResults.push(result); fileBytes += bytes;
   }
-  const modelCandidates = (await models(files)).filter((model) =>
-    model.sources.every((source) => !excluded(source.path, config)) && model.related_paths.every((path) => !excluded(path, config))
-    && (!paths.length || model.scope.some((scope) => paths.some((path) => intersects(scope, path)))));
-  const rankedModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
-    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules])) }))
-    .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
-    .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
-  const modelResults: (SavedModel & { status: string; effective: false; source_states: { path: string; state: string }[] })[] = [];
-  let modelBytes = 0;
-  for (const { model } of rankedModels.slice(0, 5)) {
+  const eligibleModels = (await models(files)).filter((model) =>
+    model.sources.every((source) => !excluded(source.path, config)) && model.related_paths.every((path) => !excluded(path, config)));
+  const materialize = async (model: SavedModel) => {
     const source_states = [];
     for (const source of model.related_versions) source_states.push({ path: source.path, state: await check(source.path, source.sha256) });
-    const result = { ...model, status: source_states.every((source) => source.state === "current") ? "candidate" : "needs_review", effective: false as const, source_states };
-    const size = Buffer.byteLength(JSON.stringify(result));
-    if (modelBytes + size > 36_000) break;
-    modelResults.push(result); modelBytes += size;
+    return { ...model, status: source_states.every((source) => source.state === "current") ? "candidate" : "needs_review", effective: false as const, source_states };
+  };
+  // 详情单独返回，容量由模型存储的 64 KiB 上限约束；不能借 ID 绕过来源排除规则。
+  if (request.model_id) {
+    const model = eligibleModels.find((entry) => entry.id === request.model_id);
+    if (!model) throw new AppError("PROJECT_MODEL_NOT_FOUND", "未找到可访问的业务模型，请重新查询当前模型列表");
+    if (request.model_revision !== undefined && model.revision !== request.model_revision) throw new AppError("PROJECT_MODEL_REVISION_CONFLICT", "模型已更新，请读取最新摘要后再获取详情");
+    const detail = await materialize(model);
+    const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head
+      || await mapConfigHash(files, config) !== map.config_hash || detail.status === "needs_review";
+    return { state: stale ? "needs_rescan" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+      files: [], modules: [], models: [detail], models_truncated: false, next_model_offset: null,
+      report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
+  }
+  const modelCandidates = eligibleModels.filter((model) => !paths.length
+    || [...model.scope, ...model.related_paths, ...model.sources.map((source) => source.path)].some((candidate) => paths.some((path) => intersects(candidate, path))));
+  const rankedModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
+    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths])) }))
+    .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
+    .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
+  const modelResults: Record<string, unknown>[] = [];
+  let modelBytes = 2;
+  const page = rankedModels.slice(request.model_offset, request.model_offset + 5);
+  for (const { model } of page) {
+    const full = await materialize(model);
+    const details_request = { model_id: model.id, model_revision: model.revision };
+    // 给本页后续摘要预留容量，避免一个大模型截断整个列表，也不截掉业务流程的中间文本。
+    const preview = { id: model.id, revision: model.revision, module: model.module, title: model.title,
+      summary: model.summary.slice(0, 400), status: full.status, effective: false, content_truncated: true,
+      related_path_count: model.related_paths.length, details_request };
+    const detail = { ...full, content_truncated: false, details_request };
+    const remaining = page.length - modelResults.length - 1;
+    const result = modelBytes + 1 + Buffer.byteLength(JSON.stringify(detail)) + remaining * 4_096 <= 36_000 ? detail : preview;
+    modelResults.push(result); modelBytes += 1 + Buffer.byteLength(JSON.stringify(result));
   }
   const head = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout);
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
@@ -84,7 +108,8 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     files_truncated: matched.length > request.limit || relatedTotal > 10 || fileResults.length < selected.length,
     unindexed_paths: paths.filter((path) => !entries.some((entry) => intersects(path, entry.path))),
     modules: modules.slice(0, 40), modules_truncated: modules.length > 40,
-    models: modelResults, models_truncated: rankedModels.length > modelResults.length,
+    models: modelResults, models_truncated: rankedModels.length > request.model_offset + modelResults.length || modelResults.some((model) => model.content_truncated),
+    next_model_offset: rankedModels.length > request.model_offset + modelResults.length ? request.model_offset + modelResults.length : null,
     report: ".project-dev/local/understanding/report.html",
     limitations: "结构和字面导入关系用于定位代码，不能覆盖完整的语法树、运行时关系或业务模型。仅对选中来源实时核验；新增文件需要重新扫描。作出判断前，请阅读相关源码、实际安装的组件版本和业务文档。候选模型未经规则确认，也不构成操作授权。" };
 }

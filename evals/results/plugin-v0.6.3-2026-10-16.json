@@ -1,0 +1,56 @@
+{
+  "version": "0.6.3",
+  "verified_at": "2026-10-16T04:41:50.727667+00:00",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 114,
+      "pass": 114,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 114,
+      "pass": 114,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 114,
+      "pass": 114,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "regressions": [
+    "关联文件、流程及待确认问题可检索业务模型",
+    "大模型摘要与按修订号读取完整详情、模型列表分页",
+    "历史习惯修订、停用、旧版归档及冲突检查",
+    "历史异常时保留业务模型结果",
+    "代码变化使旧证据失效，阻止沿用旧结果关闭任务",
+    "遗留配置锁恢复及并发保护",
+    "历史暂停、重启续跑及真实进度",
+    "旧版历史分析与任务记录兼容"
+  ],
+  "native_upgrade": {
+    "node": "18.19.1",
+    "from_version": "0.6.2",
+    "to_version": "0.6.3",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true,
+    "result": "passed",
+    "workspace_and_task_preserved": true,
+    "marketplace_refresh_updated_installed_version": true
+  },
+  "plugin_runtime_sha256": "30dbb67ff42d0595f368979f38d242e841c178c87628d93b9ae1017b6a664325",
+  "skill_validation": "passed",
+  "documentation_links_checked": 21
+}

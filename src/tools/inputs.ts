@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IdSchema, TextSchema } from "../domain/common.js";
+import { IdSchema, ReviewSnapshotSchema, TextSchema } from "../domain/common.js";
 import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, ValidationRecordSchema } from "../domain/task.js";
 
 // 工具只接收业务输入；任务 ID、Git 基线、时间和初始状态由服务生成，不能由调用方伪造。
@@ -13,6 +13,7 @@ export const TaskOpenInputSchema = z.object({
 export const TaskUpdateInputSchema = z.object({
   task_id: IdSchema,
   expected_revision: z.number().int().nonnegative(),
+  review_snapshot: ReviewSnapshotSchema.optional().describe("审查和执行验证前由 task_check 获取的代码指纹；提交完成的审查或验证记录时必须传入，期间代码变化将拒绝写入"),
   change_items: z.array(ChangeItemSchema).max(500).optional(),
   acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100).optional(),
   validations: z.array(ValidationRecordSchema).max(100).optional(),

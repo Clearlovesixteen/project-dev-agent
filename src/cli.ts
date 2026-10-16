@@ -47,12 +47,17 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
     建立或刷新有范围上限的结构索引和 HTML 报告，不修改业务代码。
   project context --project <工作区绝对路径> [--query <关键词>] [--path <相对路径>]
     查询参考文件、直接导入和使用方，以及经过来源核验的模块理解候选。
+    --model-id <模型 ID> [--model-revision <修订号>] 读取完整详情；--model-offset <起点> 翻页。
   model record --project <工作区绝对路径> --file <模型 JSON 文件>
     保存有明确范围的业务模型候选，核验源码引用并保留修订版本。
   history scan --project <工作区绝对路径> [--refresh] [--codex-home <目录>]
     发现本地项目对话文本，保留覆盖情况和增量分析进度。
-  history next --project <工作区绝对路径>
-    读取下一批文本，供 Codex 进行语义分析。
+  history next --project <工作区绝对路径> [--batch-id <批次 ID>]
+    读取下一批文本或指定批次的当前分析，供 Codex 进行分析或修订。
+  history pause --project <工作区绝对路径>
+    暂停历史分析，保留已分析和待处理进度。
+  history resume --project <工作区绝对路径>
+    恢复历史分析并返回下一批待处理文本。
   history record --project <工作区绝对路径> --file <分析 JSON 文件>
     核验用户原话并保存批次分析，更新 HTML 报告。
   history propose --project <工作区绝对路径> --id <候选 ID>
@@ -108,6 +113,10 @@ async function main(): Promise<void> {
       query: { type: "string" },
       path: { type: "string" },
       id: { type: "string" },
+      "batch-id": { type: "string" },
+      "model-id": { type: "string" },
+      "model-revision": { type: "string" },
+      "model-offset": { type: "string" },
       refresh: { type: "boolean", default: false },
       "codex-home": { type: "string" },
     },
@@ -168,7 +177,9 @@ async function main(): Promise<void> {
     const service = new UnderstandingService(await bindWorktree(values.project));
     let result;
     if (positionals[1] === "scan") result = await service.scan({});
-    else if (positionals[1] === "context") result = await service.context({ query: values.query ?? "", paths: values.path ? [values.path] : [] });
+    else if (positionals[1] === "context") result = await service.context({ query: values.query ?? "", paths: values.path ? [values.path] : [],
+      model_id: values["model-id"], model_revision: values["model-revision"] === undefined ? undefined : Number(values["model-revision"]),
+      model_offset: values["model-offset"] === undefined ? 0 : Number(values["model-offset"]) });
     else if (values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
     else throw new Error("model record 需要 --file 参数");
     print(result); if (result.outcome === "error") process.exitCode = 1; return;
@@ -178,10 +189,11 @@ async function main(): Promise<void> {
     const service = new HistoryService(await bindWorktree(values.project), values["codex-home"]);
     let result;
     if (positionals[1] === "scan") result = await service.scan({ refresh: values.refresh });
-    else if (positionals[1] === "next") result = await service.next({});
+    else if (positionals[1] === "next") result = await service.next({ batch_id: values["batch-id"] });
+    else if (["pause", "resume"].includes(positionals[1]!)) result = await service.next({ action: positionals[1] });
     else if (positionals[1] === "record" && values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
     else if (positionals[1] === "propose" && values.id) result = await service.propose(values.id);
-    else throw new Error("请使用 history scan、history next、history record --file 或 history propose --id");
+    else throw new Error("请使用 history scan、history next、history pause/resume、history record --file 或 history propose --id");
     print(result);
     if (result.outcome === "error") process.exitCode = 1;
     return;
