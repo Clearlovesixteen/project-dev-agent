@@ -144,6 +144,7 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   assert.equal((await call(second, "task_check", { project: fixture.path })).code, "REVIEW_STALE");
   assert.equal((await call(second, "task_update", { project: fixture.path, task_id: task.id, expected_revision: 1, phase: "closed" })).code, "REVIEW_STALE");
   const current = ((await call(second, "task_check", { project: fixture.path })).data as any).review_snapshot;
-  assert.equal((await call(second, "task_update", { ...review, expected_revision: 1, review_snapshot: current })).outcome, "ok");
+  assert.equal((await call(second, "task_update", { ...review, expected_revision: 1, review_snapshot: current,
+    reviewed_ids: { change_items: ["readme"], acceptance_criteria: ["persist"] } })).outcome, "ok");
   assert.equal((await call(second, "task_update", { project: fixture.path, task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
 });

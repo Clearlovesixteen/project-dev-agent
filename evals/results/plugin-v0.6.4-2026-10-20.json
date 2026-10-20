@@ -1,0 +1,58 @@
+{
+  "version": "0.6.4",
+  "verified_on": "2026-10-20",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 121,
+      "pass": 121,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 121,
+      "pass": 121,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 121,
+      "pass": 121,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "regressions": [
+    "局部复核只刷新 reviewed_ids 中明确选择的条目，完整回传保留其他旧证据",
+    "重复、不存在、待处理 ID 及缺失指纹、缺失集合拒绝写入",
+    "对话追加、归档保留原批次的纠正与停用决定，仅新增消息待分析",
+    "原话改写需要重新分析，不沿用旧证据",
+    "历史与业务模型并发恢复遗留锁时仅允许一个写入者",
+    "旧版活跃任务的证据升级后需逐项复核，不能批量刷新",
+    "旧版手动 Skill 升级与原生 MCP 真实调用"
+  ],
+  "native_upgrade": {
+    "node": "18.19.1",
+    "from_version": "0.6.3",
+    "to_version": "0.6.4",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true,
+    "result": "passed",
+    "workspace_and_task_preserved": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "legacy_task_requires_explicit_revalidation": true,
+    "refresh_updates_installed_version": true
+  },
+  "plugin_runtime_sha256": "a4f13be7800f6f17f017436bd875a86eca506082a8a92b965175649544f4e7e3",
+  "skill_validation": "passed",
+  "documentation_links_checked": 23
+}

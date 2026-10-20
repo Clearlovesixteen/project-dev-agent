@@ -148,7 +148,8 @@ test("代码再次修改后旧验证失效，重新验证才能关闭", async (t
   await writeFile(path, original + "\n// 修复后重新验证\n");
   const fresh = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
   execFileSync(process.execPath, ["--test"], { cwd: fixture.path, env, stdio: "pipe" });
-  assert.equal((await service.update({ ...review, expected_revision: 1, review_snapshot: fresh })).outcome, "ok");
+  assert.equal((await service.update({ ...review, expected_revision: 1, review_snapshot: fresh,
+    reviewed_ids: { change_items: ["service"], acceptance_criteria: ["disabled"], validations: ["tests"] } })).outcome, "ok");
   assert.equal((await service.update({ task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
 });
 
@@ -182,4 +183,57 @@ test("审查指纹覆盖未跟踪文件的内容，暂存操作不使相同内�
   assert.notEqual(second, first);
   execFileSync("git", ["add", "new.bin"], { cwd: fixture.path });
   assert.equal(((await service.check({})).data as any).review_snapshot, second);
+});
+
+test("局部复核只刷新明确指定的条目，完整回传不能刷新其他旧证据", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path));
+  let task = TaskSchema.parse((await service.open(request)).data);
+  const path = join(fixture.path, "src/service.js"), original = await readFile(path, "utf8");
+  await writeFile(path, original + "\n// 初次实现\n");
+  const snapshot = ((await service.check({})).data as any).review_snapshot;
+  const evidence = [{ kind: "manual", reference: "src/service.js", summary: "检查当前行为" }];
+  const reviewed = await service.update({ task_id: task.id, expected_revision: task.revision, review_snapshot: snapshot,
+    change_items: ["a", "b"].map((id) => ({ ...item(id, "src/service.js"), status: "checked", reviewed_by: "fixture", evidence })),
+    acceptance_criteria: [{ ...request.acceptance_criteria[0], status: "checked", reviewed_by: "fixture", evidence }],
+    validations: ["test-a", "test-b"].map((id) => ({ id, description: id, outcome: "passed", evidence })) });
+  assert.equal(reviewed.outcome, "ok", JSON.stringify(reviewed)); task = TaskSchema.parse(reviewed.data);
+  await writeFile(path, original + "\n// 后续实现改变\n");
+  const fresh = ((await service.check({})).data as any).review_snapshot;
+  const replacement = { task_id: task.id, expected_revision: task.revision, review_snapshot: fresh,
+    change_items: task.change_items, acceptance_criteria: task.acceptance_criteria, validations: task.validations };
+  // 旧客户端只传新指纹和原列表时，所有旧证据仍需复核。
+  assert.equal((await service.update(replacement)).outcome, "ok");
+  const unchanged = (await service.check({})).data as any;
+  assert.deepEqual(unchanged.stale_evidence, { change_items: ["a", "b"], acceptance_criteria: ["disabled"], validations: ["test-a", "test-b"] });
+  assert.equal((await service.update({ ...replacement, expected_revision: task.revision + 1,
+    validations: task.validations.map((record) => ({ ...record, description: "仅修改说明" })) })).code, "REVIEW_CONFIRMATION_REQUIRED");
+  const partial = await service.update({ ...replacement, expected_revision: ++task.revision,
+    reviewed_ids: { change_items: ["a"], validations: ["test-a"] } });
+  assert.equal(partial.outcome, "ok", JSON.stringify(partial)); task = TaskSchema.parse(partial.data);
+  const after = (await service.check({})).data as any;
+  assert.deepEqual(after.stale_evidence, { change_items: ["b"], acceptance_criteria: ["disabled"], validations: ["test-b"] });
+  assert.equal(task.validations.find((entry) => entry.id === "test-b")?.review_snapshot, snapshot);
+  assert.equal((await service.update({ task_id: task.id, expected_revision: task.revision, phase: "closed" })).code, "REVIEW_STALE");
+  const final = await service.update({ ...replacement, expected_revision: task.revision,
+    change_items: task.change_items, acceptance_criteria: task.acceptance_criteria, validations: task.validations,
+    reviewed_ids: { change_items: ["b"], acceptance_criteria: ["disabled"], validations: ["test-b"] }, phase: "closed" });
+  assert.equal(final.outcome, "ok", JSON.stringify(final));
+});
+
+test("显式复核需要有效指纹和完整集合，不能指定不存在、重复或待处理条目", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path));
+  const task = TaskSchema.parse((await service.open(request)).data);
+  const pending = item("a", "src/service.js");
+  const base = { task_id: task.id, expected_revision: 0, review_snapshot: ((await service.check({})).data as any).review_snapshot };
+  for (const extra of [
+    { reviewed_ids: { change_items: ["missing"] }, change_items: [pending] },
+    { reviewed_ids: { change_items: ["a"] }, change_items: [pending] },
+    { reviewed_ids: { change_items: ["a", "a"] }, change_items: [pending] },
+    { reviewed_ids: { change_items: ["a"] } },
+    { reviewed_ids: { change_items: ["a"] }, review_snapshot: undefined,
+      change_items: [{ ...pending, status: "checked", reviewed_by: "fixture", evidence: [{ kind: "manual", reference: "src/service.js", summary: "复核" }] }] },
+  ]) assert.equal((await service.update({ ...base, ...extra })).outcome, "error");
+  assert.equal(((await service.check({})).data as any).recorded_task.revision, 0);
 });

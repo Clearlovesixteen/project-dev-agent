@@ -89,7 +89,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).open(input)));
   server.registerTool("task_update", {
-    description: "使用最新修订号保存任务集合的完整更新，保留已有 ID。完成审查或验证前先读取 task_check 的 review_snapshot，在该版本上核验后连同证据提交；代码变化会拒绝旧证据。停止任务时将 phase 设为 aborted 并填写原因。新说明默认用中文。",
+    description: "使用最新修订号保存任务集合的完整更新，保留已有 ID。核验前读取 task_check 的 review_snapshot；重新核验已有完成项时，还需在 reviewed_ids 中明确本次条目，完整回传不会刷新其他旧证据。停止任务时将 phase 设为 aborted 并填写原因。新说明默认用中文。",
     inputSchema: TaskUpdateInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).update(input)));

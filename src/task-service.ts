@@ -10,17 +10,25 @@ import { ProjectFiles } from "./storage/project-files.js";
 import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
 import { reviewSnapshot } from "./git/review-snapshot.js";
 
-/** 单项指纹由服务写入，不能通过回传或伪造单项字段刷新旧证据。 */
-function stampReviews<T extends { id: string; review_snapshot?: string | undefined }>(incoming: T[] | undefined, previous: T[], complete: (entry: T) => boolean, token?: string): T[] {
+/** 完整集合的回传不是全量复核；已有完成项只有被显式选中后才能刷新指纹。 */
+function stampReviews<T extends { id: string; review_snapshot?: string | undefined }>(incoming: T[] | undefined, previous: T[], complete: (entry: T) => boolean, token?: string, reviewedIds: string[] = []): T[] {
+  const reviewed = new Set(reviewedIds);
+  if (reviewedIds.some((id) => !incoming?.some((entry) => entry.id === id && complete(entry)))) {
+    throw new AppError("REVIEW_ITEM_INVALID", "本次复核的 ID 必须属于同时提交的完整集合，且已填写完成状态和证据");
+  }
+  if (reviewed.size && !token) throw new AppError("REVIEW_SNAPSHOT_REQUIRED", "显式复核需要实际核验前取得的 review_snapshot");
   if (!incoming) return previous;
   const content = ({ review_snapshot: _snapshot, ...entry }: T) => entry;
   return incoming.map((entry) => {
     const clean = content(entry);
     if (!complete(entry)) return clean as T;
-    if (token) return { ...clean, review_snapshot: token } as T;
     const prior = previous.find((old) => old.id === entry.id);
-    if (prior && complete(prior) && JSON.stringify(content(prior)) === JSON.stringify(clean)) return prior;
-    throw new AppError("REVIEW_SNAPSHOT_REQUIRED", "记录完成的审查或验证前，请用 task_check 获取 review_snapshot，在该版本上核验后将指纹传入 task_update");
+    if (prior && complete(prior) && !reviewed.has(entry.id)) {
+      if (JSON.stringify(content(prior)) === JSON.stringify(clean)) return prior;
+      throw new AppError("REVIEW_CONFIRMATION_REQUIRED", "修改已有完成项前请重新核验，并把该 ID 加入 reviewed_ids；仅修改说明或回传列表不能刷新旧证据");
+    }
+    if (!token) throw new AppError("REVIEW_SNAPSHOT_REQUIRED", "记录完成的审查或验证前，请用 task_check 获取 review_snapshot，在该版本上核验后将指纹传入 task_update");
+    return { ...clean, review_snapshot: token } as T;
   });
 }
 
@@ -108,9 +116,9 @@ export class TaskService {
         if (request.review_snapshot && request.review_snapshot !== snapshot?.hash) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "代码已不同于审查或验证时的快照，请重新读取 task_check 并执行受影响的检查");
         const next = TaskSchema.parse({
           ...current,
-          change_items: stampReviews(request.change_items, current.change_items, (item) => item.status !== "pending", request.review_snapshot),
-          acceptance_criteria: stampReviews(request.acceptance_criteria, current.acceptance_criteria, (item) => item.status === "checked", request.review_snapshot),
-          validations: stampReviews(request.validations, current.validations, (item) => item.outcome !== "not_run", request.review_snapshot),
+          change_items: stampReviews(request.change_items, current.change_items, (item) => item.status !== "pending", request.review_snapshot, request.reviewed_ids?.change_items),
+          acceptance_criteria: stampReviews(request.acceptance_criteria, current.acceptance_criteria, (item) => item.status === "checked", request.review_snapshot, request.reviewed_ids?.acceptance_criteria),
+          validations: stampReviews(request.validations, current.validations, (item) => item.outcome !== "not_run", request.review_snapshot, request.reviewed_ids?.validations),
           ...(request.corrections !== undefined ? { corrections: request.corrections } : {}),
           ...(request.knowledge_versions !== undefined ? { knowledge_versions: request.knowledge_versions } : {}),
           ...(request.phase !== undefined ? { phase: request.phase } : {}),
@@ -172,7 +180,7 @@ export class TaskService {
           limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
         diagnostics: reviewed ? [] : [{ code: outdated ? "REVIEW_STALE" : "REVIEW_INCOMPLETE", message: outdated
-          ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，再通过 task_update 提交受影响记录。"
+          ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，通过 reviewed_ids 明确本次复核的条目，并提交对应完整集合。"
           : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };
     });

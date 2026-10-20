@@ -5,7 +5,7 @@ import { ProjectFiles, hasCode } from "./project-files.js";
 
 /** 原子发布锁信息；仅回收确认已退出的进程，未知持有者和权限错误保持锁定。 */
 export async function acquireFileLock(files: ProjectFiles, path: string, busyCode: string, depth = 0): Promise<() => Promise<void>> {
-  const busy = () => new AppError(busyCode, "其他进程正在修改设置，或无法确认遗留锁的持有者。请稍后重试或核对锁文件");
+  const busy = () => new AppError(busyCode, "其他进程正在修改记录，或无法确认遗留锁的持有者。请稍后重试或核对锁文件");
   if (depth > 8) throw busy();
   const owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
   const read = async () => {

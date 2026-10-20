@@ -1,7 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { unlink } from "node:fs/promises";
 import { AppError } from "../domain/error.js";
 import { hasCode, ProjectFiles } from "../storage/project-files.js";
+import { acquireFileLock } from "../storage/file-lock.js";
 import { digest } from "../knowledge/document.js";
 import { AnalysisSchema, BatchSchema, HISTORY_DIR, HistoryControlSchema, ManifestSchema, type HistoryFinding, type HistoryManifest, type HistoryMessage } from "./contracts.js";
 
@@ -28,27 +27,8 @@ export async function manifestFor(files: ProjectFiles): Promise<HistoryManifest 
 }
 
 export async function withHistoryLock<T>(files: ProjectFiles, action: () => Promise<T>): Promise<T> {
-  const path = `${HISTORY_DIR}/operation.lock`;
-  const owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
-  for (let attempt = 0; ; attempt++) {
-    try { await files.create(path, owner); break; } catch (error) {
-      if (!(error instanceof AppError && error.code === "FILE_EXISTS")) throw error;
-      const prior = await optional(files, path);
-      let dead = false;
-      try {
-        const pid: unknown = JSON.parse(prior ?? "{}").pid;
-        if (typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0) {
-          try { process.kill(pid, 0); } catch (probe) { if (hasCode(probe, "ESRCH")) dead = true; }
-        }
-      } catch { /* Unknown owners require manual reconciliation. */ }
-      if (!dead || attempt > 0) throw new AppError("HISTORY_BUSY", "其他历史分析操作正在运行，或其锁文件需要检查");
-      if (await optional(files, path) !== prior) throw new AppError("HISTORY_BUSY", "历史记录的锁文件已变化");
-      await unlink(await files.path(path));
-    }
-  }
-  try { return await action(); } finally {
-    if (await optional(files, path) === owner) await unlink(await files.path(path));
-  }
+  const release = await acquireFileLock(files, `${HISTORY_DIR}/operation.lock`, "HISTORY_BUSY");
+  try { return await action(); } finally { await release(); }
 }
 
 function normalized(text: string): string { return text.normalize("NFKC").toLowerCase().replace(/[\s\p{P}]+/gu, ""); }

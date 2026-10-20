@@ -7,32 +7,16 @@ import { assertStateIgnored, type WorktreeBinding } from "../git/index.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { digest, renderKnowledge } from "../knowledge/document.js";
 import { KnowledgeSchema } from "../domain/knowledge.js";
-import { belongsToProject, discoverSessions, historyHome, parseSession, sessionMeta, type ParsedSession, type SessionFile, type SessionMeta } from "./codex-reader.js";
+import { belongsToProject, discoverSessions, historyHome, parseSession, sessionMeta, type SessionFile, type SessionMeta } from "./codex-reader.js";
 import { AnalysisSchema, BatchSchema, HISTORY_DIR, HistoryNextInputSchema, HistoryRecordInputSchema, HistoryScanInputSchema, ManifestSchema, PARSER_VERSION, type HistoryBatch, type HistoryManifest } from "./contracts.js";
 import { historyControl, historyProfile, historyStatus, manifestFor, optional, save, withHistoryLock } from "./store.js";
 import { renderHistoryReport } from "./report.js";
+import { batchMessages, BATCHING_VERSION } from "./batches.js";
 
 const CacheSchema = z.object({ batches: z.array(z.string()).max(1_000), counts: z.object({
   user_messages: z.number(), assistant_messages: z.number(), attachment_messages: z.number(),
   metadata_messages_excluded: z.number(), duplicate_messages_excluded: z.number(), redactions: z.number(),
 }).strict() }).strict();
-/** 按 24 KB 或 60 条消息切批，控制工具返回量；批次 ID 绑定项目、解析版本及文本内容。 */
-function batchMessages(parsed: ParsedSession, project: string): HistoryBatch[] {
-  const batches: HistoryBatch[] = [];
-  let messages: ParsedSession["messages"] = [], bytes = 0;
-  const flush = () => {
-    if (!messages.length) return;
-    const id = digest(JSON.stringify([PARSER_VERSION, project, messages])).slice(0, 32);
-    batches.push(BatchSchema.parse({ id, project, messages })); messages = []; bytes = 0;
-  };
-  for (const message of parsed.messages) {
-    const size = Buffer.byteLength(JSON.stringify(message));
-    if (bytes + size > 24_000 || messages.length === 60) flush();
-    messages.push(message); bytes += size;
-  }
-  flush(); return batches;
-}
-
 /**
  * 读取属于当前项目的本地对话，保存文本批次和分析进度。
  * 服务不调用模型；Codex 读取 next 的批次后提交 record，服务核验原话并保留候选。
@@ -55,6 +39,22 @@ export class HistoryService {
       await assertStateIgnored(this.binding);
       return withHistoryLock(this.files, async () => {
         const home = await historyHome(this.codexHome);
+        // 只在来源变化时读取上一快照。兼容旧版批次 ID，保留其当前修订和停用记录。
+        let previous: HistoryBatch[] | undefined;
+        const previousBatches = async () => {
+          if (previous) return previous;
+          const manifest = await manifestFor(this.files);
+          const loaded: HistoryBatch[] = [];
+          if (manifest?.source_home === home && manifest.parser_version === PARSER_VERSION) {
+            for (const id of manifest.batches) {
+              const batch = BatchSchema.parse(JSON.parse(await this.files.read(`${HISTORY_DIR}/batches/${id}.json`, 65_536)));
+              if (batch.id !== id || batch.project !== this.binding.root) throw new AppError("HISTORY_RECORD_MISMATCH", "旧快照的批次身份不一致");
+              loaded.push(batch);
+            }
+          }
+          previous = loaded;
+          return previous;
+        };
         const inventory = await discoverSessions(home);
         const coverage: HistoryManifest["coverage"] = { files_discovered: inventory.files.length, project_sessions: 0,
           internal_sessions_excluded: 0, other_projects_excluded: 0, duplicate_sessions_excluded: 0,
@@ -79,7 +79,7 @@ export class HistoryService {
         for (const { file, meta } of selected.values()) {
           // 解析缓存按来源路径、大小、修改时间和解析器版本复用，refresh 可强制重读。
           // 语义分析则绑定文本批次 ID，因此重新扫描不会自动抹去相同批次的分析。
-          const key = digest(JSON.stringify([PARSER_VERSION, this.binding.root, home, file.relative, file.size, file.mtime])).slice(0, 32);
+          const key = digest(JSON.stringify([PARSER_VERSION, BATCHING_VERSION, this.binding.root, home, file.relative, file.size, file.mtime])).slice(0, 32);
           const cachePath = `${HISTORY_DIR}/cache/${key}.json`;
           try {
             const cached = request.refresh ? undefined : await optional(this.files, cachePath);
@@ -87,7 +87,7 @@ export class HistoryService {
             if (cached) { summary = CacheSchema.parse(JSON.parse(cached)); coverage.cache_hits++; }
             else {
               const parsed = await parseSession(file, meta, this.binding.root);
-              const chunks = batchMessages(parsed, this.binding.root);
+              const chunks = batchMessages(parsed.messages, this.binding.root, await previousBatches());
               summary = { batches: chunks.map((chunk) => chunk.id), counts: {
                 user_messages: parsed.user_messages, assistant_messages: parsed.assistant_messages,
                 attachment_messages: parsed.attachment_messages, metadata_messages_excluded: parsed.metadata_messages_excluded,

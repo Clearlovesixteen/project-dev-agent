@@ -12,7 +12,8 @@ export async function reviewSnapshot(binding: WorktreeBinding, baseline: string)
   const paths = await changedPaths(binding, baseline);
   if (paths.length > 10_000) throw new AppError("REVIEW_SNAPSHOT_LIMIT", "审查快照涉及的文件超过 10000 个，请缩小任务范围");
   const files = new ProjectFiles(binding.root), hash = createHash("sha256");
-  hash.update(JSON.stringify(["review-v1", baseline, paths]));
+  // 旧版可能批量刷新过未复核项；升级后让活跃任务显式复核一次，已结束任务保留原记录。
+  hash.update(JSON.stringify(["review-v2", baseline, paths]));
   let total = 0;
   for (const relative of paths) {
     const parent = dirname(relative);

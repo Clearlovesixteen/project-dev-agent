@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
-import { unlink } from "node:fs/promises";
 import { AppError } from "../domain/error.js";
-import { ProjectFiles, hasCode } from "../storage/project-files.js";
+import { ProjectFiles } from "../storage/project-files.js";
+import { acquireFileLock } from "../storage/file-lock.js";
 import { digest } from "../knowledge/document.js";
 import { optional, save } from "../history/store.js";
 import { FileSchema, HASH, MAP_DIR, MapSchema, SavedModelSchema, type MapFile, type SavedModel } from "./contracts.js";
@@ -10,19 +9,8 @@ import { IdSchema } from "../domain/common.js";
 
 export { optional, save };
 export async function locked<T>(files: ProjectFiles, action: () => Promise<T>): Promise<T> {
-  const target = `${MAP_DIR}/operation.lock`, owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
-  for (let attempt = 0; ; attempt++) {
-    try { await files.create(target, owner); break; } catch (error) {
-      if (!(error instanceof AppError && error.code === "FILE_EXISTS")) throw error;
-      const before = await optional(files, target); let dead = false;
-      try { const pid = JSON.parse(before ?? "{}").pid; if (Number.isSafeInteger(pid) && pid > 0) {
-        try { process.kill(pid, 0); } catch (probe) { dead = hasCode(probe, "ESRCH"); }
-      } } catch { /* Preserve unknown lock owners. */ }
-      if (!dead || attempt > 0 || before !== await optional(files, target)) throw new AppError("PROJECT_MAP_BUSY", "请先等待其他操作结束，或核实锁文件所属进程的状态");
-      await unlink(await files.path(target));
-    }
-  }
-  try { return await action(); } finally { if (await optional(files, target) === owner) await unlink(await files.path(target)); }
+  const release = await acquireFileLock(files, `${MAP_DIR}/operation.lock`, "PROJECT_MAP_BUSY");
+  try { return await action(); } finally { await release(); }
 }
 export async function readMap(files: ProjectFiles) {
   const raw = await optional(files, `${MAP_DIR}/manifest.json`);

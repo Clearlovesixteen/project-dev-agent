@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { bindWorktree } from "../src/git/index.js";
@@ -258,4 +258,52 @@ test("暂停历史分析保留待处理进度，重启后可继续", async (t) =
   assert.equal(resumed.batch.id, pending[0]);
   assert.equal(resumed.analyzed_batches, 1);
   assert.equal(resumed.analysis_complete, false);
+});
+
+test("追加消息保留旧批次的纠正和停用决定，只把新增消息交给分析", async (t) => {
+  const { home, binding, service, files } = await setup(t);
+  const source = await log(home, "append", binding.root, [message("u1", "user", "表单使用项目已有组件")]);
+  await service.scan({}); const first = await next(service), originalId = first.batch!.id;
+  const base = { scan_id: first.scan_id, batch_id: originalId, note: "完整读取批次" };
+  const good = finding(first.batch!);
+  await service.record({ ...base, findings: [{ ...good, rule: "错误的原生表单规则" }] });
+  await service.record({ ...base, expected_revision: 1, revision_reason: "修正误读", findings: [good] });
+  await appendFile(source.path, JSON.stringify(message("u2", "user", "继续开发下一个页面")) + "\n");
+  assert.equal((await service.scan({})).outcome, "ok");
+  const profile = await historyProfile(files);
+  assert.equal(profile.hints[0]?.rule, good.rule);
+  assert.deepEqual(profile.hints[0]?.analysis_refs, [{ batch_id: originalId, revision: 2 }]);
+  const added = await next(service);
+  assert.deepEqual(added.batch!.messages.map((entry) => entry.text), ["继续开发下一个页面"]);
+  const saved = (await service.next({ batch_id: originalId })).data as any;
+  assert.equal(saved.analysis.revision, 2);
+  await service.record({ scan_id: added.scan_id, batch_id: added.batch!.id, findings: [], note: "没有新的可复用偏好" });
+  await service.record({ ...base, scan_id: added.scan_id, expected_revision: 2, revision_reason: "用户要求停用", findings: [] });
+  await appendFile(source.path, JSON.stringify(message("u3", "user", "继续")) + "\n");
+  assert.equal((await service.scan({ refresh: true })).outcome, "ok");
+  assert.equal((await historyProfile(files)).hints.length, 0);
+  assert.equal(((await service.next({ batch_id: originalId })).data as any).analysis.revision, 3);
+  assert.deepEqual((await next(service)).batch!.messages.map((entry) => entry.text), ["继续"]);
+  await service.scan({});
+  assert.equal((await historyProfile(files)).manifest?.coverage.cache_hits, 1);
+  assert.equal(((await service.next({ batch_id: originalId })).data as any).analysis.revision, 3);
+});
+
+test("归档日志沿用原批次和修订，改写用户原话则重新分析", async (t) => {
+  const { home, binding, service, files } = await setup(t);
+  const source = await log(home, "archive-stable", binding.root, [message("u1", "user", "表单使用项目已有组件")]);
+  await service.scan({}); const first = await next(service);
+  await service.record({ scan_id: first.scan_id, batch_id: first.batch!.id, findings: [finding(first.batch!)], note: "已分析" });
+  await mkdir(join(home, "archived_sessions"));
+  const archived = join(home, "archived_sessions/archive-stable.jsonl");
+  await rename(source.path, archived);
+  assert.equal((await service.scan({})).outcome, "ok");
+  assert.deepEqual((await historyProfile(files)).manifest?.batches, [first.batch!.id]);
+  assert.equal((await historyProfile(files)).analyzed, 1);
+  assert.equal((await next(service)).batch, null);
+  assert.equal((await historyProfile(files)).hints.length, 1);
+  await writeFile(archived, (await readFile(archived, "utf8")).replace("表单使用项目已有组件", "改为其他表单实现"));
+  await service.scan({});
+  assert.equal((await historyProfile(files)).hints.length, 0);
+  assert.equal((await historyProfile(files)).pending.length, 1);
 });
