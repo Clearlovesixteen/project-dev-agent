@@ -77,5 +77,44 @@
     "有界静态检查不覆盖所有动态调用、语言或语义等价绕过；模块化、设计模式、注释及例外理由的合理性仍需代码审查。",
     "未新增 MCP 工具、用户表单或隐式触发；原明确调用方式保留。"
   ],
-  "documentation_links_checked": 22
+  "documentation_links_checked": 22,
+  "ci_fixture_fix": {
+    "initial_failure": "新增回归夹具提交未指定 Git 身份，干净 CI 环境中10项准备失败；已在本地禁全局身份环境复现。",
+    "fix": "测试命令通过 -c 设置固定身份并禁用钩子/签名，不修改个人 Git 配置。",
+    "runtime_and_skill_unchanged": true,
+    "isolated_regression_suites": [
+      {
+        "node": "20.19.6",
+        "tests": 12,
+        "pass": 12,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "node": "18.19.0",
+        "tests": 12,
+        "pass": 12,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "node": "18.19.1",
+        "tests": 12,
+        "pass": 12,
+        "fail": 0,
+        "skipped": 0
+      }
+    ],
+    "environment": "禁用全局/系统 Git 配置及身份推断；测试临时提交使用命令级身份。"
+  },
+  "public_install": {
+    "result": "passed",
+    "source": "https://github.com/Clearlovesixteen/project-dev-agent.git",
+    "version": "0.8.1",
+    "node": "v18.19.1",
+    "tools": 14,
+    "bundle_matches_tested_release": true,
+    "generation_rules_installed": true,
+    "isolated_codex_home": true
+  }
 }

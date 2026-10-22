@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
+import { devNull } from "node:os";
 import { join } from "node:path";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { bindWorktree } from "../src/git/index.js";
@@ -17,7 +18,10 @@ async function setup(t: { after: (action: () => Promise<void>) => void }) {
   await put("src/platform/transport.ts", "import axios from 'axios';\nexport const transport = axios.create({baseURL: '/api'});\ntransport.interceptors.request.use(config => config);\n");
   await put("src/modules/catalog/api.ts", "import {transport} from '../../platform/transport';\nexport const loadCatalog = () => transport.get('/catalog');\n");
   await put("src/modules/orders/api.ts", "import {transport} from '../../platform/transport';\nexport const loadOrders = () => transport.get('/orders');\n");
-  execFileSync("git", ["-C", fixture.path, "add", "src"]); execFileSync("git", ["-C", fixture.path, "-c", "core.hooksPath=/dev/null", "commit", "-m", "existing request facade"]);
+  // 夹具的临时提交使用固定身份并关闭钩子/签名，不依赖开发机或 CI 的个人 Git 配置。
+  const git = (args: string[]) => execFileSync("git", ["-C", fixture.path, "-c", `core.hooksPath=${devNull}`, "-c", "core.fsmonitor=false",
+    "-c", "commit.gpgsign=false", "-c", "user.name=Reuse Regression", "-c", "user.email=reuse-regression@example.invalid", ...args]);
+  git(["add", "src"]); git(["commit", "-m", "existing request facade"]);
   const binding = await bindWorktree(fixture.path), files = new ProjectFiles(binding.root), service = new UnderstandingService(binding), tasks = new TaskService(binding);
   assert.equal((await service.scan({})).outcome, "ok");
   const task = TaskSchema.parse((await tasks.open({ requirement: "新增独立退款模块，遵循已有项目约定", acceptance_criteria: [{ id: "reuse", description: "复用项目既有请求能力" }] })).data);
