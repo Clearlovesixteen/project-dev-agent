@@ -1,5 +1,5 @@
 {
-  "version": "0.6.4",
+  "version": "0.6.5",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -117,27 +117,32 @@
     {
       "path": "package.json",
       "bytes": 331,
-      "sha256": "cb6fa85775d7d524dfcfbb13dca647cf9c4d1c3048ec5599e41fbb0542267c66"
+      "sha256": "ad3ffb70ca0045aa60098607d35b4c69264b42ebed0d4b7ccd4cb4874e95256d"
     },
     {
       "path": "plugin.json",
       "bytes": 894,
-      "sha256": "90308a6e9e35b887022ad88d75767c33660e3386093d6e4e9f450d666141c488"
+      "sha256": "236702494b96710807bcd83275d5bee38c35bfc78b3b940d5f2630dd0b0d43a5"
     },
     {
       "path": "README.md",
       "bytes": 723,
-      "sha256": "4a1b2a798f2061ef7e818cd806c00bd00935313ddad1a4b280d14acbb86f5f92"
+      "sha256": "c2e78f193e1053a8a2c7cdd6f91d5867b433e4b5e736de96bb9296d421b470a9"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1006399,
-      "sha256": "a4f13be7800f6f17f017436bd875a86eca506082a8a92b965175649544f4e7e3"
+      "bytes": 1006474,
+      "sha256": "6133a092e76ba1489c23c7612f6623a80c2923bc783fb6b710df876dbc29bb76"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
       "bytes": 159,
       "sha256": "34d6b23d399ea20b2aae75cc56e55ce96841d6ea320e1ef6ad13e1299d9ac626"
+    },
+    {
+      "path": "skills/project-dev/references/generation-rules.md",
+      "bytes": 6264,
+      "sha256": "265320f4f4a77577c5bb5d7aad85216faea38ab240a04bf34b5cbd8a47e7d70e"
     },
     {
       "path": "skills/project-dev/references/history-inputs.md",
@@ -146,8 +151,8 @@
     },
     {
       "path": "skills/project-dev/references/task-inputs.md",
-      "bytes": 5616,
-      "sha256": "62e3999ef973d68522cc5370c7dd0458d3980a9191c96ac0abc08cd6181a2123"
+      "bytes": 8356,
+      "sha256": "363263365180f47dc99d7c8d568da7bc815531ef931adff0c7cd6dfc9bd50e0e"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
@@ -156,8 +161,8 @@
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 11578,
-      "sha256": "485ed4349d0a10af5539aaf11030b534322f4a673fd32e042b2d13d2c89c7ac6"
+      "bytes": 14532,
+      "sha256": "dbfd36e1d99e4377b5299494ca92f6d3e241c92d9c7e946b5203e1a6b0321a39"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -308,6 +313,31 @@
       "path": "templates/previous-skills/v0.6.3/SKILL.md",
       "bytes": 11167,
       "sha256": "aaf704e25989db56c8b5a5afd9fa1cf31b1bc6814603bf2938411bfb02474dc8"
+    },
+    {
+      "path": "templates/previous-skills/v0.6.4/agents/openai.yaml",
+      "bytes": 159,
+      "sha256": "34d6b23d399ea20b2aae75cc56e55ce96841d6ea320e1ef6ad13e1299d9ac626"
+    },
+    {
+      "path": "templates/previous-skills/v0.6.4/references/history-inputs.md",
+      "bytes": 4939,
+      "sha256": "5c3edc86fcd6b75983e9358225ddda0f7c1ad5c7bb51bbd1eebe749906b9b971"
+    },
+    {
+      "path": "templates/previous-skills/v0.6.4/references/task-inputs.md",
+      "bytes": 5616,
+      "sha256": "62e3999ef973d68522cc5370c7dd0458d3980a9191c96ac0abc08cd6181a2123"
+    },
+    {
+      "path": "templates/previous-skills/v0.6.4/references/understanding-inputs.md",
+      "bytes": 3474,
+      "sha256": "dcdd76ec1492513ee69d3ca2772131c37487b29d5856e8d47b4c7049b776bbfa"
+    },
+    {
+      "path": "templates/previous-skills/v0.6.4/SKILL.md",
+      "bytes": 11578,
+      "sha256": "485ed4349d0a10af5539aaf11030b534322f4a673fd32e042b2d13d2c89c7ac6"
     },
     {
       "path": "templates/project-readme.html",

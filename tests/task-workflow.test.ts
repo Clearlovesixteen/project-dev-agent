@@ -104,6 +104,47 @@ test("a verified change can close, survives restart, and releases the task after
   assert.equal((await restarted.open(request)).outcome, "ok");
 });
 
+test("用户修订要求后保留来源和原始需求，并在重新验收前保持未完成", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), service = new TaskService(binding);
+  const task = TaskSchema.parse((await service.open({ requirement: "将说明标题设为主菜单",
+    acceptance_criteria: [{ id: "title", description: "说明标题为主菜单" }] })).data);
+  const path = join(fixture.path, "README.md"); await writeFile(path, "# 主菜单\n");
+  const snapshot = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
+  assert.equal(await readFile(path, "utf8"), "# 主菜单\n");
+  const evidence = [{ kind: "manual", reference: "README.md", summary: "已核对标题为主菜单" }];
+  const original = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: 0, review_snapshot: snapshot,
+    change_items: [{ ...item("readme", "README.md"), status: "checked", reviewed_by: "fixture", evidence }],
+    acceptance_criteria: [{ id: "title", description: "说明标题为主菜单", status: "checked", reviewed_by: "fixture", evidence }],
+  })).data);
+
+  // 新要求先改变验收条件并清空旧证据，不能因代码尚未变化就沿用原通过结论。
+  const revised = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: original.revision,
+    acceptance_criteria: [{ id: "title", description: "说明标题改为订单管理", status: "pending", evidence: [] }],
+    corrections: [{ id: "title-request", description: "标题改为订单管理", rationale: "本次新增要求取代原文案",
+      sources: [{ kind: "experience", reference: "fixture:user-message-2", description: "测试场景中的后续用户要求" }] }],
+  })).data);
+  assert.equal(revised.requirement, task.requirement);
+  assert.equal(revised.acceptance_criteria[0]?.review_snapshot, undefined);
+  const restarted = new TaskService(binding);
+  const check = (await restarted.check({ task_id: task.id })).data as any;
+  assert.deepEqual(check.pending_acceptance, ["title"]);
+  assert.equal(check.recorded_task.corrections[0].id, "title-request");
+  assert.equal((await restarted.update({ task_id: task.id, expected_revision: revised.revision, phase: "closed" })).outcome, "error");
+
+  await writeFile(path, "# 订单管理\n");
+  const current = ((await restarted.check({ task_id: task.id })).data as any).review_snapshot;
+  assert.equal(await readFile(path, "utf8"), "# 订单管理\n");
+  const updatedEvidence = [{ kind: "manual", reference: "README.md", summary: "按修订后的要求核对标题为订单管理" }];
+  const result = await restarted.update({ task_id: task.id, expected_revision: revised.revision, review_snapshot: current,
+    reviewed_ids: { change_items: ["readme"] }, phase: "closed",
+    change_items: [{ ...original.change_items[0], evidence: updatedEvidence }],
+    acceptance_criteria: [{ ...revised.acceptance_criteria[0], status: "checked", reviewed_by: "fixture", evidence: updatedEvidence }],
+  });
+  assert.equal(result.outcome, "ok");
+  assert.equal(TaskSchema.parse(result.data).corrections[0]?.id, "title-request");
+});
+
 test("an unresolved merge stays incomplete at the service boundary and cannot be closed", async (t) => {
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);

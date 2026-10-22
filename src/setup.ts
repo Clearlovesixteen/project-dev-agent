@@ -11,7 +11,8 @@ import { VERSION } from "./version.js";
 
 const MARKER = "<!-- project-dev-agent -->";
 const GUIDANCE = `${MARKER}\n跟踪项目改动时，结合 project-dev Skill 和 project_dev MCP 服务工作。选择实现方案前阅读适用知识和现有代码，记录关联路径与审查证据。任务状态和经验草稿保存在 .project-dev/local/。通过团队审查流程确认共享规则。新生成的说明默认使用中文，代码与原话引用保持原样。\n<!-- /project-dev-agent -->\n`;
-const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"];
+// 项目级 Skill 和本地插件均需携带全部可发现的生码参考资料。
+const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md", "references/generation-rules.md"];
 
 interface Change { file: string; action: "create" | "append" | "unchanged" | "preserve"; before?: string; after: string }
 

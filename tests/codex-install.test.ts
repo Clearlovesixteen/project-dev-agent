@@ -110,3 +110,49 @@ for (const version of ["v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.3"]) test(`
   assert.match(current, /project_scan/);
   await access(join(directory, "references/understanding-inputs.md"));
 });
+
+test("v0.6.4 完整 Skill 升级保留回滚能力并交付生码参考资料", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(await realpath(fixture.root), "v064 home");
+  const directory = join(home, ".agents/skills/project-dev");
+  await mkdir(join(directory, "references"), { recursive: true });
+  const previousRoot = fileURLToPath(new URL("../../templates/previous-skills/v0.6.4/", import.meta.url));
+  const currentRoot = fileURLToPath(new URL("../../skills/project-dev/", import.meta.url));
+  const previous = new Map<string, string>();
+  for (const file of ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"]) {
+    const content = await readFile(join(previousRoot, file), "utf8");
+    previous.set(file, content); await writeFile(join(directory, file), content);
+  }
+  const reference = "references/generation-rules.md";
+  const options = { workspace: fixture.root, codex: "fake", userHome: home, apply: true };
+  const failing = async (args: string[]) => { if (args[1] === "list") return "[]"; throw new Error("registration failed"); };
+  await assert.rejects(connectCodex({ ...options, runCodex: failing }), /registration failed/);
+  for (const [file, content] of previous) assert.equal(await readFile(join(directory, file), "utf8"), content);
+  await assert.rejects(access(join(directory, reference)), { code: "ENOENT" });
+  const config = configuration();
+  await connectCodex({ ...options, runCodex: config.runCodex });
+  for (const file of [...previous.keys(), reference]) {
+    assert.equal(await readFile(join(directory, file), "utf8"), await readFile(join(currentRoot, file), "utf8"));
+  }
+  const repeated = await connectCodex({ ...options, runCodex: config.runCodex });
+  assert.ok(repeated.skill_files.every((file) => file.action === "unchanged"));
+  await connectCodex({ ...options, runCodex: config.runCodex, disconnect: true });
+  await assert.rejects(access(join(directory, reference)), { code: "ENOENT" });
+  await access(join(fixture.path, "src/service.js"));
+});
+
+test("安装或断开时保留用户自定义的生码参考资料", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(await realpath(fixture.root), "custom rules home");
+  const directory = join(home, ".agents/skills/project-dev");
+  await mkdir(join(directory, "references"), { recursive: true });
+  const reference = join(directory, "references/generation-rules.md");
+  await writeFile(reference, "用户维护的项目规则\n");
+  const config = configuration();
+  const options = { workspace: fixture.root, codex: "fake", userHome: home, apply: true, runCodex: config.runCodex };
+  await assert.rejects(connectCodex(options), { code: "SKILL_CONFLICT" });
+  await assert.rejects(connectCodex({ ...options, disconnect: true }), { code: "SKILL_CONFLICT" });
+  assert.equal(config.mutations.length, 0);
+  assert.equal(await readFile(reference, "utf8"), "用户维护的项目规则\n");
+  await assert.rejects(access(join(directory, "SKILL.md")), { code: "ENOENT" });
+});

@@ -1,0 +1,131 @@
+{
+  "version": "0.6.5",
+  "verified_on": "2026-10-22",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 124,
+      "pass": 124,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 124,
+      "pass": 124,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 124,
+      "pass": 124,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "regressions": [
+    "v0.6.4 完整手动 Skill 升级、注册失败回滚与重复安装",
+    "自定义生码参考资料在安装和断开时保持原样",
+    "原生包、手动安装与项目级初始化携带同一份生码规则",
+    "用户修订要求后保留原始需求、纠正来源和条目 ID，重新验收前不能关闭任务"
+  ],
+  "native_upgrade": {
+    "node": "18.19.1",
+    "from_version": "0.6.4",
+    "to_version": "0.6.5",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true,
+    "result": "passed",
+    "workspace_and_task_preserved": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v064_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "refresh_updates_installed_version": true
+  },
+  "plugin_runtime_sha256": "6133a092e76ba1489c23c7612f6623a80c2923bc783fb6b710df876dbc29bb76",
+  "skill_validation": "passed",
+  "manual_scenario_review": {
+    "version": "0.6.5",
+    "reviewed_on": "2026-10-22",
+    "method": "manual_instruction_walkthrough",
+    "scope": "核对规则文本与当前任务字段能否表达各场景，不代表独立模型执行或真实项目生码验收。",
+    "cases": [
+      {
+        "id": "module-boundary",
+        "scenario": "订单功能同时包含请求、金额计算与页面交互",
+        "reviewed_decision": "按项目已有分层组织不同职责，计算内部辅助函数可共置",
+        "basis": "generation-rules.md: 按职责模块化",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "simple-change",
+        "scenario": "只修改一个展示文案",
+        "reviewed_decision": "直接修改现有位置，无需新增策略、工厂或设计文档",
+        "basis": "generation-rules.md: 按实际问题选择设计模式",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "multiple-policies",
+        "scenario": "当前需求已有多种可替换计价算法",
+        "reviewed_decision": "评估函数表或策略的稳定边界，并记录采用原因，不强制新增类",
+        "basis": "generation-rules.md: 按实际问题选择设计模式",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "request-revision",
+        "scenario": "验收已通过后用户修改要求",
+        "reviewed_decision": "保留原始需求与记录 ID，保存纠正来源，修订验收并恢复 pending 后复核",
+        "basis": "task-inputs.md: 生码规则如何进入任务记录；tests/task-workflow.test.ts",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "comment-maintenance",
+        "scenario": "修改带历史注释的金额边界处理",
+        "reviewed_decision": "同步更新公共契约与业务依据注释，不能伪造舍入规则来源",
+        "basis": "generation-rules.md: 配套清晰的注释",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "library-first",
+        "scenario": "已安装组件库的当前 API 已满足需求",
+        "reviewed_decision": "直接复用组件库，不重复创建同等组件",
+        "basis": "generation-rules.md: 按优先级选择组件",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "existing-wrapper",
+        "scenario": "库组件缺少必要项目权限能力，现有封装已提供",
+        "reviewed_decision": "记录查库结果及能力缺口，然后复用或合理扩展现有封装并检查调用方",
+        "basis": "generation-rules.md: 按优先级选择组件",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "custom-component",
+        "scenario": "组件库和项目组件均无法合理满足需求",
+        "reviewed_decision": "记录两层已查位置与具体缺口，按职责和注释规则自研",
+        "basis": "generation-rules.md: 按优先级选择组件",
+        "status": "guidance_reviewed"
+      },
+      {
+        "id": "backend-only",
+        "scenario": "纯接口改动，不涉及 UI",
+        "reviewed_decision": "只审查适用规则，说明组件选型不适用，不添加虚假验证结果",
+        "basis": "SKILL.md: 检查与结束",
+        "status": "guidance_reviewed"
+      }
+    ]
+  },
+  "limitations": [
+    "规则审查为人工场景推演，未运行独立模型生码评测。",
+    "测试验证安装、数据及任务机制，不保证所有任务的架构、模式、注释和复用选择均合理。"
+  ],
+  "documentation_links_checked": 29
+}

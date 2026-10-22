@@ -25,6 +25,10 @@ test("setup previews without writing, preserves project instructions and is repe
   const plugin = JSON.parse(await readFile(join(fixture.path, ".project-dev/local/plugin/mcp.json"), "utf8"));
   assert.equal(plugin.mcpServers.project_dev.type, "stdio");
   assert.equal(plugin.mcpServers.project_dev.args.at(-1), fixture.path);
+  const rules = await readFile(new URL("../../skills/project-dev/references/generation-rules.md", import.meta.url), "utf8");
+  for (const directory of [".agents/skills/project-dev", ".project-dev/local/plugin/skills/project-dev"]) {
+    assert.equal(await readFile(join(fixture.path, directory, "references/generation-rules.md"), "utf8"), rules);
+  }
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: fixture.path, encoding: "utf8" });
   assert.ok(!status.includes(".project-dev/local"));
   assert.ok(status.includes(".agents/skills/project-dev/SKILL.md"));

@@ -49,6 +49,37 @@
 
 结束前用 `task_check` 检查任务。`structurally_reviewed` 只表示记录与文件覆盖符合结构要求，不独立验证业务正确性；完整任务位于 `recorded_task`。工作完成后用最新修订号、有效记录和 `phase: closed` 关闭。停止工作使用 `phase: aborted` 并填写 `abort_reason`。结束的任务是只读历史，后续改动需从干净基线另建任务。
 
+## 生码规则如何进入任务记录
+
+[默认生码规则](generation-rules.md)使用现有任务字段，不增加 `design`、`component_choice` 等 MCP 参数。
+
+| 内容 | 保存位置 | 要求 |
+| --- | --- | --- |
+| 本次明确需求 | `task_open.requirement`、`acceptance_criteria` | 验收描述应能观察或核对；初始要求不用伪造为纠正 |
+| 模块职责、设计模式取舍、组件选型 | 对应 `change_items.rationale` 和 `sources` | 写清选择与原因，引用实际源码、组件 API 或文档；无需另造设计文件 |
+| 需要验收的生码约束 | `acceptance_criteria` | 只加入适用且具体的项，例如“订单金额计算不依赖 UI 和网络请求”；不机械复制五条口号 |
+| 开发中新增、修订或纠正的要求 | `corrections`，同步调整验收项与清单 | 记录实际来源与原因，不编造会话 ID；保留原记录 ID 和历史修订 |
+| 代码规则的实际审查 | 对应清单项或验收项的 `evidence` | `kind: code/manual`，引用具体文件并描述已核对的行为；不能当作自动测试结果 |
+| 项目验证结果 | `validations` | 实际执行后记录命令和结果，保留失败与未运行状态 |
+
+任务的原始 `requirement` 由 `task_open` 保存，`task_update` 不接受改写它。用户改变要求时，新增带来源的纠正记录，保留验收项 ID 并修订描述，使当前验收反映新要求。受影响的旧完成项先改为 `pending`，清除旧 `reviewed_by`、`review_snapshot` 和 `evidence`，再实际核验；不要把新描述和旧通过结论一起沿用。已记录的验证若需要重跑，设为 `not_run` 并清除旧证据与指纹。更新集合仍需完整回传，保留其他条目。
+
+下面是结构示例，路径和选择理由均须替换为本次阅读得到的真实内容：
+
+```json
+{
+  "id": "amount-calculation",
+  "target_path": "src/orders/calculate.ts",
+  "action": "modify",
+  "requirement": "支持本次订单金额规则",
+  "rationale": "金额计算独立于页面交互和请求；当前只有一种算法，使用纯函数，私有舍入辅助函数共置，无需策略层；公共函数与舍入依据配套中文注释。本项不涉及组件选型。",
+  "sources": [{ "kind": "code", "reference": "src/orders/existing-calculation.ts" }],
+  "status": "pending"
+}
+```
+
+不适用的项在相应理由中说明，不伪造“通过”证据。已有清单项经核对确实不需处理时，可用 `skipped` 并附 `reviewed_by`、`skip_reason`；验收项没有 `skipped` 状态，需求变更应保留 ID、修订当前验收描述并重新核验。恢复旧任务沿用现有字段和记录，不为补齐新规则重建任务或刷新旧指纹。
+
 ## 知识与纠正
 
 查询形状：`{ "query": "任务关键词", "paths": ["src/entry.js"], "modules": ["module-name"], "limit": 5 }`。未知模块名省略；同时提供的范围筛选需要全部满足。结果含 ID、文件、内容哈希 `version`、来源、`effective` 和适用条件。`include_unconfirmed: true` 会返回未生效的审查线索。不完整结果带有诊断，不能当作全量知识扫描。

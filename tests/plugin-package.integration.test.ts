@@ -30,6 +30,11 @@ test("release inventory matches bundled assets and carries no external dependenc
   assert.equal(JSON.parse(await readFile(join(packageRoot, "build-info.json"), "utf8")).node, pkg.engines.node);
   const mcp = JSON.parse(await readFile(join(packageRoot, "mcp.json"), "utf8"));
   assert.deepEqual(mcp.mcpServers.project_dev.args, ["${PLUGIN_ROOT}/runtime/cli.mjs", "serve", "--plugin"]);
+  // 默认约束通过 Skill 的本地引用加载，发布包必须携带同一份可读取的参考资料。
+  const rules = "skills/project-dev/references/generation-rules.md";
+  assert.ok(info.files.some((file) => file.path === rules));
+  assert.equal(await readFile(join(packageRoot, rules), "utf8"),
+    await readFile(fileURLToPath(new URL(`../../${rules}`, import.meta.url)), "utf8"));
 });
 
 test("standalone plugin runs without source or node_modules and preserves task/configuration across relocation", { timeout: 120_000 }, async (t) => {

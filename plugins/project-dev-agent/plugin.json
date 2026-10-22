@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "project-dev-agent",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "结合项目代码、业务背景和历史习惯辅助 Codex 开发，检查关联改动并保留项目经验。",
   "extensions": {
     "com.openai": {

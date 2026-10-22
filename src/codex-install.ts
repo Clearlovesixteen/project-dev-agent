@@ -10,7 +10,8 @@ import { Workspace } from "./workspace.js";
 
 const execFileAsync = promisify(execFile);
 const SKILL_ROOT = ".agents/skills/project-dev";
-const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"];
+// 显式列出运行 Skill 所需的参考资料，确保手动安装与原生插件的规则一致。
+const SKILL_FILES = ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md", "references/generation-rules.md"];
 type CodexRunner = (args: string[]) => Promise<string>;
 interface Options {
   workspace: string;
@@ -53,7 +54,7 @@ export async function connectCodex(options: Options) {
     if (before !== undefined && before !== content) {
       // Upgrade only an exact bundled predecessor. Never replace local customizations.
       const predecessors: string[] = [];
-      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.2", "v0.6.3"]) {
+      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.2", "v0.6.3", "v0.6.4"]) {
         try { predecessors.push(await readFile(join(toolRoot, "templates/previous-skills", version, name), "utf8")); }
         catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
       }
