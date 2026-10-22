@@ -1,3 +1,4 @@
+import { BusinessCheckSchema, EvaluationTagSchema } from "../quality/contracts.js";
 import { z } from "zod";
 import { IdSchema, ReviewSnapshotSchema, TextSchema } from "../domain/common.js";
 import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, ValidationRecordSchema } from "../domain/task.js";
@@ -5,7 +6,8 @@ import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, Validati
 // 工具只接收业务输入；任务 ID、Git 基线、时间和初始状态由服务生成，不能由调用方伪造。
 export const TaskOpenInputSchema = z.object({
   requirement: TextSchema,
-  acceptance_criteria: z.array(z.object({ id: IdSchema, description: TextSchema }).strict()).min(1).max(100),
+  evaluation: EvaluationTagSchema.optional(),
+  acceptance_criteria: z.array(z.object({ id: IdSchema, description: TextSchema, business_check: BusinessCheckSchema.optional() }).strict()).min(1).max(100),
 }).strict();
 
 // 集合字段省略表示保留，传入则完整替换；服务层另行检查旧 ID 不丢失和预期修订号。
@@ -28,7 +30,7 @@ export const TaskUpdateInputSchema = z.object({
 }).strict();
 
 // 省略 ID 用于跨对话恢复唯一活跃任务；传入 ID 时也可查看已结束的历史任务。
-export const TaskCheckInputSchema = z.object({ task_id: IdSchema.optional() }).strict();
+export const TaskCheckInputSchema = z.object({ task_id: IdSchema.optional(), include_evaluation: z.boolean().default(false) }).strict();
 
 export type TaskOpenInput = z.infer<typeof TaskOpenInputSchema>;
 export type TaskUpdateInput = z.infer<typeof TaskUpdateInputSchema>;

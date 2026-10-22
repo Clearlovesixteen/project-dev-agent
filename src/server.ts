@@ -94,7 +94,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).update(input)));
   server.registerTool("task_check", {
-    description: "省略 task_id 可恢复当前活跃任务。比较清单、Git 改动和证据绑定的代码指纹，返回待验收项、过期证据及当前 review_snapshot。审查和执行验证前保留此指纹，完成后传入 task_update；本工具不执行测试或确认业务正确性。",
+    description: "省略 task_id 可恢复当前活跃任务。比较清单、Git 改动和证据绑定的代码指纹，返回待验收项、过期证据、关联线索和正常/边界/异常业务场景。可将场景 business_check 绑定现有验收项；include_evaluation: true 附本项目任务统计，无真实配对不计算改善。返回当前 review_snapshot。审查和执行验证前保留此指纹，完成后传入 task_update；本工具不执行测试或确认业务正确性。",
     inputSchema: TaskCheckInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).check(input)));
@@ -129,17 +129,17 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
   }, async ({ project, ...input }) => run(project, (binding) => new HistoryService(binding).record(input)));
   // 项目理解同样区分结构索引与语义模型：先定位源码，再按需保存有证据的理解。
   server.registerTool("project_scan", {
-    description: "从 Git 可见源码建立或刷新有数量和容量限制的全仓库结构索引。排除依赖、生成产物、敏感路径和嵌套仓库，记录模块、角色、导入线索、包声明及哈希，不执行项目代码。扫描不代表读懂全部业务。本地状态需已忽略，并保留未提交改动。",
+    description: "从 Git 可见源码建立或刷新有数量和容量限制的全仓库结构索引。排除依赖、生成产物、敏感路径和嵌套仓库，以安全路径和文件元数据复用未变化结构，记录实际读取/复用量；提取模块、角色、导入、共享标识符、包声明及哈希，不执行项目代码。扫描不代表读懂全部业务。本地状态需已忽略，并保留未提交改动。",
     inputSchema: ScanInput.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).scan(input)));
   server.registerTool("project_context", {
-    description: "查询代码线索与业务模型，沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
+    description: "查询代码线索与业务模型，返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
     inputSchema: ContextInput.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).context(input)));
   server.registerTool("project_model_record", {
-    description: "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason。不会确认团队规则。",
+    description: "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，可选 assertion 描述对象、属性及取值以辅助冲突检查；支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason。不会确认团队规则。",
     inputSchema: ModelRecordInput.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).record(input)));

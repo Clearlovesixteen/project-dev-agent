@@ -7,6 +7,9 @@ import { mapFiles, models, readMap } from "./store.js";
 import { excluded, mapConfigHash, safeSource } from "./scan.js";
 import { AppError } from "../domain/error.js";
 import { ModelEvidence, sourcePath } from "./model-evidence.js";
+import { businessScenarios } from "../quality/scenarios.js";
+import { impactCandidates } from "../quality/impact.js";
+import { auditModels } from "./model-audit.js";
 import { materializeModel, modelPreview, relatedModelIds, selectModelRules } from "./model-view.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
@@ -82,6 +85,8 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
       || await mapConfigHash(files, config) !== map.config_hash || pathStates.some((state) => state !== "current" && state !== "missing_after_scan");
     return { state: stale ? "needs_rescan" : detail.status === "needs_review" ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
       files: [], modules: [], models: [detail], models_truncated: detail.content_truncated, next_model_offset: null,
+      model_audit: auditModels(eligibleModels, new Set([model.id])),
+      ...(request.rule_ids ? { business_checks: businessScenarios([detail]) } : {}),
       report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
   }
   const modelCandidates = eligibleModels.filter((model) => !paths.length
@@ -114,6 +119,8 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+    model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
+    impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),
     snapshot: { head: map.head, scanned_at: map.scanned_at, coverage: map.coverage }, files: fileResults,
     files_truncated: matched.length > request.limit || relatedTotal > 10 || fileResults.length < selected.length,
     unindexed_paths: paths.filter((path) => !entries.some((entry) => intersects(path, entry.path))),

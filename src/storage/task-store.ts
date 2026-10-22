@@ -89,6 +89,28 @@ export class TaskStore {
     return task;
   }
 
+  /** 只读、限量列出本工作树任务，供效果统计使用；截断时不能声称覆盖全部项目历史。 */
+  async list(limit = 100): Promise<{ tasks: Task[]; truncated: boolean }> {
+    let paths: StatePaths;
+    try { paths = await this.prepare(false); } catch (error) {
+      if (error instanceof AppError && error.code === "TASK_NOT_FOUND") return { tasks: [], truncated: false };
+      throw error;
+    }
+    const tasks: Task[] = [];
+    const directory = await opendir(paths.tasks);
+    let count = 0;
+    for await (const entry of directory) {
+      if (++count > MAX_TASK_ENTRIES) return { tasks, truncated: true };
+      if (!entry.name.endsWith(".json")) continue;
+      if (tasks.length >= limit) return { tasks, truncated: true };
+      const id = taskId(entry.name.slice(0, -5));
+      const task = await this.readTask(join(paths.tasks, entry.name));
+      if (task.id !== id) throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
+      this.assertBinding(task, paths.root); tasks.push(task);
+    }
+    return { tasks, truncated: false };
+  }
+
   async active(): Promise<Task | undefined> {
     let paths: StatePaths;
     try { paths = await this.prepare(false); } catch (error) {
@@ -130,6 +152,9 @@ export class TaskStore {
         if (candidate[field] !== current[field]) {
           throw new AppError("IMMUTABLE_TASK_FIELD", `任务字段 ${field} 不允许修改`);
         }
+      }
+      if (JSON.stringify(candidate.evaluation) !== JSON.stringify(current.evaluation)) {
+        throw new AppError("IMMUTABLE_TASK_FIELD", "评测分组属于初始任务定义，不能事后改组或移除");
       }
       const next = parseTask({ ...candidate, revision: current.revision + 1, updated_at: new Date().toISOString() });
       await this.writeTask(paths, next, true);

@@ -1,3 +1,4 @@
+import type { Task } from "../domain/task.js";
 import { AppError } from "../domain/error.js";
 import { digest } from "../knowledge/document.js";
 import type { ProjectConfig } from "../knowledge/config.js";
@@ -18,14 +19,17 @@ export function sourceFingerprint(source: SourceV2): string {
 }
 
 export function ruleFingerprint(rule: RuleV2): string {
-  return digest(JSON.stringify([rule.id, rule.description, rule.responsibility, rule.basis, rule.conditions, rule.exceptions, rule.source_ids]));
+  const fields: unknown[] = [rule.id, rule.description, rule.responsibility, rule.basis, rule.conditions, rule.exceptions, rule.source_ids];
+  // 未使用断言的旧规则保持原有指纹，避免升级本身使全部验收失效。
+  if (rule.assertion) fields.push(rule.assertion);
+  return digest(JSON.stringify(fields));
 }
 
 /** 单次查询或修订共用读取缓存，避免同一来源被每条规则反复读取。 */
 export class ModelEvidence {
   private readonly fileCache = new Map<string, Promise<string>>();
   private readonly taskCache = new Map<string, Promise<string>>();
-  constructor(private readonly files: ProjectFiles, private readonly config: ProjectConfig, private readonly entries: Map<string, MapFile>, private readonly repoIdentity: string) {}
+  constructor(private readonly files: ProjectFiles, private readonly config: ProjectConfig, private readonly entries: Map<string, MapFile>, private readonly repoIdentity: string, private readonly taskOverrides?: ReadonlyMap<string, Task>) {}
 
   private file(path: string): Promise<string> {
     let value = this.fileCache.get(path);
@@ -38,7 +42,7 @@ export class ModelEvidence {
     let value = this.taskCache.get(key);
     if (!value) {
       value = (async () => {
-        const task = await new TaskStore(this.files.root).load(source.task_id);
+        const task = this.taskOverrides?.get(source.task_id) ?? await new TaskStore(this.files.root).load(source.task_id);
         if (task.worktree_path !== this.files.root || task.repo_identity !== this.repoIdentity) throw new AppError("PROJECT_MODEL_TASK_SCOPE", "任务依据必须属于当前仓库及工作区");
         if (!source.correction_id) return task.requirement;
         const correction = task.corrections.find((item) => item.id === source.correction_id);

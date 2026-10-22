@@ -1,0 +1,3 @@
+interface:
+  display_name: "项目开发"
+  short_description: "首次使用自动初始化项目，结合代码、业务背景和历史习惯开发需求。"

@@ -89,3 +89,12 @@
 模型更新使用预期修订号并保留不可变历史；冲突时重新读取、合并再试，不能覆盖他人修订。单模型最多 20 条规则、30 条关系、30 条来源，保存上限 64 KiB；超限按业务能力拆分，不能删掉必要异常来凑长度。标题、说明默认中文，原文引用不翻译。结构化内容、依据和异常均由 Agent 维护，用户无需填写这些参数。
 
 CLI 可用 `project context --project ... --model-id ... --rule-id edit` 查询；多个规则重复传 `--rule-id`。记录与修订继续使用 `model record --project ... --file ...`。扫描或模型不可用时说明限制，继续依据当前源码完成不受影响的工作。
+
+
+## 0.8：分歧、重复与增量扫描
+
+- `rules[].assertion` 可选，例如 `{ "subject": "冻结订单", "property": "允许编辑", "value": "false" }`。它是 Agent 对原文结论的提炼，不代替 `description`、条件、异常和逐条来源。
+- `project_context` 及记录结果的 `model_audit` 返回范围重叠、职责/条件/异常一致时的 `rule_conflict`、`behavior_divergence`、`duplicate_rule` 和术语差异。包含修订及规则详情请求；结果受数量和容量限制，`truncated` 必须保留。断言缺失、近义词、条件歧义仍需 Codex 阅读来源核实。
+- `duplicate_rule.canonical` 是稳定的引用建议，不代表被批准的权威模型。优先复用业务关系；必要整理使用原有 patch，核对意义、保留来源，不自动删除模型。
+- `impact` 根据双向直接导入、显式业务关系及共享标识符返回待核对位置。同名标识符不证明属于同一业务对象。
+- 扫描新增 `content_reused/read_files/read_bytes` 统计。路径与纳秒文件元数据未变化时复用结构解析，新增、删除、改名和别名仍重新解析关系；缓存命中仍核验路径边界。业务规则新鲜度继续读取实际来源，不由扫描缓存代替。

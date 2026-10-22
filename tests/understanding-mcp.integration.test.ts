@@ -46,19 +46,26 @@ test("新版模型通过真实 MCP 创建、按规则读取、局部修订并跨
     return ToolResultSchema.parse(result.structuredContent);
   };
   const first = await connect();
+  const opened = await call(first, "task_open", { requirement: "协议夹具：核对服务入口", acceptance_criteria: [{ id: "initial", description: "服务入口保持正确" }],
+    evaluation: { case_id: "mcp-fixture", variant: "assisted", sample: "fixture" } });
+  const task = opened.data as any; assert.equal(opened.outcome, "ok");
   const available = (await first.listTools()).tools;
   assert.ok(available.find((tool) => tool.name === "project_model_record")?.inputSchema.properties?.patch);
   assert.ok(available.find((tool) => tool.name === "project_context")?.inputSchema.properties?.rule_ids);
+  assert.ok(available.find((tool) => tool.name === "task_check")?.inputSchema.properties?.include_evaluation);
   await call(first, "project_scan", {});
   const context = (await call(first, "project_context", { paths: ["src/service.js"] })).data as any;
   const source = context.files.find((item: any) => item.path === "src/service.js");
   const lines = (await readFile(join(fixture.path, source.path), "utf8")).split("\n"), index = lines.findIndex((line) => line.trim().length > 3);
-  const rule = { id: "service", description: "服务入口按当前实现提供业务能力", responsibility: "unknown", basis: "observed", conditions: ["调用该服务时"], exceptions: ["具体异常分支需要进一步核对"], source_ids: ["service-code"] };
+  const rule = { id: "service", description: "服务入口按当前实现提供业务能力", responsibility: "unknown", basis: "observed", conditions: ["调用该服务时"], exceptions: ["具体异常分支需要进一步核对"], source_ids: ["service-code"], assertion: { subject: "服务入口", property: "提供能力", value: "true" } };
   const created = await call(first, "project_model_record", { id: "business-service", schema_version: 2, expected_revision: 0, scan_id: context.scan_id,
     revision_reason: "记录已阅读入口，保留未知语义", module: "src", title: "服务入口观察", scope: [source.path], summary: "只记录可核对的入口线索。",
     entities: [], flows: [], rules: [rule], relations: [], questions: ["完整业务条件待任务核对"], related_paths: [source.path],
     sources: [{ id: "service-code", kind: "code", path: source.path, sha256: source.sha256, line: index + 1, quote: lines[index] }] });
   assert.equal(created.outcome, "ok", JSON.stringify(created));
+  assert.equal((await call(first, "task_update", { task_id: task.id, expected_revision: 0, change_items: [{ id: "service-check", target_path: source.path, action: "verify", requirement: "协议夹具", rationale: "核对入口", sources: [{ kind: "code", reference: source.path }] }] })).outcome, "ok");
+  const quality = (await call(first, "task_check", { include_evaluation: true })).data as any;
+  assert.equal(quality.quality.business_checks.total, 3); assert.equal(quality.evaluation.fixture_tasks, 1);
   const preview = (await call(first, "project_context", { paths: [source.path] })).data as any;
   assert.equal(preview.models[0].content_truncated, true); assert.equal(preview.models[0].sources, undefined);
   const updated = await call(first, "project_model_record", { id: "business-service", schema_version: 2, expected_revision: 1, scan_id: context.scan_id,
@@ -70,5 +77,8 @@ test("新版模型通过真实 MCP 创建、按规则读取、局部修订并跨
   assert.equal(detail.models[0].rules[0].freshness, "current");
   assert.deepEqual(detail.models[0].rules[0].conditions, ["当前模块调用入口时"]);
   assert.deepEqual(detail.models[0].rules[0].exceptions, rule.exceptions);
+  assert.deepEqual(detail.models[0].rules[0].assertion, rule.assertion);
+  const qualityAgain = (await call(second, "task_check", { include_evaluation: true })).data as any;
+  assert.equal(qualityAgain.quality.state, "advisory"); assert.equal(qualityAgain.evaluation.fixture_tasks, 1);
   assert.equal(detail.models[0].sources[0].sha256, source.sha256);
 });

@@ -1,3 +1,4 @@
+import { qualityReview, projectEvaluation, assertBusinessAcceptance } from "./quality/review.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError } from "./domain/error.js";
@@ -70,6 +71,7 @@ export class TaskService {
       const task = TaskSchema.parse({
         schema_version: 1, id: randomUUID(), revision: 0, repo_identity: current.repo_identity, worktree_path: current.root,
         baseline_head: current.head, baseline_branch: current.branch, phase: "active", requirement: request.requirement,
+        ...(request.evaluation ? { evaluation: request.evaluation } : {}),
         acceptance_criteria: request.acceptance_criteria, change_items: [], created_at: now, updated_at: now,
       });
       const saved = await this.store.create(task);
@@ -127,6 +129,8 @@ export class TaskService {
         if (next.phase === "closed" && snapshot) {
           if (snapshot.paths.some((path) => !next.change_items.some((item) => item.target_path === path))) throw new AppError("UNREVIEWED_CHANGES", "关闭前出现清单之外的改动，请补充审查");
           if (Object.values(staleReviews(next, snapshot.hash)).some((ids) => ids.length)) throw new AppError("REVIEW_STALE", "代码已变化或旧记录尚未绑定代码快照，请重新审查和验证后关闭任务");
+          try { await assertBusinessAcceptance(this.binding, next, snapshot.hash); }
+          catch (error) { throw new AppError("BUSINESS_CHECK_STALE", error instanceof Error ? error.message : String(error)); }
         }
         return next;
       });
@@ -143,7 +147,7 @@ export class TaskService {
       const task_id = task.id;
       if (task.repo_identity !== this.binding.repo_identity) throw new AppError("TASK_BINDING_MISMATCH", "该任务属于其他仓库");
       if (task.phase !== "active") {
-        return { outcome: "incomplete", code: "TASK_INACTIVE", data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task },
+        return { outcome: "incomplete", code: "TASK_INACTIVE", data: { task_id, revision: task.revision, phase: task.phase, recorded_task: task, ...(request.include_evaluation ? { evaluation: await projectEvaluation(this.binding) } : {}) },
           diagnostics: [{ code: "TASK_INACTIVE", message: "该任务已结束，其记录仅供历史查询；当前工作树的改动不会归入此任务。" }] };
       }
       let changed: string[];
@@ -175,6 +179,8 @@ export class TaskService {
           changed_paths: changed, unexpected_changes: unexpected, pending_items: pending,
           pending_acceptance: acceptance, unresolved_validations: validations,
           review_snapshot: snapshot, stale_evidence: stale,
+          quality: await qualityReview(this.binding, task, changed, snapshot),
+          ...(request.include_evaluation ? { evaluation: await projectEvaluation(this.binding) } : {}),
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
           limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",

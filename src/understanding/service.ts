@@ -49,6 +49,7 @@ export class UnderstandingService {
         try { await renderProjectReport(this.files); }
         catch { diagnostics.push({ code: "PROJECT_REPORT_UNAVAILABLE", message: "模型修订已保存，报告生成失败；可通过 project_context 读取，不要重复写入。" }); }
         return { outcome: "ok", code: "PROJECT_MODEL_RECORDED", data: { id: model.id, revision: model.revision,
+          model_audit: "model_audit" in current ? current.model_audit : undefined,
           status: view?.status ?? "needs_review", effective: false, schema_version: model.schema_version,
           ...("review_required" in (view ?? {}) ? { review_required: (view as Record<string, unknown>).review_required } : {}),
           report: `${MAP_DIR}/report.html`, next_step: "模型已保存；未复核条目继续保留旧依据。引用匹配不证明业务判断正确，也不代表用户或团队批准。" }, diagnostics };

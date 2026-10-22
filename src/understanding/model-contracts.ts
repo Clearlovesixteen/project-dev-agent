@@ -24,6 +24,8 @@ export const BusinessRule = z.object({
   id: IdSchema, description: ShortText, responsibility: Responsibility, basis: Basis,
   conditions: z.array(ShortText).min(1).max(8), exceptions: z.array(ShortText).max(8),
   source_ids: z.array(IdSchema).min(1).max(10),
+  assertion: z.object({ subject: z.string().trim().min(1).max(120), property: z.string().trim().min(1).max(120),
+    value: z.string().trim().min(1).max(200) }).strict().optional(),
 }).strict();
 export const BusinessRelation = z.object({
   id: IdSchema, rule_ids: z.array(IdSchema).min(1).max(10),

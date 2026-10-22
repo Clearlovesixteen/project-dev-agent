@@ -1,3 +1,4 @@
+import { BusinessCheckSchema, EvaluationTagSchema } from "../quality/contracts.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { EvidenceSchema, IdSchema, RelativePathSchema, ReviewSnapshotSchema, SourceSchema, TextSchema } from "./common.js";
@@ -34,6 +35,7 @@ export const ChangeItemSchema = z.object({
 });
 
 export const AcceptanceCriterionSchema = z.object({
+  business_check: BusinessCheckSchema.optional(),
   id: IdSchema,
   description: TextSchema,
   status: z.enum(["pending", "checked"]).default("pending"),
@@ -73,6 +75,7 @@ export const TaskSchema = z.object({
   baseline_branch: TextSchema.nullable(),
   phase: z.enum(["active", "closed", "aborted"]),
   requirement: TextSchema,
+  evaluation: EvaluationTagSchema.optional(),
   acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100),
   knowledge_versions: z.array(z.object({ id: IdSchema, version: TextSchema }).strict()).max(100).default([]),
   change_items: z.array(ChangeItemSchema).max(500).default([]),

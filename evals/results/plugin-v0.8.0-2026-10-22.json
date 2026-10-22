@@ -1,0 +1,79 @@
+{
+  "version": "0.8.0",
+  "verified_on": "2026-10-22",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 155,
+      "pass": 155,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 155,
+      "pass": 155,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 155,
+      "pass": 155,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "suite_execution": "逐版本运行，每个版本内部 test-concurrency=4；无放宽 MCP 请求超时。",
+  "features_verified": [
+    "条件、职责、异常及范围一致时的断言冲突与代码/需求分歧；不同性质的规则不直接归并",
+    "明确重复规则、术语差异和公共模型引用建议，保留来源、模型及旧修订",
+    "计划与实际路径的双向引用、共享标识符、业务关系线索；删除文件后的未解析引用",
+    "正常、边界、异常场景绑定规则及依据指纹；旧验收、混合新旧验收不能关闭任务",
+    "关闭请求同时修改任务来源时，按即将保存的内容复核，失败不会写入或关闭任务",
+    "本项目只读统计、真实与夹具区分、同口径唯一配对、无对照不报改善、分组不可事后改写",
+    "元数据复用内容解析、等长改写及还原时间戳仍重新读取、新增删除及别名目标重新解析、缓存命中仍拒绝链接和嵌套仓库",
+    "真实 STDIO 创建任务、记录断言、查询业务场景及统计、重启恢复；0.7.0 Skill 升级和回滚"
+  ],
+  "native_upgrade": {
+    "node": "18.19.1",
+    "from_version": "0.7.0",
+    "to_version": "0.8.0",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true,
+    "verified_at": "2026-10-22T08:25:42.573Z",
+    "refresh_updates_cached_runtime": true,
+    "refresh_updates_installed_version": true,
+    "legacy_model_migrated_and_patched_after_restart": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v070_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "unchanged_v070_rule_fingerprint_preserved": true,
+    "workspace_and_task_preserved": true,
+    "result": "passed"
+  },
+  "plugin_runtime_sha256": "c144507e077f8a37867640ceafe6be73daa35303b873e5ccd4b82d727242b0c3",
+  "plugin_inventory_files": 74,
+  "verification_caveats": [
+    {
+      "scenario": "本机同时运行三版本完整矩阵及 CLI 升级验证",
+      "observed": "MCP 重启集成用例请求超时，其余153项通过。",
+      "follow_up": "最小调用链、三版本并发专项各15项及隔离完整矩阵155项均通过；没有放宽正式测试超时，未稳定复现，根因尚未确认。"
+    }
+  ],
+  "limitations": [
+    "未取得团队真实需求的同口径配对样本；已实现采集和比较机制，不能据夹具测试宣称真实减少纠偏、返工或遗漏。",
+    "断言及同名标识符检查是有界候选分析，不覆盖全部自然语言冲突、动态依赖和隐藏业务关系。",
+    "重复合并由 Agent 核对语义、复用公共引用并局部修订，不自动删除整份模型。",
+    "没有进行独立模型业务建模或生码效果评测；规则与引用校验不保证业务语义正确。"
+  ],
+  "documentation_links_checked": 22
+}

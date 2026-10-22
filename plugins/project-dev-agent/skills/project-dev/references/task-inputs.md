@@ -87,3 +87,20 @@
 修改来源文件前，用 `task_update` 保存已使用的确认知识：`knowledge_versions: [{ "id": "rule-id", "version": "returned-sha256" }]`，保留已有 ID。任务记录这些历史版本；来源变化后，当前查询可能要求重新审查。
 
 经验草稿示例：`{ "task_id": "...", "correction_id": "existing-correction-id", "title": "可复用的经验标题", "type": "change_relation", "modules": ["module-name"], "paths": ["src"], "applicable_conditions": ["具体适用情境"], "rule": "拟采用的行为规则", "review_questions": ["需要同事核实哪些问题？"] }`。类型还包括 `code_convention` 和 `business_rule`。工具复制纠正记录的原因与来源，只生成本地草稿并返回相对路径，不确认或发布规则。
+
+
+## 0.8：业务验收和效果统计
+
+`task_check.data.quality` 返回关联线索、业务场景、规则分歧和现有检查脚本。`state` 为 `not_scanned/unavailable` 时不是检查通过。`index_state: needs_rescan` 先刷新索引。场景数量有限，检查 `truncated/models_truncated`，默认最多15个关联位置和10个业务场景；通过 `project_context {model_id, rule_ids}` 分批读取规则场景，再写入当前任务验收。
+
+适用场景的 `business_check` 原样附在现有验收项：
+
+```json
+{"id":"freeze-boundary","description":"核对冻结状态成立及不成立时的编辑行为","status":"pending","business_check":{"model_id":"orders","rule_id":"editable","rule_fingerprint":"工具返回的64位哈希","scenario_id":"工具返回的场景ID"}}
+```
+
+上例哈希和 ID 是占位说明；必须采用工具实际返回值。完成时仍需审查者、证据和当前 `review_snapshot`。规则或来源变化后显示 `stale/needs_rule_review`，场景本身消失时通过 `obsolete_acceptance_ids` 提示；复核、修订验收后才能关闭，失败返回 `BUSINESS_CHECK_STALE`。普通已完成验收不会自动算作某条业务场景已覆盖。
+
+收尾时在原工具加 `include_evaluation: true`，读取本项目至多100条任务统计；截断明确标识。`observed` 是当前记录数、纠正条目数、待验收与当前失败验证记录数，不是实际返工工时或历史交互总次数。
+
+明确安排同需求对照时，可在 `task_open` 附 `evaluation: {"case_id":"real-case-1","variant":"baseline","sample":"real"}`；另一条使用 `variant: assisted`。元数据创建后不可改组。只有唯一、已完成、需求及验收描述一致的真实配对才比较纠正条目差异。`sample: fixture`、无对照、口径变化、重复样本和截断结果不产生真实改善结论。日常不要求填写该字段，也不自动伪造 baseline。

@@ -1,3 +1,4 @@
+import { lexicalReferences } from "./lexical.js";
 import { posix } from "node:path";
 import { lstat } from "node:fs/promises";
 import { AppError } from "../domain/error.js";
@@ -18,14 +19,25 @@ export function excluded(path: string, config: ProjectConfig): boolean {
     || /(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock)$|\.(?:min\.js|map|pem|key|p12|pfx)$/i.test(path)
     || config.exclude_paths.some((pattern) => matchesPath(pattern, path));
 }
-export async function safeSource(files: ProjectFiles, path: string, config: ProjectConfig): Promise<string> {
+async function sourceBoundary(files: ProjectFiles, path: string, config: ProjectConfig): Promise<void> {
   if (excluded(path, config)) throw new AppError("PROJECT_SOURCE_EXCLUDED", "该来源已被排除在项目理解范围之外");
   const parts = path.split("/");
   for (let i = 1; i < parts.length; i++) {
     try { await lstat(`${files.root}/${parts.slice(0, i).join("/")}/.git`); throw new AppError("PROJECT_SOURCE_NESTED", "嵌套仓库需要单独扫描"); }
     catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
   }
+}
+export async function safeSource(files: ProjectFiles, path: string, config: ProjectConfig): Promise<string> {
+  await sourceBoundary(files, path, config);
   return files.read(path, MAX_SOURCE);
+}
+
+/** 元数据仅用于复用结构解析；每次仍检查真实路径、嵌套仓库和文件类型，业务证据另行读取原文。 */
+async function sourceSignature(files: ProjectFiles, path: string, config: ProjectConfig): Promise<string> {
+  await sourceBoundary(files, path, config);
+  const info = await lstat(await files.path(path), { bigint: true });
+  if (!info.isFile() || info.size > BigInt(MAX_SOURCE)) throw new AppError("PROJECT_SOURCE_UNSAFE", "来源必须是容量范围内的普通文件");
+  return digest(["structure-v1", info.dev, info.ino, info.size, info.mode, info.mtimeNs, info.ctimeNs].join(":"));
 }
 /** JSON with comments/trailing commas, preserving strings; no config code or extends execution. */
 function jsonc(text: string): unknown {
@@ -109,7 +121,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   const paths = [...new Set(decodeGitOutput((await readGit(binding.root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).stdout).split("\0").filter(Boolean))].sort();
   const previous = new Map((await mapFiles(files)).map((file) => [file.path, file]));
   const records: MapFile[] = [], diagnostics: ProjectMap["diagnostics"] = [];
-  const coverage = { discovered: paths.length, indexed: 0, excluded: 0, unreadable: 0, unsupported: 0, reused: 0, complete: true };
+  const coverage = { discovered: paths.length, indexed: 0, excluded: 0, unreadable: 0, unsupported: 0, reused: 0, complete: true, content_reused: 0, read_files: 0, read_bytes: 0 };
   const eligible = paths.filter((path) => {
     if (excluded(path, config)) { coverage.excluded++; return false; }
     if (!EXTENSIONS.has(posix.extname(path)) && !/^(?:Dockerfile|Makefile|\.eslintrc|\.prettierrc)$/.test(posix.basename(path))) { coverage.unsupported++; return false; }
@@ -121,13 +133,19 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   for (const path of eligible) {
     if (records.length >= 10_000 || totalBytes >= 80_000_000) { diagnostic("PROJECT_SCAN_LIMIT", "剩余文件超出 10,000 个文件或 80 MB 的读取上限；本次扫描仅覆盖部分范围"); break; }
     try {
-      const content = await safeSource(files, path, config), bytes = Buffer.byteLength(content); totalBytes += bytes;
-      if (content.includes("\0")) { coverage.unsupported++; continue; }
-      const sha256 = digest(content), prior = previous.get(path);
-      const imports = prior?.sha256 === sha256 ? prior.imports : /\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(path) ? literalImports(content) : [];
+      const stat_signature = await sourceSignature(files, path, config), prior = previous.get(path);
+      const cached = prior?.stat_signature === stat_signature && (posix.basename(path) !== "package.json" || prior.package);
+      const content = cached ? null : await safeSource(files, path, config);
+      const bytes = content === null ? prior!.bytes : Buffer.byteLength(content); totalBytes += bytes;
+      if (content === null) coverage.content_reused++;
+      else { coverage.read_files++; coverage.read_bytes += bytes; }
+      if (content?.includes("\0")) { coverage.unsupported++; continue; }
+      const sha256 = content === null ? prior!.sha256 : digest(content);
+      if (await sourceSignature(files, path, config) !== stat_signature) throw new AppError("PROJECT_SOURCE_CHANGED", "读取期间来源变化，请重新扫描");
+      const imports = prior?.sha256 === sha256 ? prior.imports : /\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(path) ? literalImports(content!) : [];
       if (prior?.sha256 === sha256) coverage.reused++;
-      let pkg: MapFile["package"];
-      if (posix.basename(path) === "package.json") {
+      let pkg: MapFile["package"] = cached ? prior?.package : undefined;
+      if (posix.basename(path) === "package.json" && content !== null) {
         try {
           const value = JSON.parse(content);
           const entries = Object.entries({ ...value.dependencies, ...value.devDependencies }).filter(([name, value]) => name.length <= 200 && typeof value === "string" && value.length <= 200);
@@ -135,7 +153,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
           pkg = { dependencies: entries.slice(0, 120).map(([name, declared]) => ({ name, declared: String(declared) })), scripts: scripts.slice(0, 40), truncated: entries.length > 120 || scripts.length > 40 };
         } catch { diagnostic("PROJECT_PACKAGE_INVALID", `${path}：无法解析依赖声明`); }
       }
-      records.push(FileSchema.parse({ path, sha256, bytes, module: moduleFor(path, config), role: roleFor(path),
+      records.push(FileSchema.parse({ path, sha256, bytes, stat_signature, ...(content === null ? { symbols: prior!.symbols, identifiers: prior!.identifiers, identifiers_truncated: prior!.identifiers_truncated } : lexicalReferences(content)), module: moduleFor(path, config), role: roleFor(path),
         imports: imports.slice(0, 40).map((entry) => ({ specifier: entry.specifier, line: entry.line, target: resolveImport(path, entry.specifier, all, mappings) })),
         imports_truncated: prior?.sha256 === sha256 ? prior.imports_truncated : imports.length > 40, ...(pkg ? { package: pkg } : {}) }));
     } catch (error) { coverage.unreadable++; diagnostic("PROJECT_FILE_UNREADABLE", `${path}: ${error instanceof Error ? error.message : String(error)}`); }
