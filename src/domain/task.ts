@@ -1,4 +1,4 @@
-import { BusinessCheckSchema, EvaluationTagSchema } from "../quality/contracts.js";
+import { BusinessCheckSchema, EvaluationTagSchema, ImplementationBaselineSchema, ReuseExceptionSchema } from "../quality/contracts.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { EvidenceSchema, IdSchema, RelativePathSchema, ReviewSnapshotSchema, SourceSchema, TextSchema } from "./common.js";
@@ -19,6 +19,7 @@ export const ChangeItemSchema = z.object({
   status: z.enum(["pending", "checked", "skipped"]).default("pending"),
   ...ReviewFields,
   skip_reason: TextSchema.optional(),
+  reuse_exception: ReuseExceptionSchema.optional(),
 }).strict().superRefine((item, ctx) => {
   if (item.status !== "pending" && !item.reviewed_by) {
     ctx.addIssue({ code: "custom", path: ["reviewed_by"], message: "已完成的审查决定必须填写审查者" });
@@ -76,6 +77,7 @@ export const TaskSchema = z.object({
   phase: z.enum(["active", "closed", "aborted"]),
   requirement: TextSchema,
   evaluation: EvaluationTagSchema.optional(),
+  implementation_baseline: ImplementationBaselineSchema.optional(),
   acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100),
   knowledge_versions: z.array(z.object({ id: IdSchema, version: TextSchema }).strict()).max(100).default([]),
   change_items: z.array(ChangeItemSchema).max(500).default([]),

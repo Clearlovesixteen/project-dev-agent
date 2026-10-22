@@ -156,6 +156,9 @@ export class TaskStore {
       if (JSON.stringify(candidate.evaluation) !== JSON.stringify(current.evaluation)) {
         throw new AppError("IMMUTABLE_TASK_FIELD", "评测分组属于初始任务定义，不能事后改组或移除");
       }
+      if (JSON.stringify(candidate.implementation_baseline) !== JSON.stringify(current.implementation_baseline)) {
+        throw new AppError("IMMUTABLE_TASK_FIELD", "项目公共能力基线由任务创建时捕获，不能事后改写");
+      }
       const next = parseTask({ ...candidate, revision: current.revision + 1, updated_at: new Date().toISOString() });
       await this.writeTask(paths, next, true);
       return structuredClone(next);

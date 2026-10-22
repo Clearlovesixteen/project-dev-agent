@@ -54,7 +54,7 @@ export async function connectCodex(options: Options) {
     if (before !== undefined && before !== content) {
       // Upgrade only an exact bundled predecessor. Never replace local customizations.
       const predecessors: string[] = [];
-      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.2", "v0.6.3", "v0.6.4", "v0.6.5", "v0.7.0"]) {
+      if (!options.disconnect) for (const version of ["v0.2.1", "v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.2", "v0.6.3", "v0.6.4", "v0.6.5", "v0.7.0", "v0.8.0"]) {
         try { predecessors.push(await readFile(join(toolRoot, "templates/previous-skills", version, name), "utf8")); }
         catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
       }

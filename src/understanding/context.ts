@@ -1,3 +1,4 @@
+import { implementationContext } from "../quality/implementation-context.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { digest } from "../knowledge/document.js";
 import { loadConfig } from "../knowledge/config.js";
@@ -119,6 +120,7 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+    implementation_context: await implementationContext(files, entries, config, paths),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),
     snapshot: { head: map.head, scanned_at: map.scanned_at, coverage: map.coverage }, files: fileResults,

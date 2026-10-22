@@ -104,3 +104,12 @@
 收尾时在原工具加 `include_evaluation: true`，读取本项目至多100条任务统计；截断明确标识。`observed` 是当前记录数、纠正条目数、待验收与当前失败验证记录数，不是实际返工工时或历史交互总次数。
 
 明确安排同需求对照时，可在 `task_open` 附 `evaluation: {"case_id":"real-case-1","variant":"baseline","sample":"real"}`；另一条使用 `variant: assisted`。元数据创建后不可改组。只有唯一、已完成、需求及验收描述一致的真实配对才比较纠正条目差异。`sample: fixture`、无对照、口径变化、重复样本和截断结果不产生真实改善结论。日常不要求填写该字段，也不自动伪造 baseline。
+
+
+## 0.8.1：请求基础设施复用检查
+
+创建任务时，服务自动捕获 `implementation_baseline`，记录已发现的项目请求入口；该字段不接收工具输入，也不能事后改写。`task_check.quality.reuse` 比较 Git 基线与本次底层 HTTP 新用法：已有封装时，业务模块新建 axios 客户端或直接使用底层请求会返回 `PROJECT_REUSE_REQUIRED`；即使其他清单完成，也不能直接关闭。旧任务缺少快照时按基线与当前索引补查，新写的客户端不能成为既有能力。覆盖不完整时返回 `PROJECT_REUSE_CONTEXT_REQUIRED`，不能声称复用审查通过。
+
+必要例外由 Agent 在对应 `change_items` 中附：`reuse_exception: {capability: "http", reason: "具体缺口、已查扩展及验证理由", inspected_path: "实际统一入口", source_version: "current", sha256: "实际64位哈希", line: 1, quote: "该行的实际原文"}`。上例路径和哈希是占位说明；原文必须存在、哈希一致，清单项仍需 checked、审查者、证据与当前 review_snapshot。`source_version: baseline` 用于确实需要替换旧基础设施且当前原文已修改的情况，引用任务 Git 基线。
+
+无项目封装时允许按需建立基础能力；既有底层调用未增加、原统一入口内部维护、类型导入与注释不算新增重复。检测是静态词法线索，不能保证覆盖动态调用、所有语言和语义等价的绕过方式；例外理由仍由执行者核实，不因引用格式有效就宣称架构正确。

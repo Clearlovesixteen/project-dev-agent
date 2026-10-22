@@ -1,3 +1,4 @@
+import { captureImplementationBaseline, requestReuseReview, assertRequestReuse } from "./quality/request-reuse.js";
 import { qualityReview, projectEvaluation, assertBusinessAcceptance } from "./quality/review.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -72,6 +73,7 @@ export class TaskService {
         schema_version: 1, id: randomUUID(), revision: 0, repo_identity: current.repo_identity, worktree_path: current.root,
         baseline_head: current.head, baseline_branch: current.branch, phase: "active", requirement: request.requirement,
         ...(request.evaluation ? { evaluation: request.evaluation } : {}),
+        implementation_baseline: await captureImplementationBaseline(current),
         acceptance_criteria: request.acceptance_criteria, change_items: [], created_at: now, updated_at: now,
       });
       const saved = await this.store.create(task);
@@ -129,6 +131,7 @@ export class TaskService {
         if (next.phase === "closed" && snapshot) {
           if (snapshot.paths.some((path) => !next.change_items.some((item) => item.target_path === path))) throw new AppError("UNREVIEWED_CHANGES", "关闭前出现清单之外的改动，请补充审查");
           if (Object.values(staleReviews(next, snapshot.hash)).some((ids) => ids.length)) throw new AppError("REVIEW_STALE", "代码已变化或旧记录尚未绑定代码快照，请重新审查和验证后关闭任务");
+          await assertRequestReuse(this.binding, next, snapshot.paths);
           try { await assertBusinessAcceptance(this.binding, next, snapshot.hash); }
           catch (error) { throw new AppError("BUSINESS_CHECK_STALE", error instanceof Error ? error.message : String(error)); }
         }
@@ -169,23 +172,26 @@ export class TaskService {
       const expected = new Set(task.change_items.map((item) => item.target_path));
       const unexpected = changed.filter((path) => !expected.has(path));
       const stale = staleReviews(task, snapshot), outdated = Object.values(stale).some((ids) => ids.length);
-      // 这里只判断记录和文件覆盖是否齐全，不能独立判断证据是否足以证明业务正确。
-      const reviewed = task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
+      const reuse = await requestReuseReview(this.binding, task, changed);
+      // 这里只判断记录、复用保护和文件覆盖，不能独立判断业务语义。
+      const reviewed = reuse.state === "checked" && task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
+      const reuseCode = reuse.state === "violations" ? "PROJECT_REUSE_REQUIRED" : reuse.state === "incomplete" ? "PROJECT_REUSE_CONTEXT_REQUIRED" : undefined;
+      const checkCode = reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : reuseCode ?? "REVIEW_INCOMPLETE";
       return {
-        outcome: reviewed ? "ok" : "incomplete", code: reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : "REVIEW_INCOMPLETE",
+        outcome: reviewed ? "ok" : "incomplete", code: checkCode,
         data: {
           task_id, revision: task.revision, phase: task.phase, baseline_head: task.baseline_head,
           recorded_task: task,
           changed_paths: changed, unexpected_changes: unexpected, pending_items: pending,
           pending_acceptance: acceptance, unresolved_validations: validations,
           review_snapshot: snapshot, stale_evidence: stale,
-          quality: await qualityReview(this.binding, task, changed, snapshot),
+          quality: { ...await qualityReview(this.binding, task, changed, snapshot), reuse },
           ...(request.include_evaluation ? { evaluation: await projectEvaluation(this.binding) } : {}),
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
           limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
-        diagnostics: reviewed ? [] : [{ code: outdated ? "REVIEW_STALE" : "REVIEW_INCOMPLETE", message: outdated
+        diagnostics: reviewed ? [] : [{ code: checkCode, message: reuseCode && !outdated ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。" : outdated
           ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，通过 reviewed_ids 明确本次复核的条目，并提交对应完整集合。"
           : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };

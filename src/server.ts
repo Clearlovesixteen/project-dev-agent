@@ -51,7 +51,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
   const run = (project: string | undefined, action: (binding: WorktreeBinding) => Promise<ToolResult>) =>
     operation(async () => action(await bindingFor(project)));
   const server = new McpServer({ name: "project-dev-agent", version: VERSION }, {
-    instructions: (plugin ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。首次使用自动初始化该仓库，无需独立接入命令；已有配置直接复用。所有项目工具均需传入已配置范围内的绝对路径 project。未经用户要求，不扩大已有工作范围。" : workspace ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。` : "") + "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
+    instructions: (plugin ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。首次使用自动初始化该仓库，无需独立接入命令；已有配置直接复用。所有项目工具均需传入已配置范围内的绝对路径 project。未经用户要求，不扩大已有工作范围。" : workspace ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。` : "") + "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。编码前先查询 project_context 的 implementation_context，实际阅读项目规范、同类模块和已有基础设施；新业务目录无命中也不能跳过全局入口。已有请求封装时业务模块不得无依据另起 axios/fetch。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
   });
   // instructions 与工具 annotations 是给客户端的执行提示，不替代后端校验或用户授权。
   if (plugin) {
@@ -84,7 +84,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     : run(project, (binding) => prepareProject(binding, input)));
   // 任务工具只管理需求、基线、清单和证据；代码修改与验证执行由 Codex 完成。
   server.registerTool("task_open", {
-    description: "在已绑定且干净的 Git 工作树中创建开发任务，修改代码前记录需求与验收项，说明文字默认用中文。",
+    description: "在已绑定且干净的 Git 工作树中创建开发任务，修改代码前记录需求与验收项，自动捕获已发现的公共请求入口基线，说明文字默认用中文。",
     inputSchema: TaskOpenInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).open(input)));
@@ -94,7 +94,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).update(input)));
   server.registerTool("task_check", {
-    description: "省略 task_id 可恢复当前活跃任务。比较清单、Git 改动和证据绑定的代码指纹，返回待验收项、过期证据、关联线索和正常/边界/异常业务场景。可将场景 business_check 绑定现有验收项；include_evaluation: true 附本项目任务统计，无真实配对不计算改善。返回当前 review_snapshot。审查和执行验证前保留此指纹，完成后传入 task_update；本工具不执行测试或确认业务正确性。",
+    description: "省略 task_id 可恢复当前活跃任务。比较清单、Git 改动和证据绑定的代码指纹，检查新增底层 HTTP 是否绕过既有封装，quality.reuse 的明确违规或覆盖不足不能直接关闭任务；返回待验收项、过期证据、关联线索和正常/边界/异常业务场景。可将场景 business_check 绑定现有验收项；include_evaluation: true 附本项目任务统计，无真实配对不计算改善。返回当前 review_snapshot。审查和执行验证前保留此指纹，完成后传入 task_update；本工具不执行测试或确认业务正确性。",
     inputSchema: TaskCheckInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).check(input)));
@@ -134,7 +134,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).scan(input)));
   server.registerTool("project_context", {
-    description: "查询代码线索与业务模型，返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
+    description: "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供项目级请求入口、已有模块用法和规范候选；编码前实际阅读。返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
     inputSchema: ContextInput.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).context(input)));
