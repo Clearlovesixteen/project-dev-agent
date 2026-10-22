@@ -97,7 +97,7 @@ test("known v0.2.1 skill upgrades in place and failed registration restores that
   assert.ok(repeated.skill_files.every((file) => file.action === "unchanged"));
 });
 
-for (const version of ["v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.3"]) test(`exact ${version} skill upgrades with project understanding and current startup instructions`, async (t) => {
+for (const version of ["v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.3", "v0.6.5"]) test(`exact ${version} skill upgrades with project understanding and current startup instructions`, async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(await realpath(fixture.root), "v03 home"), directory = join(home, ".agents/skills/project-dev");
   await mkdir(directory, { recursive: true });
@@ -111,15 +111,15 @@ for (const version of ["v0.3.0", "v0.4.0", "v0.5.0", "v0.6.0", "v0.6.3"]) test(`
   await access(join(directory, "references/understanding-inputs.md"));
 });
 
-test("v0.6.4 完整 Skill 升级保留回滚能力并交付生码参考资料", async (t) => {
+for (const version of ["v0.6.4", "v0.6.5"]) test(`${version} 完整 Skill 升级保留回滚能力并交付参考资料`, async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
-  const home = join(await realpath(fixture.root), "v064 home");
+  const home = join(await realpath(fixture.root), `${version} home`);
   const directory = join(home, ".agents/skills/project-dev");
   await mkdir(join(directory, "references"), { recursive: true });
-  const previousRoot = fileURLToPath(new URL("../../templates/previous-skills/v0.6.4/", import.meta.url));
+  const previousRoot = fileURLToPath(new URL(`../../templates/previous-skills/${version}/`, import.meta.url));
   const currentRoot = fileURLToPath(new URL("../../skills/project-dev/", import.meta.url));
   const previous = new Map<string, string>();
-  for (const file of ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md"]) {
+  for (const file of ["SKILL.md", "references/task-inputs.md", "references/history-inputs.md", "references/understanding-inputs.md", ...(version === "v0.6.5" ? ["references/generation-rules.md"] : [])]) {
     const content = await readFile(join(previousRoot, file), "utf8");
     previous.set(file, content); await writeFile(join(directory, file), content);
   }
@@ -128,7 +128,7 @@ test("v0.6.4 完整 Skill 升级保留回滚能力并交付生码参考资料", 
   const failing = async (args: string[]) => { if (args[1] === "list") return "[]"; throw new Error("registration failed"); };
   await assert.rejects(connectCodex({ ...options, runCodex: failing }), /registration failed/);
   for (const [file, content] of previous) assert.equal(await readFile(join(directory, file), "utf8"), content);
-  await assert.rejects(access(join(directory, reference)), { code: "ENOENT" });
+  if (!previous.has(reference)) await assert.rejects(access(join(directory, reference)), { code: "ENOENT" });
   const config = configuration();
   await connectCodex({ ...options, runCodex: config.runCodex });
   for (const file of [...previous.keys(), reference]) {

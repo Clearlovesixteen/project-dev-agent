@@ -115,6 +115,7 @@ async function main(): Promise<void> {
       id: { type: "string" },
       "batch-id": { type: "string" },
       "model-id": { type: "string" },
+      "rule-id": { type: "string", multiple: true },
       "model-revision": { type: "string" },
       "model-offset": { type: "string" },
       refresh: { type: "boolean", default: false },
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
     if (positionals[1] === "scan") result = await service.scan({});
     else if (positionals[1] === "context") result = await service.context({ query: values.query ?? "", paths: values.path ? [values.path] : [],
       model_id: values["model-id"], model_revision: values["model-revision"] === undefined ? undefined : Number(values["model-revision"]),
+      rule_ids: values["rule-id"],
       model_offset: values["model-offset"] === undefined ? 0 : Number(values["model-offset"]) });
     else if (values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
     else throw new Error("model record 需要 --file 参数");

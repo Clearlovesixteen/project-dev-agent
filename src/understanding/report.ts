@@ -3,13 +3,14 @@ import { escapeHtml as e } from "../history/report.js";
 import { mapFiles, models, optional, readMap } from "./store.js";
 import { MAP_DIR } from "./contracts.js";
 import { moduleSummary } from "./context.js";
-import { fileRoleLabel, responsibilityLabels } from "../report-labels.js";
+import { fileRoleLabel } from "../report-labels.js";
+import { modelCard } from "./model-report.js";
 
 export async function renderProjectReport(files: ProjectFiles): Promise<string> {
   const map = await readMap(files); if (!map) return "";
   const entries = await mapFiles(files), candidates = await models(files), modules = moduleSummary(entries);
   const cards = [
-    ...candidates.map((model) => `<article><small>模块理解候选 · 修订 ${model.revision}</small><h2>${e(model.title)}</h2><p>${e(model.summary)}</p><p>范围：${e(model.scope.join("，"))}</p><details><summary>术语、流程、依据与待核实项</summary><ul>${model.entities.map((item) => `<li>${e(item.name)}：${e(item.meaning)}</li>`).join("")}${model.flows.map((item) => `<li>${e(item.name)}：${e(item.steps.join(" → "))}</li>`).join("")}${model.rules.map((item) => `<li>${e(responsibilityLabels[item.responsibility])}：${e(item.description)}</li>`).join("")}</ul>${model.sources.map((source) => `<blockquote>${e(source.quote)}<small>${e(source.path)}:${source.line} · ${e(source.sha256.slice(0, 12))}</small></blockquote>`).join("")}<ul>${model.questions.map((item) => `<li>${e(item)}</li>`).join("")}</ul></details></article>`),
+    ...candidates.map(modelCard),
     ...modules.map((module) => `<article><small>目录或配置推测的模块边界</small><h2>${e(module.module)}</h2><p>${module.files} 个索引文件 · ${e(Object.entries(module.roles).map(([role, count]) => `${fileRoleLabel(role)} ${count}`).join(" / "))}</p><p>${module.examples.map((path) => `<code>${e(path)}</code>`).join("<br>")}</p></article>`),
     ...entries.map((file) => `<article><small>${e(fileRoleLabel(file.role))} · ${e(file.module)}</small><h2>${e(file.path)}</h2><p>${file.bytes} 字节 · ${e(file.sha256.slice(0, 12))}</p>${file.package ? `<details><summary>依赖声明和可用脚本（没有执行）</summary><p>${e(file.package.dependencies.map((item) => `${item.name}: ${item.declared}`).join("；"))}</p><p>${e(file.package.scripts.join("，"))}${file.package.truncated ? " · 声明摘要有截取" : ""}</p><p>声明版本不等于实际安装产物，组件能力仍需查当前实现。</p></details>` : ""}${file.imports.length ? `<details><summary>${file.imports.length} 条导入线索${file.imports_truncated ? "（已截取）" : ""}</summary><ul>${file.imports.map((item) => `<li>${e(item.specifier)} → ${e(item.target ?? "未解析 / 外部依赖")} · 第 ${item.line} 行</li>`).join("")}</ul></details>` : ""}</article>`),
   ];

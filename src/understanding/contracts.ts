@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { IdSchema, RelativePathSchema } from "../domain/common.js";
+import { IdSchema } from "../domain/common.js";
+import { ConcretePath, HASH } from "./fields.js";
+export { ConcretePath, HASH, ShortText } from "./fields.js";
+export { ModelRecordInput, SavedModelSchema, type SavedModel } from "./model-contracts.js";
 
 export const MAP_DIR = ".project-dev/local/understanding";
-export const HASH = z.string().regex(/^[a-f0-9]{64}$/);
-export const ShortText = z.string().trim().min(1).max(1_000);
-export const ConcretePath = RelativePathSchema.refine((path) => !/[\*?\[\]]/.test(path), "请使用具体的文件或目录路径");
 export const FileSchema = z.object({
   path: ConcretePath, sha256: HASH, bytes: z.number().int().nonnegative(), module: z.string(),
   role: z.enum(["entry", "page", "shared", "api", "test", "config", "document", "source"]),
@@ -28,19 +28,7 @@ export const ContextInput = z.object({ query: z.string().trim().max(2_000).defau
   model_offset: z.number().int().min(0).max(200).default(0).describe("模型列表的分页起点；使用上次返回的 next_model_offset"),
   model_id: IdSchema.optional().describe("按 ID 单独读取一个模型的完整详情，仍执行来源排除和版本核验"),
   model_revision: z.number().int().positive().optional().describe("读取详情时核对摘要中的修订号，防止两次查询间内容变化"),
-}).strict();
-export const ModelContent = z.object({
-  id: IdSchema, module: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200),
-  scope: z.array(ConcretePath).min(1).max(10), summary: ShortText,
-  entities: z.array(z.object({ name: z.string().max(100), meaning: ShortText }).strict()).max(10),
-  flows: z.array(z.object({ name: z.string().max(100), steps: z.array(ShortText).min(1).max(8) }).strict()).max(5),
-  rules: z.array(z.object({ description: ShortText, responsibility: z.enum(["frontend", "backend", "shared", "unknown"]) }).strict()).max(10),
-  related_paths: z.array(ConcretePath).min(1).max(20),
-  sources: z.array(z.object({ path: ConcretePath, sha256: HASH, line: z.number().int().positive(), quote: ShortText }).strict()).min(1).max(10),
-  questions: z.array(ShortText).max(10),
-}).strict();
-export const ModelRecordInput = ModelContent.extend({ scan_id: HASH, expected_revision: z.number().int().nonnegative().default(0) }).strict();
-export const SavedModelSchema = ModelContent.extend({ schema_version: z.literal(1), project: z.string(),
-  revision: z.number().int().positive(), recorded_at: z.string(), scan_id: HASH,
-  related_versions: z.array(z.object({ path: ConcretePath, sha256: HASH }).strict()).min(1).max(20) }).strict();
-export type SavedModel = z.infer<typeof SavedModelSchema>;
+  rule_ids: z.array(IdSchema).min(1).max(20).optional().describe("配合 model_id 只读取所需规则、关联关系及证据；省略则返回完整详情"),
+}).strict().superRefine((value, ctx) => {
+  if (value.rule_ids && !value.model_id) ctx.addIssue({ code: "custom", message: "按规则读取需要 model_id" });
+});

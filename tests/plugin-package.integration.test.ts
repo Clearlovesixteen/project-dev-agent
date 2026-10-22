@@ -124,6 +124,19 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   assert.equal(restored.models[0]?.effective, false);
   const detail = (await call(second, "project_context", { project: fixture.path, model_id: "runtime-service", model_revision: 1 })).data as any;
   assert.equal(detail.models[0].sources[0].sha256, source.sha256);
+  // 实际发布产物中迁移旧模型并局部修订，覆盖 schema、SDK 参数处理及独立运行时。
+  const migration = await call(second, "project_model_record", { project: fixture.path, schema_version: 2, id: "runtime-service", expected_revision: 1,
+    scan_id: context.scan_id, revision_reason: "补充逐条依据", module: "src", title: "服务入口", scope: [source.path], summary: "记录已读入口，具体业务继续核对。",
+    entities: [], flows: [], questions: [], related_paths: [source.path], relations: [],
+    rules: [{ id: "entry", description: "当前服务入口需要作为实现参考", responsibility: "unknown", basis: "observed", conditions: ["修改服务时"], exceptions: [], source_ids: ["entry-code"] }],
+    sources: [{ id: "entry-code", kind: "code", path: source.path, sha256: source.sha256, line: line + 1, quote: lines[line] }] });
+  assert.equal(migration.outcome, "ok", JSON.stringify(migration));
+  const partial = await call(second, "project_model_record", { project: fixture.path, schema_version: 2, id: "runtime-service", expected_revision: 2,
+    scan_id: context.scan_id, revision_reason: "保留未知边界", patch: { metadata: { questions: ["异常分支需结合具体需求核对"] } } });
+  assert.equal(partial.outcome, "ok", JSON.stringify(partial));
+  const selectedRule = (await call(second, "project_context", { project: fixture.path, model_id: "runtime-service", model_revision: 3, rule_ids: ["entry"] })).data as any;
+  assert.equal(selectedRule.models[0].rules[0].freshness, "current");
+  assert.equal(selectedRule.models[0].sources[0].sha256, source.sha256);
   const knowledge = (await call(second, "knowledge_search", { project: fixture.path, query: "表单" })).data as {
     history: { hints: { effective: boolean }[] };
   };

@@ -2,10 +2,12 @@ import { ProjectFiles } from "../storage/project-files.js";
 import { digest } from "../knowledge/document.js";
 import { loadConfig } from "../knowledge/config.js";
 import { gitLine, readGit } from "../git/command.js";
-import { ContextInput, type MapFile, type SavedModel } from "./contracts.js";
+import { ContextInput, type MapFile } from "./contracts.js";
 import { mapFiles, models, readMap } from "./store.js";
 import { excluded, mapConfigHash, safeSource } from "./scan.js";
 import { AppError } from "../domain/error.js";
+import { ModelEvidence, sourcePath } from "./model-evidence.js";
+import { materializeModel, modelPreview, relatedModelIds, selectModelRules } from "./model-view.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -54,37 +56,44 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     return actual.sha256 === expected ? "current" : actual.sha256 ? "changed" : actual.state;
   };
   const fileResults = []; let fileBytes = 0;
-  for (const { entry, relation } of selected) {
+  for (const { entry, relation } of request.model_id ? [] : selected) {
     const result = { ...entry, relation, source_state: await check(entry.path, entry.sha256),
       imports: entry.imports.slice(0, 12), imports_truncated: entry.imports_truncated || entry.imports.length > 12 };
     const bytes = Buffer.byteLength(JSON.stringify(result)); if (fileBytes + bytes > 40_000) break;
     fileResults.push(result); fileBytes += bytes;
   }
   const eligibleModels = (await models(files)).filter((model) =>
-    model.sources.every((source) => !excluded(source.path, config)) && model.related_paths.every((path) => !excluded(path, config)));
-  const materialize = async (model: SavedModel) => {
-    const source_states = [];
-    for (const source of model.related_versions) source_states.push({ path: source.path, state: await check(source.path, source.sha256) });
-    return { ...model, status: source_states.every((source) => source.state === "current") ? "candidate" : "needs_review", effective: false as const, source_states };
-  };
+    model.sources.every((source) => { const path = sourcePath(source); return !path || !excluded(path, config); }) && model.related_paths.every((path) => !excluded(path, config)));
+  const evidence = new ModelEvidence(files, config, new Map(entries.map((entry) => [entry.path, entry])), map.repo_identity);
+  const materialize = (model: typeof eligibleModels[number]) => materializeModel(model, evidence, eligibleModels);
   // 详情单独返回，容量由模型存储的 64 KiB 上限约束；不能借 ID 绕过来源排除规则。
   if (request.model_id) {
     const model = eligibleModels.find((entry) => entry.id === request.model_id);
     if (!model) throw new AppError("PROJECT_MODEL_NOT_FOUND", "未找到可访问的业务模型，请重新查询当前模型列表");
     if (request.model_revision !== undefined && model.revision !== request.model_revision) throw new AppError("PROJECT_MODEL_REVISION_CONFLICT", "模型已更新，请读取最新摘要后再获取详情");
-    const detail = await materialize(model);
+    const detail = selectModelRules(await materialize(model), request.rule_ids);
+    const indexedVersions = new Map(entries.map((entry) => [entry.path, entry.sha256]));
+    const pathStates = await Promise.all(model.related_paths.map(async (path) => {
+      if (indexedVersions.has(path)) return evidence.pathState(path, indexedVersions.get(path)!);
+      // 已从索引移除的缺失来源需要修订模型；重复扫描不能恢复它。只有仍可读的未索引文件需要重扫。
+      return await evidence.pathState(path, "") === "changed" ? "unindexed" : "missing_after_scan";
+    }));
     const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head
-      || await mapConfigHash(files, config) !== map.config_hash || detail.status === "needs_review";
-    return { state: stale ? "needs_rescan" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-      files: [], modules: [], models: [detail], models_truncated: false, next_model_offset: null,
+      || await mapConfigHash(files, config) !== map.config_hash || pathStates.some((state) => state !== "current" && state !== "missing_after_scan");
+    return { state: stale ? "needs_rescan" : detail.status === "needs_review" ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+      files: [], modules: [], models: [detail], models_truncated: detail.content_truncated, next_model_offset: null,
       report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
   }
   const modelCandidates = eligibleModels.filter((model) => !paths.length
-    || [...model.scope, ...model.related_paths, ...model.sources.map((source) => source.path)].some((candidate) => paths.some((path) => intersects(candidate, path))));
-  const rankedModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
-    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths])) }))
+    || [...model.scope, ...model.related_paths, ...model.sources.flatMap((source) => { const path = sourcePath(source); return path ? [path] : []; })].some((candidate) => paths.some((path) => intersects(candidate, path))));
+  const directModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
+    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths, model.schema_version === 2 ? model.relations : []])) }))
     .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
     .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
+  const directIds = new Set(directModels.map((item) => item.model.id));
+  const relationIds = relatedModelIds(eligibleModels, directIds);
+  const rankedModels = [...directModels, ...eligibleModels.filter((model) => !directIds.has(model.id) && relationIds.has(model.id))
+    .sort((a, b) => a.id.localeCompare(b.id)).map((model) => ({ model, score: 0 }))];
   const modelResults: Record<string, unknown>[] = [];
   let modelBytes = 2;
   const page = rankedModels.slice(request.model_offset, request.model_offset + 5);
@@ -92,18 +101,19 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     const full = await materialize(model);
     const details_request = { model_id: model.id, model_revision: model.revision };
     // 给本页后续摘要预留容量，避免一个大模型截断整个列表，也不截掉业务流程的中间文本。
-    const preview = { id: model.id, revision: model.revision, module: model.module, title: model.title,
-      summary: model.summary.slice(0, 400), status: full.status, effective: false, content_truncated: true,
-      related_path_count: model.related_paths.length, details_request };
+    const preview = modelPreview(full, request.query, paths);
     const detail = { ...full, content_truncated: false, details_request };
     const remaining = page.length - modelResults.length - 1;
-    const result = modelBytes + 1 + Buffer.byteLength(JSON.stringify(detail)) + remaining * 4_096 <= 36_000 ? detail : preview;
+    const match_reason = directIds.has(model.id) ? "direct" : "business_relation";
+    const detailResult = { ...detail, match_reason };
+    const result = model.schema_version !== 2 && modelBytes + 1 + Buffer.byteLength(JSON.stringify(detailResult)) + remaining * 4_500 <= 36_000
+      ? detailResult : { ...preview, match_reason };
     modelResults.push(result); modelBytes += 1 + Buffer.byteLength(JSON.stringify(result));
   }
   const head = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout);
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
-  return { state: stale ? "needs_rescan" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+  return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
     snapshot: { head: map.head, scanned_at: map.scanned_at, coverage: map.coverage }, files: fileResults,
     files_truncated: matched.length > request.limit || relatedTotal > 10 || fileResults.length < selected.length,
     unindexed_paths: paths.filter((path) => !entries.some((entry) => intersects(path, entry.path))),

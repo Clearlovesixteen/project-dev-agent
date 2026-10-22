@@ -1,0 +1,70 @@
+{
+  "version": "0.7.0",
+  "verified_on": "2026-10-22",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "regressions": [
+    "逐条规则保存条件、异常、性质与证据；拒绝重复 ID、悬空引用、伪造原文及来源类型错误",
+    "局部修订仅更新本次实际复核条目，共享来源变化不能刷新其他规则及业务关系",
+    "本项目任务原文与纠正可作需求依据；跨工作区任务不能引用，原始要求和同名纠正不会缓存混淆",
+    "业务关系辅助检索没有直接 import 的关联模型，目标文件、规则及模型修订变化会提示复核",
+    "新版默认限量摘要与分页，按规则 ID 读取条件、异常及来源；模型与报告的文本转义正确",
+    "旧模型继续可读，按需迁移保留旧修订；新版禁止整份覆盖及降级写入",
+    "区分索引过期与业务待复核；已经扫描删除的来源不会造成重复重扫循环",
+    "报告生成失败不撤销已经保存的模型，也不误导调用方重复写入",
+    "真实 STDIO MCP 调用、插件独立运行、重启恢复及旧 Skill 升级回滚"
+  ],
+  "native_upgrade": {
+    "node": "18.19.1",
+    "from_version": "0.6.5",
+    "to_version": "0.7.0",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true,
+    "verified_at": "2026-10-22T07:14:27.306Z",
+    "result": "passed",
+    "workspace_and_task_preserved": true,
+    "model_and_history_preserved": true,
+    "legacy_model_migrated_and_patched_after_restart": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v065_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "refresh_updates_installed_version": true,
+    "refresh_updates_cached_runtime": true
+  },
+  "plugin_runtime_sha256": "bcffbcf269744b5941d7ba851906fba06f1515eac8ca66c868936ba8f934898c",
+  "plugin_inventory_files": 68,
+  "skill_validation": "passed",
+  "limitations": [
+    "测试验证来源、版本、关联及交付机制，未运行独立模型业务建模或真实需求生码评测。",
+    "来源匹配不能证明业务语义正确，业务关系仅展开一层已记录关系，不保证发现全部影响。",
+    "实际减少的纠偏、返工和遗漏仍需由团队使用真实需求验证。"
+  ],
+  "documentation_links_checked": 22
+}

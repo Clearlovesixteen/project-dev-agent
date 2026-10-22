@@ -134,12 +134,12 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).scan(input)));
   server.registerTool("project_context", {
-    description: "查询参考文件、直接导入和使用方，以及按范围、关联路径、术语或流程匹配的业务模型。大模型返回摘要和 details_request，用 model_id 与 model_revision 读取完整详情；model_offset 用于模型列表翻页。来源变化需复核，结果仍是候选。",
+    description: "查询代码线索与业务模型，沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
     inputSchema: ContextInput.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).context(input)));
   server.registerTool("project_model_record", {
-    description: "阅读当前代码和文档后，保存或修订范围明确的模块业务理解。标题、摘要、流程、规则与问题默认用中文，源码引用保持原文。需提供准确引用、行号、当前索引哈希、关联路径和预期修订号。保留旧修订；证据仅证明来源，模型仍是候选，不代表用户已确认。",
+    description: "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason。不会确认团队规则。",
     inputSchema: ModelRecordInput.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).record(input)));
