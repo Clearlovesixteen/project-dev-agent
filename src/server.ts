@@ -84,17 +84,17 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     : run(project, (binding) => prepareProject(binding, input)));
   // 任务工具只管理需求、基线、清单和证据；代码修改与验证执行由 Codex 完成。
   server.registerTool("task_open", {
-    description: "在已绑定且干净的 Git 工作树中创建开发任务，修改代码前记录需求与验收项，自动捕获已发现的公共请求入口基线，说明文字默认用中文。",
+    description: "在已绑定且干净的 Git 工作树中创建任务，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获，说明默认中文。",
     inputSchema: TaskOpenInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).open(input)));
   server.registerTool("task_update", {
-    description: "使用最新修订号保存任务集合的完整更新，保留已有 ID。核验前读取 task_check 的 review_snapshot；重新核验已有完成项时，还需在 reviewed_ids 中明确本次条目，完整回传不会刷新其他旧证据。停止任务时将 phase 设为 aborted 并填写原因。新说明默认用中文。",
+    description: "使用最新修订号更新任务，集合完整替换且保留旧 ID。implementation_basis 追加依据修订，相关验收先重开为 pending，保存后再复核，不能在关闭时补写；历史与记录时机保留。核验前保留 task_check.review_snapshot，复核旧完成项另传 reviewed_ids，回传不能刷新旧证据。停止用 aborted 和原因，说明默认中文。",
     inputSchema: TaskUpdateInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).update(input)));
   server.registerTool("task_check", {
-    description: "省略 task_id 可恢复当前活跃任务。比较清单、Git 改动和证据绑定的代码指纹，检查新增底层 HTTP 是否绕过既有封装，quality.reuse 的明确违规或覆盖不足不能直接关闭任务；返回待验收项、过期证据、关联线索和正常/边界/异常业务场景。可将场景 business_check 绑定现有验收项；include_evaluation: true 附本项目任务统计，无真实配对不计算改善。返回当前 review_snapshot。审查和执行验证前保留此指纹，完成后传入 task_update；本工具不执行测试或确认业务正确性。",
+    description: "省略 task_id 恢复活跃任务。quality.implementation 核对通用实现依据、记录时机及关联验收，缺失或未复核不能关闭新任务；旧任务明确标为 legacy。比较 Git 差异、清单与证据指纹，返回关联线索和业务场景；quality.reuse 另检查明确 HTTP 绕过。保留 review_snapshot 后实际审查/验证，再传 task_update。include_evaluation 附有限项目统计，无真实配对不计算改善。本工具不执行测试或保证设计与业务正确。",
     inputSchema: TaskCheckInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).check(input)));

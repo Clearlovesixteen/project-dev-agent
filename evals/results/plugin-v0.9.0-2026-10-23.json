@@ -1,0 +1,85 @@
+{
+  "version": "0.9.0",
+  "verified_on": "2026-10-23",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 181,
+      "pass": 181,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "tests": 181,
+      "pass": 181,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.1",
+      "tests": 181,
+      "pass": 181,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "original_regressions": {
+    "test": "tests/implementation-basis.test.ts",
+    "before_fix": {
+      "tests": 2,
+      "pass": 0,
+      "fail": 2
+    },
+    "symptoms": [
+      "缺失实现依据时，仅表面完整清单也可关闭新任务",
+      "任务输入没有通用原文依据与实现选择，不能核验假引用"
+    ]
+  },
+  "changes": [
+    "项目级共享实现和样例不局限请求库，新目录仍有候选，兄弟目录 AGENTS 不作为当前适用规范",
+    "Agent 记录原文依据、适用约束、实现选择并关联既有验收，无新用户命令或表单",
+    "服务核验引用与验收关系，新任务缺失或未复核依据不能关闭",
+    "依据追加历史，时机和快照由服务记录；晚补不能伪装为编码前准备",
+    "修订依据先重开相关验收并保存，再核验；不能在关闭时补依据",
+    "旧任务明确标为 legacy，兼容保留历史、模型与快照；实际前版完整 Skill 可升级回滚"
+  ],
+  "native_upgrade": {
+    "verified_at": "2026-10-23T01:06:56.559Z",
+    "refresh_updates_cached_runtime": true,
+    "refresh_updates_installed_version": true,
+    "legacy_task_not_forced_to_invent_preparation": true,
+    "legacy_model_migrated_and_patched_after_restart": true,
+    "generic_basis_native_lifecycle_passed": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v081_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "installed_runtime_versions": [
+      "0.8.1",
+      "0.9.0"
+    ],
+    "unchanged_v081_rule_fingerprint_preserved": true,
+    "workspace_and_task_preserved": true,
+    "result": "passed",
+    "from_version": "0.8.1",
+    "to_version": "0.9.0",
+    "node": "18.19.1",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true
+  },
+  "plugin_runtime_sha256": "9a4789ad9199bcbe35672ee257c3e61964bda0fdd4c367ea76722b40b896521b",
+  "limitations": [
+    "引用校验不能证明代码已被理解、设计取舍合理或业务语义正确",
+    "关闭保护不能拦截 Codex 直接写文件；按当前 Skill 明确调用后由 Agent 维护流程",
+    "无参考原因及语义取舍由执行者核实，不能把候选索引当成穷尽证明",
+    "当前为工具、兼容与原生插件生命周期回归；尚无真实同需求独立模型前后对照的质量改善结论"
+  ]
+}

@@ -1,4 +1,4 @@
-# Project Dev Agent 0.8.1
+# Project Dev Agent 0.9.0
 
 此目录是 Codex 插件发布产物，由 `npm run build:plugin` 生成，请修改源码后重新构建。
 

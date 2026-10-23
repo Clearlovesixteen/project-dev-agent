@@ -1,3 +1,4 @@
+import { withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -18,7 +19,7 @@ test("writer-only changes remain incomplete and evidence cannot be replaced by f
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   const checklist = [item("writer", "src/service.js"), item("login-and-session", "src/auth.js"), item("view", "src/view.js")];
   const updated = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: 0, change_items: checklist })).data);
   assert.equal(updated.revision, 1);
@@ -41,7 +42,7 @@ test("updates preserve existing checklist records and reject stale revisions", a
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   await service.update({ task_id: task.id, expected_revision: 0, change_items: [item("writer", "src/service.js")] });
   assert.equal((await service.update({ task_id: task.id, expected_revision: 0 })).code, "REVISION_CONFLICT");
   assert.equal((await service.update({ task_id: task.id, expected_revision: 1, change_items: [] })).code, "RECORD_REMOVAL_NOT_ALLOWED");
@@ -52,7 +53,7 @@ test("baseline changes do not become successful checks, and interrupted tasks ca
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   execFileSync("git", ["switch", "-c", "other"], { cwd: fixture.path, stdio: "pipe" });
   const check = await service.check({ task_id: task.id });
   assert.equal(check.outcome, "incomplete");
@@ -60,14 +61,14 @@ test("baseline changes do not become successful checks, and interrupted tasks ca
   const stopped = await service.update({ task_id: task.id, expected_revision: 0, phase: "aborted", abort_reason: "User switched branches" });
   assert.equal(stopped.outcome, "ok");
   assert.equal((await service.check({ task_id: task.id })).code, "TASK_INACTIVE");
-  assert.equal((await service.open(request)).outcome, "ok");
+  assert.equal((await service.open(await withImplementationBasis(fixture.path, request))).outcome, "ok");
 });
 
 test("closing refuses changed paths that have not been included in the reviewed checklist", async (t) => {
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   await writeFile(join(fixture.path, "unexpected.js"), "export const value = 1;\n");
   const evidence = [{ kind: "manual", reference: "review-session", summary: "Reviewed entry point" }];
   const closed = await service.update({ task_id: task.id, expected_revision: 0, phase: "closed",
@@ -81,7 +82,7 @@ test("a verified change can close, survives restart, and releases the task after
   t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path);
   const service = new TaskService(binding);
-  const task = TaskSchema.parse((await service.open({ requirement: "Document the existing service boundary", acceptance_criteria: [{ id: "policy", description: "README points readers to the existing project policy" }] })).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, { requirement: "Document the existing service boundary", acceptance_criteria: [{ id: "policy", description: "README points readers to the existing project policy" }] }))).data);
   const path = join(fixture.path, "README.md");
   await writeFile(path, `${await readFile(path, "utf8")}\nImplementation policy: see AGENTS.md and docs/account-policy.md.\n`);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "NODE_TEST_CONTEXT"));
@@ -101,13 +102,13 @@ test("a verified change can close, survives restart, and releases the task after
   assert.equal((await restarted.check({ task_id: task.id })).code, "TASK_INACTIVE");
   execFileSync("git", ["add", "README.md"], { cwd: fixture.path });
   execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Clarify fixture policy"], { cwd: fixture.path, stdio: "pipe" });
-  assert.equal((await restarted.open(request)).outcome, "ok");
+  assert.equal((await restarted.open(await withImplementationBasis(fixture.path, request))).outcome, "ok");
 });
 
 test("用户修订要求后保留来源和原始需求，并在重新验收前保持未完成", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path), service = new TaskService(binding);
-  const task = TaskSchema.parse((await service.open({ requirement: "将说明标题设为主菜单",
+  const task = TaskSchema.parse((await service.open({ ...(await withImplementationBasis(fixture.path, { acceptance_criteria: [{ id: "title" }] })), requirement: "将说明标题设为主菜单",
     acceptance_criteria: [{ id: "title", description: "说明标题为主菜单" }] })).data);
   const path = join(fixture.path, "README.md"); await writeFile(path, "# 主菜单\n");
   const snapshot = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
@@ -150,7 +151,7 @@ test("an unresolved merge stays incomplete at the service boundary and cannot be
   t.after(fixture.cleanup);
   const git = (args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: fixture.path, stdio: "pipe" });
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   git(["checkout", "-b", "conflicting"]);
   await writeFile(join(fixture.path, "README.md"), "Conflicting side\n");
   git(["add", "README.md"]);
@@ -169,7 +170,7 @@ test("an unresolved merge stays incomplete at the service boundary and cannot be
 test("代码再次修改后旧验证失效，重新验证才能关闭", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   const path = join(fixture.path, "src/service.js"), original = await readFile(path, "utf8");
   await writeFile(path, original + "\n// 已审查的注释\n");
   const snapshot = ((await service.check({ task_id: task.id })).data as any).review_snapshot;
@@ -197,7 +198,7 @@ test("代码再次修改后旧验证失效，重新验证才能关闭", async (t
 test("缺少指纹的旧记录需要复核，回传伪造的单项指纹不能刷新证据", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   const evidence = [{ kind: "manual", reference: "src/service.js", summary: "核对源码行为" }];
   const reviewed = { ...item("service", "src/service.js"), status: "checked", reviewed_by: "fixture", evidence };
   const snapshot = ((await service.check({})).data as any).review_snapshot;
@@ -215,7 +216,7 @@ test("缺少指纹的旧记录需要复核，回传伪造的单项指纹不能�
 
 test("审查指纹覆盖未跟踪文件的内容，暂存操作不使相同内容失效", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
-  const service = new TaskService(await bindWorktree(fixture.path)); await service.open(request);
+  const service = new TaskService(await bindWorktree(fixture.path)); await service.open(await withImplementationBasis(fixture.path, request));
   const path = join(fixture.path, "new.bin");
   await writeFile(path, Buffer.from([0, 255, 1]));
   const first = ((await service.check({})).data as any).review_snapshot;
@@ -229,7 +230,7 @@ test("审查指纹覆盖未跟踪文件的内容，暂存操作不使相同内�
 test("局部复核只刷新明确指定的条目，完整回传不能刷新其他旧证据", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  let task = TaskSchema.parse((await service.open(request)).data);
+  let task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   const path = join(fixture.path, "src/service.js"), original = await readFile(path, "utf8");
   await writeFile(path, original + "\n// 初次实现\n");
   const snapshot = ((await service.check({})).data as any).review_snapshot;
@@ -265,7 +266,7 @@ test("局部复核只刷新明确指定的条目，完整回传不能刷新其�
 test("显式复核需要有效指纹和完整集合，不能指定不存在、重复或待处理条目", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const service = new TaskService(await bindWorktree(fixture.path));
-  const task = TaskSchema.parse((await service.open(request)).data);
+  const task = TaskSchema.parse((await service.open(await withImplementationBasis(fixture.path, request))).data);
   const pending = item("a", "src/service.js");
   const base = { task_id: task.id, expected_revision: 0, review_snapshot: ((await service.check({})).data as any).review_snapshot };
   for (const extra of [

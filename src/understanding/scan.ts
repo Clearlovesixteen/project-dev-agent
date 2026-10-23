@@ -19,7 +19,7 @@ export function excluded(path: string, config: ProjectConfig): boolean {
     || /(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock)$|\.(?:min\.js|map|pem|key|p12|pfx)$/i.test(path)
     || config.exclude_paths.some((pattern) => matchesPath(pattern, path));
 }
-async function sourceBoundary(files: ProjectFiles, path: string, config: ProjectConfig): Promise<void> {
+export async function sourceBoundary(files: ProjectFiles, path: string, config: ProjectConfig): Promise<void> {
   if (excluded(path, config)) throw new AppError("PROJECT_SOURCE_EXCLUDED", "该来源已被排除在项目理解范围之外");
   const parts = path.split("/");
   for (let i = 1; i < parts.length; i++) {

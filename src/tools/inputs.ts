@@ -1,4 +1,5 @@
 import { BusinessCheckSchema, EvaluationTagSchema } from "../quality/contracts.js";
+import { ImplementationBasisInputSchema } from "../quality/basis-contracts.js";
 import { z } from "zod";
 import { IdSchema, ReviewSnapshotSchema, TextSchema } from "../domain/common.js";
 import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, ValidationRecordSchema } from "../domain/task.js";
@@ -7,6 +8,7 @@ import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, Validati
 export const TaskOpenInputSchema = z.object({
   requirement: TextSchema,
   evaluation: EvaluationTagSchema.optional(),
+  implementation_basis: ImplementationBasisInputSchema.optional().describe("Agent 编码前读取项目后记录的原文依据和实现决策；每项决策关联一个现有验收项"),
   acceptance_criteria: z.array(z.object({ id: IdSchema, description: TextSchema, business_check: BusinessCheckSchema.optional() }).strict()).min(1).max(100),
 }).strict();
 
@@ -17,6 +19,7 @@ const ReviewedIds = (maximum: number) => z.array(IdSchema).max(maximum)
 export const TaskUpdateInputSchema = z.object({
   task_id: IdSchema,
   expected_revision: z.number().int().nonnegative(),
+  implementation_basis: ImplementationBasisInputSchema.optional().describe("追加本次实现依据；保留历史，相关验收须处于 pending，保存后再逐项复核。记录时机由服务判断"),
   review_snapshot: ReviewSnapshotSchema.optional().describe("审查和执行验证前由 task_check 获取的代码指纹；提交完成的审查或验证记录时必须传入，期间代码变化将拒绝写入"),
   reviewed_ids: z.object({ change_items: ReviewedIds(500), acceptance_criteria: ReviewedIds(100), validations: ReviewedIds(100) }).strict()
     .optional().describe("本次实际重新核验的条目 ID，按集合分类；须同时传该集合的完整列表和 review_snapshot。未指定的已有完成项保留旧指纹，不随完整回传自动刷新"),

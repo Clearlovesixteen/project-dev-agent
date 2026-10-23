@@ -1,3 +1,4 @@
+import { withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, writeFile, readFile, symlink, unlink, stat, utimes } from "node:fs/promises";
@@ -16,7 +17,7 @@ import { auditModels } from "../src/understanding/model-audit.js";
 async function setup(t: { after: (action: () => Promise<void>) => void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path), files = new ProjectFiles(binding.root), tasks = new TaskService(binding), service = new UnderstandingService(binding);
-  const task = TaskSchema.parse((await tasks.open({ requirement: "冻结订单不能编辑，管理员除外", acceptance_criteria: [{ id: "original", description: "按冻结规则开发" }] })).data);
+  const task = TaskSchema.parse((await tasks.open(await withImplementationBasis(fixture.path, { requirement: "冻结订单不能编辑，管理员除外", acceptance_criteria: [{ id: "original", description: "按冻结规则开发" }] }))).data);
   const put = async (path: string, text: string) => { await mkdir(join(binding.root, path, ".."), { recursive: true }); await writeFile(join(binding.root, path), text); };
   await put("src/orders.ts", "export const editableOrder = (state: string) => state !== 'frozen';\n");
   await put("src/consumer.ts", "import {editableOrder} from './orders';\nexport const submitOrder = editableOrder;\n");

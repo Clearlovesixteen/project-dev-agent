@@ -1,4 +1,5 @@
 import { captureImplementationBaseline, requestReuseReview, assertRequestReuse } from "./quality/request-reuse.js";
+import { recordImplementationBasis, implementationBasisReview, assertImplementationBasis } from "./quality/implementation-basis.js";
 import { qualityReview, projectEvaluation, assertBusinessAcceptance } from "./quality/review.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -74,6 +75,8 @@ export class TaskService {
         baseline_head: current.head, baseline_branch: current.branch, phase: "active", requirement: request.requirement,
         ...(request.evaluation ? { evaluation: request.evaluation } : {}),
         implementation_baseline: await captureImplementationBaseline(current),
+        implementation_policy: 1,
+        implementation_bases: request.implementation_basis ? [await recordImplementationBasis(current, current.head, request.implementation_basis, request.acceptance_criteria.map(item => item.id))] : [],
         acceptance_criteria: request.acceptance_criteria, change_items: [], created_at: now, updated_at: now,
       });
       const saved = await this.store.create(task);
@@ -118,8 +121,21 @@ export class TaskService {
         }
         const snapshot = request.phase === "aborted" ? undefined : await reviewSnapshot(this.binding, current.baseline_head);
         if (request.review_snapshot && request.review_snapshot !== snapshot?.hash) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "代码已不同于审查或验证时的快照，请重新读取 task_check 并执行受影响的检查");
+        let bases = current.implementation_bases;
+        if (request.implementation_basis) {
+          if (!snapshot || request.phase === "closed") throw new AppError("IMPLEMENTATION_BASIS_REVIEW_REQUIRED", "先保存实现依据，再在当前代码上复核相关验收；不能在关闭时同时补写依据");
+          const acceptance = request.acceptance_criteria ?? current.acceptance_criteria;
+          if (request.implementation_basis.decisions.some(decision => acceptance.some(item => item.id === decision.acceptance_id && item.status !== "pending"))) {
+            throw new AppError("IMPLEMENTATION_BASIS_REVIEW_REQUIRED", "依据修订后须将相关验收项重开为 pending，保存后重新核验");
+          }
+          if ((bases?.length ?? 0) >= 10) throw new AppError("IMPLEMENTATION_BASIS_LIMIT", "本任务的依据修订已达10次，请完成当前任务或中止后缩小任务范围");
+          const record = await recordImplementationBasis(this.binding, current.baseline_head, request.implementation_basis, acceptance.map(item => item.id));
+          if (record.review_snapshot !== snapshot.hash) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "建立实现依据期间代码发生变化，请重新核验");
+          bases = [...bases ?? [], record];
+        }
         const next = TaskSchema.parse({
           ...current,
+          ...(bases ? { implementation_bases: bases } : {}),
           change_items: stampReviews(request.change_items, current.change_items, (item) => item.status !== "pending", request.review_snapshot, request.reviewed_ids?.change_items),
           acceptance_criteria: stampReviews(request.acceptance_criteria, current.acceptance_criteria, (item) => item.status === "checked", request.review_snapshot, request.reviewed_ids?.acceptance_criteria),
           validations: stampReviews(request.validations, current.validations, (item) => item.outcome !== "not_run", request.review_snapshot, request.reviewed_ids?.validations),
@@ -131,6 +147,7 @@ export class TaskService {
         if (next.phase === "closed" && snapshot) {
           if (snapshot.paths.some((path) => !next.change_items.some((item) => item.target_path === path))) throw new AppError("UNREVIEWED_CHANGES", "关闭前出现清单之外的改动，请补充审查");
           if (Object.values(staleReviews(next, snapshot.hash)).some((ids) => ids.length)) throw new AppError("REVIEW_STALE", "代码已变化或旧记录尚未绑定代码快照，请重新审查和验证后关闭任务");
+          assertImplementationBasis(await implementationBasisReview(this.binding, next, snapshot.hash));
           await assertRequestReuse(this.binding, next, snapshot.paths);
           try { await assertBusinessAcceptance(this.binding, next, snapshot.hash); }
           catch (error) { throw new AppError("BUSINESS_CHECK_STALE", error instanceof Error ? error.message : String(error)); }
@@ -173,10 +190,13 @@ export class TaskService {
       const unexpected = changed.filter((path) => !expected.has(path));
       const stale = staleReviews(task, snapshot), outdated = Object.values(stale).some((ids) => ids.length);
       const reuse = await requestReuseReview(this.binding, task, changed);
+      const implementation = await implementationBasisReview(this.binding, task, snapshot);
       // 这里只判断记录、复用保护和文件覆盖，不能独立判断业务语义。
-      const reviewed = reuse.state === "checked" && task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
+      const basisReviewed = !implementation.required || implementation.state === "checked";
+      const reviewed = basisReviewed && reuse.state === "checked" && task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
       const reuseCode = reuse.state === "violations" ? "PROJECT_REUSE_REQUIRED" : reuse.state === "incomplete" ? "PROJECT_REUSE_CONTEXT_REQUIRED" : undefined;
-      const checkCode = reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : reuseCode ?? "REVIEW_INCOMPLETE";
+      const basisCode = basisReviewed ? undefined : implementation.state === "missing" ? "IMPLEMENTATION_BASIS_REQUIRED" : "IMPLEMENTATION_BASIS_REVIEW_REQUIRED";
+      const checkCode = reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : basisCode === "IMPLEMENTATION_BASIS_REQUIRED" ? basisCode : reuseCode ?? basisCode ?? "REVIEW_INCOMPLETE";
       return {
         outcome: reviewed ? "ok" : "incomplete", code: checkCode,
         data: {
@@ -185,13 +205,13 @@ export class TaskService {
           changed_paths: changed, unexpected_changes: unexpected, pending_items: pending,
           pending_acceptance: acceptance, unresolved_validations: validations,
           review_snapshot: snapshot, stale_evidence: stale,
-          quality: { ...await qualityReview(this.binding, task, changed, snapshot), reuse },
+          quality: { ...await qualityReview(this.binding, task, changed, snapshot), reuse, implementation },
           ...(request.include_evaluation ? { evaluation: await projectEvaluation(this.binding) } : {}),
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
           limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
-        diagnostics: reviewed ? [] : [{ code: checkCode, message: reuseCode && !outdated ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。" : outdated
+        diagnostics: reviewed ? [] : [{ code: checkCode, message: basisCode === checkCode ? "请核对 quality.implementation：先建立项目实现依据，再逐项复核所关联的验收。依据与实现选择由 Agent 维护，无需用户额外填写。" : reuseCode === checkCode ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。" : outdated
           ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，通过 reviewed_ids 明确本次复核的条目，并提交对应完整集合。"
           : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };

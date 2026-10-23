@@ -17,6 +17,27 @@
 }
 ```
 
+### 项目实现依据（0.9）
+
+上例是需求与验收的最小形状。实际编码前，Agent 还要在同一 `task_open` 中附 `implementation_basis`，或建任务后通过 `task_update` 保存：
+
+```json
+{
+  "implementation_basis": {
+    "references": [{"id":"existing","path":"src/实际参考文件.ts","sha256":"实际64位哈希","line":1,"quote":"该行实际原文"}],
+    "decisions": [{"id":"boundary","constraint":"本次适用的职责、复用或代码约定","implementation":"本次具体怎样实现及原因","reference_ids":["existing"],"acceptance_id":"behavior"}]
+  }
+}
+```
+
+哈希、路径和行文均为形状示例，不能照抄。引用最多12条，决策最多20条，每条引用须被实际决策使用。用户要求或默认约束可有空 `reference_ids`，但不能伪造来源；已有项目依据仍应读取和引用。确实没有可参考实现时，`references: []`，填写至少20字的 `absence_reason` 说明实际检索范围、结果和采用最小结构的原因。不能用该字段跳过已有实现；它是执行者的解释，不是工具证明已扫清项目。
+
+服务读取真实文件，核对哈希与指定行原文，检查验收 ID 是否存在。任务内 `implementation_bases` 是追加历史，`implementation_policy`、`timing`、记录时间与快照由服务生成，工具输入不能伪造。`before_changes` 仅表示记录时相对任务基线无改动；`after_changes` 如实表示已有改动，不证明先前读过代码。依据和理解是不同层次，真实引用不自动证明设计取舍正确。
+
+新任务缺失依据返回 `IMPLEMENTATION_BASIS_REQUIRED`，尚未核对返回 `IMPLEMENTATION_BASIS_REVIEW_REQUIRED`。`task_check.quality.implementation` 返回引用状态、决策对应验收状态及记录时机；完整内容在 `recorded_task.implementation_bases`。依据原文若正在本次任务中修改，可回查任务 Git 基线，标为 `task_baseline`，当前实现仍需重新验收。原文不可核验或现已排除时不能认定依据有效。
+
+改变方案时在 `task_update.implementation_basis` 追加新版本，并先把该版所有关联验收恢复为 `pending`；不能同时补依据并关闭，保存后再在当前快照上实际复核。保留旧记录、原需求与纠正，不用新方案抹掉未解决要求。最多保留10版；仅在实际选择变化时修订，不逐轮重复保存。旧任务没有策略标记时返回 `legacy`，不强制补造编码前记录；按需补录后纳入通用核对。所有字段由 Agent 自动维护，不让使用者填写。
+
 使用返回的 `id` 和 `revision` 更新：
 
 ```json

@@ -1,4 +1,5 @@
 import { BusinessCheckSchema, EvaluationTagSchema, ImplementationBaselineSchema, ReuseExceptionSchema } from "../quality/contracts.js";
+import { ImplementationBasisRecordSchema } from "../quality/basis-contracts.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { EvidenceSchema, IdSchema, RelativePathSchema, ReviewSnapshotSchema, SourceSchema, TextSchema } from "./common.js";
@@ -78,6 +79,8 @@ export const TaskSchema = z.object({
   requirement: TextSchema,
   evaluation: EvaluationTagSchema.optional(),
   implementation_baseline: ImplementationBaselineSchema.optional(),
+  implementation_policy: z.literal(1).optional(),
+  implementation_bases: z.array(ImplementationBasisRecordSchema).max(10).optional(),
   acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100),
   knowledge_versions: z.array(z.object({ id: IdSchema, version: TextSchema }).strict()).max(100).default([]),
   change_items: z.array(ChangeItemSchema).max(500).default([]),

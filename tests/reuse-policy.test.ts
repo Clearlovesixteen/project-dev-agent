@@ -1,3 +1,4 @@
+import { withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
@@ -24,7 +25,7 @@ async function setup(t: { after: (action: () => Promise<void>) => void }) {
   git(["add", "src"]); git(["commit", "-m", "existing request facade"]);
   const binding = await bindWorktree(fixture.path), files = new ProjectFiles(binding.root), service = new UnderstandingService(binding), tasks = new TaskService(binding);
   assert.equal((await service.scan({})).outcome, "ok");
-  const task = TaskSchema.parse((await tasks.open({ requirement: "新增独立退款模块，遵循已有项目约定", acceptance_criteria: [{ id: "reuse", description: "复用项目既有请求能力" }] })).data);
+  const task = TaskSchema.parse((await tasks.open(await withImplementationBasis(fixture.path, { requirement: "新增独立退款模块，遵循已有项目约定", acceptance_criteria: [{ id: "reuse", description: "复用项目既有请求能力" }] }))).data);
   return { fixture, binding, files, service, tasks, task, put };
 }
 

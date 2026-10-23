@@ -21,7 +21,7 @@ export async function captureImplementationBaseline(binding: WorktreeBinding) {
     const { config } = await loadConfig(files);
     const entries = (await mapFiles(files)).filter(entry => !excluded(entry.path, config));
     const context = await implementationContext(files, entries, config);
-    return ImplementationBaselineSchema.parse({ state: "ready", scan_id: map.scan_id, truncated: context.truncated || !map.coverage.complete || context.request_entries.some(entry => entry.source_state !== "current"),
+    return ImplementationBaselineSchema.parse({ state: "ready", scan_id: map.scan_id, truncated: context.request_truncated || !map.coverage.complete || context.request_entries.some(entry => entry.source_state !== "current"),
       request_entries: context.request_entries.filter(entry => entry.role === "shared_request_entry" && entry.source_state === "current").map(entry => ({ path: entry.path, sha256: entry.sha256 })) });
   } catch { return ImplementationBaselineSchema.parse({ state: "unavailable", request_entries: [], truncated: true }); }
 }
@@ -55,7 +55,7 @@ export async function requestReuseReview(binding: WorktreeBinding, task: Task, c
     if (map) {
       const context = await implementationContext(files, (await mapFiles(files)).filter(entry => !excluded(entry.path, config)), config, candidates);
       entries = [...new Map([...entries, ...context.request_entries.filter(entry => entry.role === "shared_request_entry" && tracked.has(entry.path)).map(entry => ({ path: entry.path, sha256: entry.sha256 }))].map(entry => [entry.path, entry])).values()];
-      discoveryIncomplete = context.truncated;
+      discoveryIncomplete = context.request_truncated;
     }
   }
   const established = [];

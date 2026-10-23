@@ -9,7 +9,7 @@ import { TaskSchema, type Task } from "../domain/task.js";
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_TASK_ENTRIES = 1_000;
 const IMMUTABLE_FIELDS = [
-  "id", "schema_version", "repo_identity", "worktree_path", "baseline_head", "baseline_branch", "created_at",
+  "id", "schema_version", "repo_identity", "worktree_path", "baseline_head", "baseline_branch", "created_at", "implementation_policy",
 ] as const;
 
 interface StatePaths { root: string; local: string; tasks: string }
@@ -158,6 +158,10 @@ export class TaskStore {
       }
       if (JSON.stringify(candidate.implementation_baseline) !== JSON.stringify(current.implementation_baseline)) {
         throw new AppError("IMMUTABLE_TASK_FIELD", "项目公共能力基线由任务创建时捕获，不能事后改写");
+      }
+      const oldBases = current.implementation_bases ?? [], nextBases = candidate.implementation_bases ?? [];
+      if (nextBases.length < oldBases.length || oldBases.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextBases[index]))) {
+        throw new AppError("IMMUTABLE_TASK_FIELD", "实现依据只能追加修订，不能覆盖或移除历史记录");
       }
       const next = parseTask({ ...candidate, revision: current.revision + 1, updated_at: new Date().toISOString() });
       await this.writeTask(paths, next, true);

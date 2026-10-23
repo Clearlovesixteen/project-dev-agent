@@ -1,3 +1,4 @@
+import { withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -107,7 +108,7 @@ test("standalone plugin runs without source or node_modules and preserves task/c
       review_questions: ["核实封装的适用范围"] }], note: "已处理本批次",
   })).outcome, "ok");
   assert.equal((await call(first, "project_prepare", { project: "/outside-workspace" })).code, "PROJECT_OUTSIDE_WORKSPACE");
-  const opened = await call(first, "task_open", { project: fixture.path, requirement: "Check plugin upgrade persistence",
+  const opened = await call(first, "task_open", { project: fixture.path, ...(await withImplementationBasis(fixture.path, { acceptance_criteria: [{ id: "persist" }] })), requirement: "Check plugin upgrade persistence",
     acceptance_criteria: [{ id: "persist", description: "Keep the same active task after restart" }] });
   const task = TaskSchema.parse(opened.data);
   await first.close();
