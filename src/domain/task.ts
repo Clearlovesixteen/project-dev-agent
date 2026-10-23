@@ -1,5 +1,7 @@
 import { BusinessCheckSchema, EvaluationTagSchema, ImplementationBaselineSchema, ReuseExceptionSchema } from "../quality/contracts.js";
 import { ImplementationBasisRecordSchema } from "../quality/basis-contracts.js";
+import { ValidationPlanRecordSchema } from "../quality/validation-contracts.js";
+import { BusinessDeltaRecordSchema, BusinessDeltaCheckSchema } from "../quality/business-delta-contracts.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { EvidenceSchema, IdSchema, RelativePathSchema, ReviewSnapshotSchema, SourceSchema, TextSchema } from "./common.js";
@@ -37,6 +39,7 @@ export const ChangeItemSchema = z.object({
 });
 
 export const AcceptanceCriterionSchema = z.object({
+  business_delta_check: BusinessDeltaCheckSchema.optional(),
   business_check: BusinessCheckSchema.optional(),
   id: IdSchema,
   description: TextSchema,
@@ -49,6 +52,7 @@ export const AcceptanceCriterionSchema = z.object({
 });
 
 export const ValidationRecordSchema = z.object({
+  run_id: IdSchema.optional(),
   id: IdSchema,
   description: TextSchema,
   outcome: z.enum(["passed", "failed", "not_run"]),
@@ -81,6 +85,9 @@ export const TaskSchema = z.object({
   implementation_baseline: ImplementationBaselineSchema.optional(),
   implementation_policy: z.literal(1).optional(),
   implementation_bases: z.array(ImplementationBasisRecordSchema).max(10).optional(),
+  validation_policy: z.literal(1).optional(),
+  validation_plans: z.array(ValidationPlanRecordSchema).max(10).optional(),
+  business_deltas: z.array(BusinessDeltaRecordSchema).max(20).optional(),
   acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100),
   knowledge_versions: z.array(z.object({ id: IdSchema, version: TextSchema }).strict()).max(100).default([]),
   change_items: z.array(ChangeItemSchema).max(500).default([]),

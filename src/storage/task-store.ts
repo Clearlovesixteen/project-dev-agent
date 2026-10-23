@@ -9,7 +9,7 @@ import { TaskSchema, type Task } from "../domain/task.js";
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_TASK_ENTRIES = 1_000;
 const IMMUTABLE_FIELDS = [
-  "id", "schema_version", "repo_identity", "worktree_path", "baseline_head", "baseline_branch", "created_at", "implementation_policy",
+  "id", "schema_version", "repo_identity", "worktree_path", "baseline_head", "baseline_branch", "created_at", "implementation_policy", "validation_policy",
 ] as const;
 
 interface StatePaths { root: string; local: string; tasks: string }
@@ -162,6 +162,14 @@ export class TaskStore {
       const oldBases = current.implementation_bases ?? [], nextBases = candidate.implementation_bases ?? [];
       if (nextBases.length < oldBases.length || oldBases.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextBases[index]))) {
         throw new AppError("IMMUTABLE_TASK_FIELD", "实现依据只能追加修订，不能覆盖或移除历史记录");
+      }
+      const oldPlans = current.validation_plans ?? [], nextPlans = candidate.validation_plans ?? [];
+      if (nextPlans.length < oldPlans.length || oldPlans.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextPlans[index]))) {
+        throw new AppError("IMMUTABLE_TASK_FIELD", "检查计划只能追加修订，不能覆盖或移除历史");
+      }
+      const oldDeltas = current.business_deltas ?? [], nextDeltas = candidate.business_deltas ?? [];
+      if (nextDeltas.length < oldDeltas.length || oldDeltas.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextDeltas[index]))) {
+        throw new AppError("IMMUTABLE_TASK_FIELD", "业务变化草案只能追加，旧依据和已发布回执须保留");
       }
       const next = parseTask({ ...candidate, revision: current.revision + 1, updated_at: new Date().toISOString() });
       await this.writeTask(paths, next, true);

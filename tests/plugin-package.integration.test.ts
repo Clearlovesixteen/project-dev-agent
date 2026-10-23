@@ -59,7 +59,7 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const call = async (client: Client, name: string, args: Record<string, unknown> = {}) =>
     ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
   const tools = (await first.listTools()).tools;
-  assert.equal(tools.length, 14);
+  assert.equal(tools.length, 15);
   assert.ok(tools.every((tool) => /[\u3400-\u9fff]/.test(tool.description ?? "")));
   assert.ok(tools.find((tool) => tool.name === "project_prepare")?.inputSchema.required?.includes("project"));
   const preview = await call(first, "project_prepare", { project: fixture.path });
@@ -165,5 +165,7 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const current = ((await call(second, "task_check", { project: fixture.path })).data as any).review_snapshot;
   assert.equal((await call(second, "task_update", { ...review, expected_revision: 1, review_snapshot: current,
     reviewed_ids: { change_items: ["readme"], acceptance_criteria: ["persist"] } })).outcome, "ok");
+  const checkedRun = JSON.parse((await execute(process.execPath, [join(secondPath, "runtime/cli.mjs"), "validation", "run", "--project", fixture.path, "--task-id", task.id, "--check-id", "project-tests"], { env })).stdout);
+  assert.equal(checkedRun.code, "VALIDATION_PASSED");
   assert.equal((await call(second, "task_update", { project: fixture.path, task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
 });

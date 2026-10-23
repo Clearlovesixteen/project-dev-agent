@@ -33,6 +33,18 @@ function scopeMatch(knowledge: Knowledge, modules: string[], paths: string[], co
   return true;
 }
 
+/** 解释现有范围过滤，不把关键词命中、确认状态或来源有效误写成适用条件已成立。 */
+function matchExplanation(knowledge: Knowledge, modules: string[], paths: string[], config: ProjectConfig, terms: string[]) {
+  const owners = config.modules.filter(module => module.paths.some(pattern => paths.some(path => matchesPath(pattern, path))));
+  const matched_paths = knowledge.paths.flatMap(pattern => paths.filter(path => matchesPath(pattern, path)).map(path => ({ pattern, path })));
+  const matched_modules = knowledge.modules.filter(module => modules.includes(module) || !knowledge.paths.length && owners.some(owner => owner.name === module));
+  const module_path_matches = modules.length && !paths.length && !knowledge.modules.length
+    ? config.modules.filter(module => modules.includes(module.name)).flatMap(module => knowledge.paths.flatMap(path => module.paths.filter(pattern => matchesPath(pattern, path)).map(pattern => ({ module: module.name, pattern, rule_path: path })))) : [];
+  return { matched_paths: matched_paths.slice(0, 20), matched_modules: matched_modules.slice(0, 20), module_path_matches: module_path_matches.slice(0, 20),
+    matched_terms: terms, truncated: matched_paths.length > 20 || matched_modules.length > 20 || module_path_matches.length > 20,
+    condition_check: "required", explanation: "范围匹配用于筛选，关键词用于排序；使用前仍需结合本任务核对适用条件。来源有效和已确认状态不代表本任务已满足条件。" };
+}
+
 export async function searchKnowledge(files: ProjectFiles, input: unknown): Promise<ToolResult> {
   const request = KnowledgeSearchInputSchema.parse(input);
   const { config, defaulted, entries, diagnostics } = await loadKnowledge(files);
@@ -62,6 +74,7 @@ export async function searchKnowledge(files: ProjectFiles, input: unknown): Prom
     eligible++;
     const value = { ...entry.knowledge, status, recorded_status: entry.knowledge.status, effective,
       file: entry.file, version: entry.version, source_status: states, matched_terms: entry.matched_terms,
+      match_explanation: matchExplanation(entry.knowledge, request.modules, paths, config, entry.matched_terms),
       applicability: "范围和关键词仅用于检索；使用前，请结合当前任务核对 applicable_conditions 中的适用条件。" };
     const size = Buffer.byteLength(JSON.stringify(value));
     if (results.length >= request.limit || resultBytes + size > 48_000) { truncated = true; continue; }

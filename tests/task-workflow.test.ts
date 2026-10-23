@@ -1,4 +1,4 @@
-import { withImplementationBasis } from "./helpers/implementation-basis.js";
+import { runFixtureChecks, withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -95,6 +95,7 @@ test("a verified change can close, survives restart, and releases the task after
     acceptance_criteria: [{ id: "policy", description: "README points readers to the existing project policy", status: "checked", reviewed_by: "fixture", evidence }],
     validations: [{ id: "baseline-tests", description: "node --test", outcome: "passed", evidence: [{ kind: "test", reference: "node --test", summary: "Existing sample tests passed with zero failures" }] }] });
   assert.equal(reviewed.outcome, "ok");
+  await runFixtureChecks(fixture.path, task.id);
   assert.equal((await service.check({ task_id: task.id })).code, "CHECKLIST_REVIEWED");
   const closed = await service.update({ task_id: task.id, expected_revision: 1, phase: "closed" });
   assert.equal(closed.outcome, "ok");
@@ -137,6 +138,7 @@ test("用户修订要求后保留来源和原始需求，并在重新验收前�
   const current = ((await restarted.check({ task_id: task.id })).data as any).review_snapshot;
   assert.equal(await readFile(path, "utf8"), "# 订单管理\n");
   const updatedEvidence = [{ kind: "manual", reference: "README.md", summary: "按修订后的要求核对标题为订单管理" }];
+  await runFixtureChecks(fixture.path, task.id);
   const result = await restarted.update({ task_id: task.id, expected_revision: revised.revision, review_snapshot: current,
     reviewed_ids: { change_items: ["readme"] }, phase: "closed",
     change_items: [{ ...original.change_items[0], evidence: updatedEvidence }],
@@ -192,6 +194,7 @@ test("代码再次修改后旧验证失效，重新验证才能关闭", async (t
   execFileSync(process.execPath, ["--test"], { cwd: fixture.path, env, stdio: "pipe" });
   assert.equal((await service.update({ ...review, expected_revision: 1, review_snapshot: fresh,
     reviewed_ids: { change_items: ["service"], acceptance_criteria: ["disabled"], validations: ["tests"] } })).outcome, "ok");
+  await runFixtureChecks(fixture.path, task.id);
   assert.equal((await service.update({ task_id: task.id, expected_revision: 2, phase: "closed" })).outcome, "ok");
 });
 
@@ -257,6 +260,7 @@ test("局部复核只刷新明确指定的条目，完整回传不能刷新其�
   assert.deepEqual(after.stale_evidence, { change_items: ["b"], acceptance_criteria: ["disabled"], validations: ["test-b"] });
   assert.equal(task.validations.find((entry) => entry.id === "test-b")?.review_snapshot, snapshot);
   assert.equal((await service.update({ task_id: task.id, expected_revision: task.revision, phase: "closed" })).code, "REVIEW_STALE");
+  await runFixtureChecks(fixture.path, task.id);
   const final = await service.update({ ...replacement, expected_revision: task.revision,
     change_items: task.change_items, acceptance_criteria: task.acceptance_criteria, validations: task.validations,
     reviewed_ids: { change_items: ["b"], acceptance_criteria: ["disabled"], validations: ["test-b"] }, phase: "closed" });

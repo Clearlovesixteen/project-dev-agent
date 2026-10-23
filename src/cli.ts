@@ -19,6 +19,7 @@ import { bindWorktree } from "./git/index.js";
 import { connectCodex } from "./codex-install.js";
 import { HistoryService } from "./history/service.js";
 import { UnderstandingService } from "./understanding/service.js";
+import { runValidation } from "./quality/validation-runner.js";
 
 const HELP = `project-dev-agent — Codex 插件 v${VERSION}
 
@@ -35,6 +36,8 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
     移除匹配的已安装 Skill 文件及此 MCP 连接，保留项目记录。
   doctor
     检查 Node、Git 和 MCP SDK 初始化状态；此命令不验证 Codex 连接。
+  validation run --project <仓库绝对路径> --task-id <任务ID> --check-id <计划检查ID>
+    Agent 内部执行入口：在原终端权限下运行已保存计划，记录真实退出码、日志和代码快照。
   serve --project <工作区绝对路径>
     启动本地 STDIO MCP 服务，提供任务、知识和经验工具。
   serve --workspace <绝对目录>
@@ -113,6 +116,8 @@ async function main(): Promise<void> {
       query: { type: "string" },
       path: { type: "string" },
       id: { type: "string" },
+      "task-id": { type: "string" },
+      "check-id": { type: "string" },
       "batch-id": { type: "string" },
       "model-id": { type: "string" },
       "rule-id": { type: "string", multiple: true },
@@ -133,6 +138,12 @@ async function main(): Promise<void> {
     print({ outcome: "ok", version: VERSION, node: process.version,
       git: execFileSync("git", ["--version"], { encoding: "utf8" }).trim(), mcp_sdk_initialization: "ok",
       codex_connection: "not_checked" });
+    return;
+  }
+  if (positionals.length === 2 && positionals[0] === "validation" && positionals[1] === "run") {
+    if (!values.project || !values["task-id"] || !values["check-id"]) throw new Error("validation run 需要 --project、--task-id 和 --check-id");
+    const result = await runValidation(await bindWorktree(values.project), values["task-id"], values["check-id"]);
+    print(result); if (result.outcome !== "ok") process.exitCode = 1;
     return;
   }
   if (positionals.length === 1 && ["connect", "disconnect"].includes(positionals[0]!)) {

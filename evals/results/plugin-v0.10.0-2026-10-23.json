@@ -1,0 +1,83 @@
+{
+  "version": "0.10.0",
+  "verified_on": "2026-10-23",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 222,
+      "pass": 222,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "2640c743698beec86a9f61f3173720a07373e3c396353e6308370d1424720627"
+    },
+    {
+      "node": "18.19.0",
+      "tests": 222,
+      "pass": 222,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "0fa19da00636836f415ee1557f554600d14b71309adc81b039c7697a58f2cb8a"
+    },
+    {
+      "node": "18.19.1",
+      "tests": 222,
+      "pass": 222,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "9d846e8a802b939beb687cc176e9df3d0bddc48dad29865f466bb82e65e4ec34"
+    }
+  ],
+  "changes": [
+    "按符号、命名词及标识符检索既有实现，返回真实位置、当前指纹和直接用法；新目录仍补充项目级候选",
+    "业务变更草案保存前镜像、预期和需求来源，正常/边界/异常场景绑定验收，真实检查后依据源码局部发布模型并保留可恢复回执",
+    "原终端执行器保存计划、真实退出码、日志摘要和前后快照，MCP只查询核验，生产代码无有效结果不能关闭新任务",
+    "规则查询解释路径、模块、关键词匹配和仍需核对的条件，不改变候选、确认、停用及来源有效状态"
+  ],
+  "regressions": [
+    "实际发布运行文件经 STDIO 与终端 CLI 完成草案、真实测试、场景验收、模型回写、重启与关闭",
+    "缺失、失败、超时、启动失败、过期与伪造运行 ID 不能作为完成证据",
+    "并发检查不能用较快成功掩盖活跃运行或最后失败，死亡中断记录需真实重跑才能恢复",
+    "JSON 转义后的合法大量参数及有界输出可保存并查询",
+    "草案前镜像冲突、需求来源变化、共享依据、删除关系及中断恢复；已发布草案允许明确语义后继"
+  ],
+  "native_upgrade": {
+    "verified_at": "2026-10-23T03:11:04.557Z",
+    "scenario": "Published v0.9.0 to v0.10.0 using isolated native Git marketplace",
+    "refresh_updates_cached_runtime": true,
+    "refresh_updates_installed_version": true,
+    "legacy_task_not_forced_to_invent_execution": true,
+    "legacy_model_migrated_and_patched_after_restart": true,
+    "generic_basis_native_lifecycle_passed": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v090_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "installed_runtime_versions": [
+      "0.9.0",
+      "0.10.0"
+    ],
+    "unchanged_v090_rule_fingerprint_preserved": true,
+    "workspace_and_task_preserved": true,
+    "result": "passed",
+    "from_version": "0.9.0",
+    "to_version": "0.10.0",
+    "node": "18.19.1",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true
+  },
+  "plugin_runtime_sha256": "994d000340045ca1423077b1212295445a7ad9442db20ac04935b60a826921eb",
+  "limitations": [
+    "当前检索为词法及静态引用线索，不能保证找到所有实现或证明适用性",
+    "模型与业务场景由 Codex 阅读判断，工具核验依据与记录，不能保证业务语义和覆盖充分",
+    "检查命令由 Codex 选择并经原终端权限流程运行，MCP不执行项目脚本；不能绕过宿主权限",
+    "本地记录仍可由电脑文件所有者修改；快照不含忽略依赖、外部服务或瞬时修改后恢复的状态",
+    "未进行同需求独立模型前后对照，不报告代码质量或返工的改善百分比"
+  ]
+}

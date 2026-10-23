@@ -1,4 +1,4 @@
-import { withImplementationBasis } from "./helpers/implementation-basis.js";
+import { runFixtureChecks, withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdir, writeFile, readFile, symlink, unlink, stat, utimes } from "node:fs/promises";
@@ -184,6 +184,7 @@ test("显式采用的当前业务场景可以正常关闭任务，不强迫把�
   const checked = (await tasks.check({})).data as any;
   const scenario = checked.quality.business_checks.scenarios[0];
   const review = { status: "checked", reviewed_by: "fixture", evidence: [{ kind: "manual", reference: "fixture", summary: "核对指定业务场景" }] };
+  await runFixtureChecks(task.worktree_path, task.id);
   const result = await tasks.update({ task_id: task.id, expected_revision: 0, review_snapshot: checked.review_snapshot, phase: "closed",
     acceptance_criteria: [...task.acceptance_criteria.map(item => ({ ...item, ...review })), { id: "business-normal", description: "核对正常路径", business_check: scenario.business_check, ...review }],
     change_items: checked.changed_paths.map((path: string, index: number) => ({ id: `change-${index}`, target_path: path, action: "modify", requirement: "夹具需求", rationale: "核对变更", sources: [{ kind: "code", reference: path }], ...review })) });

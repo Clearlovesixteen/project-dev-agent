@@ -1,4 +1,4 @@
-import { withImplementationBasis } from "./helpers/implementation-basis.js";
+import { runFixtureChecks, withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
@@ -55,6 +55,7 @@ test("复用既有入口可正常完成，不强迫新增封装或额外用户�
   await put("src/modules/refunds/api.ts", "import {transport} from '../../platform/transport';\nexport const refund = () => transport.post('/refund');\n");
   const check = (await tasks.check({})).data as any; assert.equal(check.quality.reuse.state, "checked");
   const review = { status: "checked", reviewed_by: "fixture", evidence: [{ kind: "manual", reference: "src/modules/refunds/api.ts", summary: "沿用项目统一 transport" }] };
+  await runFixtureChecks(task.worktree_path, task.id);
   const closed = await tasks.update({ task_id: task.id, expected_revision: 0, review_snapshot: check.review_snapshot, phase: "closed",
     acceptance_criteria: task.acceptance_criteria.map(item => ({ ...item, ...review })), change_items: [{ id: "refund", target_path: "src/modules/refunds/api.ts", action: "modify", requirement: "新增退款", rationale: "业务层复用统一请求入口", sources: [{ kind: "code", reference: "src/platform/transport.ts" }], ...review }] });
   assert.equal(closed.outcome, "ok", JSON.stringify(closed));
@@ -90,6 +91,7 @@ test("必要例外必须记录理由与实际读取的既有封装原文，伪�
     reuse_exception: { capability: "http", reason: "外部服务需要隔离认证，现有入口未提供隔离扩展点，保留独立客户端并验证不携带业务凭证。", inspected_path: "src/platform/transport.ts", sha256: digest(source), line: 2, quote: "伪造的限制说明" } };
   const base = { task_id: task.id, expected_revision: 0, review_snapshot: check.review_snapshot, phase: "closed", acceptance_criteria: task.acceptance_criteria.map(item => ({ ...item, ...review })) };
   assert.equal((await tasks.update({ ...base, change_items: [change] })).code, "PROJECT_REUSE_REQUIRED");
+  await runFixtureChecks(task.worktree_path, task.id);
   const valid = { ...change, reuse_exception: { ...change.reuse_exception, quote: "export const transport = axios.create({baseURL: '/api'});" } };
   assert.equal((await tasks.update({ ...base, change_items: [valid] })).outcome, "ok");
 });

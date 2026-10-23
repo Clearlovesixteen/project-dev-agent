@@ -98,3 +98,16 @@ CLI 可用 `project context --project ... --model-id ... --rule-id edit` 查询�
 - `duplicate_rule.canonical` 是稳定的引用建议，不代表被批准的权威模型。优先复用业务关系；必要整理使用原有 patch，核对意义、保留来源，不自动删除模型。
 - `impact` 根据双向直接导入、显式业务关系及共享标识符返回待核对位置。同名标识符不证明属于同一业务对象。
 - 扫描新增 `content_reused/read_files/read_bytes` 统计。路径与纳秒文件元数据未变化时复用结构解析，新增、删除、改名和别名仍重新解析关系；缓存命中仍核验路径边界。业务规则新鲜度继续读取实际来源，不由扫描缓存代替。
+
+
+## 0.10：业务规则变更草案与发布
+
+保持当前模型与任务预期分开。通过 `task_update.business_deltas` 追加草案：`id/model_id/base_revision/operation:add|modify|remove/rule_id/reason/acceptance_ids/sources`；修改和删除另填从当前模型得到的 `expected_rule_fingerprint`。新增/修改附 `proposed_rule`（同规则ID、basis:intended、条件/例外/需求 source_ids）；删除不填预期规则。需求来源只使用真实文档或本项目任务原文，旧代码前镜像由服务读取。最多20条草案历史。
+
+先补齐足够的 pending 验收项，保存草案后从 `task_check.quality.business_delta.items[].scenarios` 获取正常、条件边界、例外或退役场景的 `business_delta_check`，绑定原验收。正常/边界/例外并不自动证明预期正确，须结合需求实际核验。预期草案不会直接改当前模型，旧规则和无关证据保持原样。
+
+完成当前快照的关联验收和真实检查后，调用 `project_model_apply`，参数为 `task_id/expected_revision/delta_id/observed_rule/sources`。新增/修改须独立提交 `basis:observed` 且语义与本次预期一致的规则，以及实际核对的当前代码来源；删除不填 observed_rule，但仍须当前代码支持的停用证据。工具回传新任务修订号与服务端发布回执。原 `project_model_record` 仍用于建立模型和一般知识维护，不用于绕过草案发布保护。
+
+规则冲突时读取最新模型；修改草案用新ID及 `supersedes_id`，关联验收重开。未完成发布先恢复，不覆盖旧记录。已经发布但代码再次变化时，重扫来源、重新核验场景与真实检查，提交当前代码依据追加复核回执；旧回执继续保留。需求发生新变化时也保留此前发布的事实，按当前规则重新建立明确的后继草案。
+
+发布采用任务锁→模型锁的固定顺序，模型修订和日志可恢复重试；相同发布不重复应用。模型发布失败或任务记录保存失败时，按工具返回状态继续，不宣称完成。关闭时核对当前规则、需求来源、场景验收及回执快照；删除最后规则、未处理关系引用等操作要求先明确处置，不隐式清理整份模型。

@@ -1,5 +1,11 @@
 import { captureImplementationBaseline, requestReuseReview, assertRequestReuse } from "./quality/request-reuse.js";
 import { recordImplementationBasis, implementationBasisReview, assertImplementationBasis } from "./quality/implementation-basis.js";
+import { recordValidationPlan } from "./quality/validation-plan.js";
+import { validationReview, assertValidationReview } from "./quality/validation-review.js";
+import { recordBusinessDeltas, businessDeltaReview, assertBusinessDeltas, applyBusinessDelta } from "./quality/business-deltas.js";
+import { BusinessDeltaApplyInputSchema } from "./quality/business-delta-contracts.js";
+import { IdSchema } from "./domain/common.js";
+import { validationRuns } from "./quality/validation-store.js";
 import { qualityReview, projectEvaluation, assertBusinessAcceptance } from "./quality/review.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -76,6 +82,8 @@ export class TaskService {
         ...(request.evaluation ? { evaluation: request.evaluation } : {}),
         implementation_baseline: await captureImplementationBaseline(current),
         implementation_policy: 1,
+        validation_policy: 1,
+        validation_plans: request.validation_plan ? [await recordValidationPlan(current, request.validation_plan, request.acceptance_criteria.map(item => item.id))] : [],
         implementation_bases: request.implementation_basis ? [await recordImplementationBasis(current, current.head, request.implementation_basis, request.acceptance_criteria.map(item => item.id))] : [],
         acceptance_criteria: request.acceptance_criteria, change_items: [], created_at: now, updated_at: now,
       });
@@ -121,7 +129,28 @@ export class TaskService {
         }
         const snapshot = request.phase === "aborted" ? undefined : await reviewSnapshot(this.binding, current.baseline_head);
         if (request.review_snapshot && request.review_snapshot !== snapshot?.hash) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "代码已不同于审查或验证时的快照，请重新读取 task_check 并执行受影响的检查");
+        const referenced = request.validations?.filter(item => item.run_id && JSON.stringify(item) !== JSON.stringify(current.validations.find(old => old.id === item.id))) ?? [];
+        if (referenced.length) {
+          const records = await validationRuns(new ProjectFiles(this.binding.root), current.id);
+          for (const item of referenced) {
+            const run = records.runs.find(run => run.id === item.run_id && run.repo_identity === this.binding.repo_identity && run.worktree_path === this.binding.root);
+            if (!run || item.outcome === "not_run" || item.outcome === "passed" && (run.state !== "passed" || run.start_snapshot !== snapshot?.hash || run.end_snapshot !== snapshot.hash)
+              || item.outcome === "failed" && run.state === "passed") throw new AppError("VALIDATION_RUN_INVALID", "运行记录必须真实存在且与本项目、当前代码及所声明结果一致，不能伪造 run_id");
+          }
+        }
         let bases = current.implementation_bases;
+        let plans = current.validation_plans;
+        let deltas = current.business_deltas;
+        if (request.business_deltas) {
+          if (!snapshot || request.phase === "closed") throw new AppError("BUSINESS_DELTA_REVIEW_REQUIRED", "先保存业务变化草案并完成验收，再发布模型与关闭任务");
+          deltas = await recordBusinessDeltas(this.binding, { ...current, acceptance_criteria: request.acceptance_criteria ?? current.acceptance_criteria }, request.business_deltas);
+        }
+        if (request.validation_plan) {
+          if (!snapshot || request.phase === "closed") throw new AppError("VALIDATION_PLAN_REVIEW_REQUIRED", "先保存检查计划并实际执行，不能在关闭时补计划");
+          if ((plans?.length ?? 0) >= 10) throw new AppError("VALIDATION_PLAN_LIMIT", "本任务检查计划修订已达10版，请缩小任务范围");
+          const plan = await recordValidationPlan(this.binding, request.validation_plan, (request.acceptance_criteria ?? current.acceptance_criteria).map(item => item.id), plans?.at(-1));
+          if (plans?.at(-1)?.version !== plan.version) plans = [...plans ?? [], plan];
+        }
         if (request.implementation_basis) {
           if (!snapshot || request.phase === "closed") throw new AppError("IMPLEMENTATION_BASIS_REVIEW_REQUIRED", "先保存实现依据，再在当前代码上复核相关验收；不能在关闭时同时补写依据");
           const acceptance = request.acceptance_criteria ?? current.acceptance_criteria;
@@ -136,6 +165,8 @@ export class TaskService {
         const next = TaskSchema.parse({
           ...current,
           ...(bases ? { implementation_bases: bases } : {}),
+          ...(plans ? { validation_plans: plans } : {}),
+          ...(deltas ? { business_deltas: deltas } : {}),
           change_items: stampReviews(request.change_items, current.change_items, (item) => item.status !== "pending", request.review_snapshot, request.reviewed_ids?.change_items),
           acceptance_criteria: stampReviews(request.acceptance_criteria, current.acceptance_criteria, (item) => item.status === "checked", request.review_snapshot, request.reviewed_ids?.acceptance_criteria),
           validations: stampReviews(request.validations, current.validations, (item) => item.outcome !== "not_run", request.review_snapshot, request.reviewed_ids?.validations),
@@ -148,13 +179,32 @@ export class TaskService {
           if (snapshot.paths.some((path) => !next.change_items.some((item) => item.target_path === path))) throw new AppError("UNREVIEWED_CHANGES", "关闭前出现清单之外的改动，请补充审查");
           if (Object.values(staleReviews(next, snapshot.hash)).some((ids) => ids.length)) throw new AppError("REVIEW_STALE", "代码已变化或旧记录尚未绑定代码快照，请重新审查和验证后关闭任务");
           assertImplementationBasis(await implementationBasisReview(this.binding, next, snapshot.hash));
+          assertBusinessDeltas(await businessDeltaReview(this.binding, next, snapshot.hash));
           await assertRequestReuse(this.binding, next, snapshot.paths);
           try { await assertBusinessAcceptance(this.binding, next, snapshot.hash); }
           catch (error) { throw new AppError("BUSINESS_CHECK_STALE", error instanceof Error ? error.message : String(error)); }
+          assertValidationReview(await validationReview(this.binding, next, snapshot.hash, snapshot.paths));
         }
         return next;
       });
       return { outcome: "ok", code: "TASK_UPDATED", data: saved, diagnostics: [] };
+    });
+  }
+
+  /** 固定按任务锁→模型锁发布；模型日志可恢复，任务保存失败时重试不会重复应用。 */
+  async applyBusiness(input: unknown): Promise<ToolResult> {
+    return this.execute(async () => {
+      const request = BusinessDeltaApplyInputSchema.extend({ task_id: IdSchema, expected_revision: z.number().int().nonnegative() }).parse(input);
+      let receipt: unknown;
+      const saved = await this.store.update(request.task_id, request.expected_revision, async current => {
+        await assertBaseline(this.binding, current);
+        const snapshot = await reviewSnapshot(this.binding, current.baseline_head);
+        assertValidationReview(await validationReview(this.binding, current, snapshot.hash, snapshot.paths));
+        const { task_id: _taskId, expected_revision: _revision, ...value } = request;
+        receipt = await applyBusinessDelta(this.binding, current, value);
+        return current;
+      });
+      return { outcome: "ok", code: "BUSINESS_DELTA_APPLIED", data: { task_id: saved.id, revision: saved.revision, receipt }, diagnostics: [] };
     });
   }
 
@@ -191,12 +241,18 @@ export class TaskService {
       const stale = staleReviews(task, snapshot), outdated = Object.values(stale).some((ids) => ids.length);
       const reuse = await requestReuseReview(this.binding, task, changed);
       const implementation = await implementationBasisReview(this.binding, task, snapshot);
+      const execution = await validationReview(this.binding, task, snapshot, changed);
+      const businessDelta = await businessDeltaReview(this.binding, task, snapshot);
       // 这里只判断记录、复用保护和文件覆盖，不能独立判断业务语义。
       const basisReviewed = !implementation.required || implementation.state === "checked";
-      const reviewed = basisReviewed && reuse.state === "checked" && task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
+      const executionReviewed = !execution.required || ["checked", "not_applicable"].includes(execution.state);
+      const deltaReviewed = ["checked", "not_applicable"].includes(businessDelta.state);
+      const reviewed = deltaReviewed && executionReviewed && basisReviewed && reuse.state === "checked" && task.change_items.length > 0 && pending.length === 0 && acceptance.length === 0 && validations.length === 0 && unexpected.length === 0 && !outdated;
       const reuseCode = reuse.state === "violations" ? "PROJECT_REUSE_REQUIRED" : reuse.state === "incomplete" ? "PROJECT_REUSE_CONTEXT_REQUIRED" : undefined;
       const basisCode = basisReviewed ? undefined : implementation.state === "missing" ? "IMPLEMENTATION_BASIS_REQUIRED" : "IMPLEMENTATION_BASIS_REVIEW_REQUIRED";
-      const checkCode = reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : basisCode === "IMPLEMENTATION_BASIS_REQUIRED" ? basisCode : reuseCode ?? basisCode ?? "REVIEW_INCOMPLETE";
+      const executionCode = executionReviewed ? undefined : execution.state === "missing" ? "VALIDATION_PLAN_REQUIRED" : "VALIDATION_RUN_REQUIRED";
+      const deltaCode = deltaReviewed ? undefined : "BUSINESS_DELTA_REVIEW_REQUIRED";
+      const checkCode = reviewed ? "CHECKLIST_REVIEWED" : outdated ? "REVIEW_STALE" : basisCode === "IMPLEMENTATION_BASIS_REQUIRED" ? basisCode : reuseCode ?? basisCode ?? executionCode ?? deltaCode ?? "REVIEW_INCOMPLETE";
       return {
         outcome: reviewed ? "ok" : "incomplete", code: checkCode,
         data: {
@@ -205,13 +261,13 @@ export class TaskService {
           changed_paths: changed, unexpected_changes: unexpected, pending_items: pending,
           pending_acceptance: acceptance, unresolved_validations: validations,
           review_snapshot: snapshot, stale_evidence: stale,
-          quality: { ...await qualityReview(this.binding, task, changed, snapshot), reuse, implementation },
+          quality: { ...await qualityReview(this.binding, task, changed, snapshot), reuse, implementation, execution, business_delta: businessDelta },
           ...(request.include_evaluation ? { evaluation: await projectEvaluation(this.binding) } : {}),
           items: task.change_items.map((item) => ({ id: item.id, target_path: item.target_path, status: item.status, changed: paths.has(item.target_path) })),
           structurally_reviewed: reviewed,
           limitation: "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
-        diagnostics: reviewed ? [] : [{ code: checkCode, message: basisCode === checkCode ? "请核对 quality.implementation：先建立项目实现依据，再逐项复核所关联的验收。依据与实现选择由 Agent 维护，无需用户额外填写。" : reuseCode === checkCode ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。" : outdated
+        diagnostics: reviewed ? [] : [{ code: checkCode, message: executionCode === checkCode ? "请核对 quality.execution：保存检查计划，用原终端运行 validation run，采用当前代码上的真实执行记录。" : basisCode === checkCode ? "请核对 quality.implementation：先建立项目实现依据，再逐项复核所关联的验收。依据与实现选择由 Agent 维护，无需用户额外填写。" : reuseCode === checkCode ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。" : outdated
           ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，通过 reviewed_ids 明确本次复核的条目，并提交对应完整集合。"
           : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。" }],
       };

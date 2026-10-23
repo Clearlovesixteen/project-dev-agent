@@ -5,22 +5,27 @@ import { digest } from "../knowledge/document.js";
 import { safeSource } from "../understanding/scan.js";
 import { HTTP_LIBRARIES, httpUsage, codeMask } from "./http-usage.js";
 import { posix } from "node:path";
+import { implementationCandidates, implementationScope, lexicalProvider } from "../understanding/retrieval.js";
 
 export const programFile = (path: string) => /\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(path);
 /** 项目级基础设施不能被新业务目录的路径过滤掉。候选与真实用法一起返回，实际语义由执行者阅读核对。 */
-export async function implementationContext(files: ProjectFiles, entries: MapFile[], config: ProjectConfig, paths: string[] = []) {
+export async function implementationContext(files: ProjectFiles, entries: MapFile[], config: ProjectConfig, paths: string[] = [], query?: string) {
   const callers = new Map<string, string[]>();
   for (const entry of entries) for (const item of entry.imports) if (item.target) {
     const list = callers.get(item.target) ?? []; if (!list.includes(entry.path)) list.push(entry.path); callers.set(item.target, list);
   }
-  const owner = (path: string) => /^(?:apps|packages)\/[^/]+/.exec(path)?.[0];
-  const owners = new Set(paths.map(owner));
-  const inScope = (path: string) => !paths.length || owners.has(undefined) || !owner(path) || owners.has(owner(path));
+  const inScope = (path: string) => implementationScope(path, paths);
+  const relevanceCache = new Map<string, number>();
+  const relevance = (entry: MapFile) => {
+    let value = relevanceCache.get(entry.path);
+    if (value === undefined) { value = lexicalProvider.rank(entry, query ?? "").score; relevanceCache.set(entry.path, value); }
+    return value;
+  };
   // 用结构和真实调用关系发现公共实现，避免把“项目习惯”收窄成某类基础库。
   const sourceFile = (path: string) => /\.(?:[cm]?[jt]sx?|vue|svelte|py|go|java|kt|cs|rs)$/.test(path);
   const reusable = entries.filter(entry => sourceFile(entry.path) && inScope(entry.path) && entry.role !== "test"
     && (entry.role === "shared" || (callers.get(entry.path)?.length ?? 0) > 0))
-    .sort((a, b) => (callers.get(b.path)?.length ?? 0) - (callers.get(a.path)?.length ?? 0) || a.path.localeCompare(b.path));
+    .sort((a, b) => relevance(b) - relevance(a) || (callers.get(b.path)?.length ?? 0) - (callers.get(a.path)?.length ?? 0) || a.path.localeCompare(b.path));
   const shared_entries = [];
   let sharedUnreadable = 0;
   for (const entry of reusable.slice(0, 8)) {
@@ -61,7 +66,7 @@ export async function implementationContext(files: ProjectFiles, entries: MapFil
     return count;
   }));
   const moduleExamples = entries.filter(entry => sourceFile(entry.path) && inScope(entry.path) && entry.role !== "test" && entry.role !== "shared")
-    .sort((a, b) => distance(b.path) - distance(a.path) || Number(/(?:modules|features|pages|views)\//.test(b.path)) - Number(/(?:modules|features|pages|views)\//.test(a.path)) || a.path.localeCompare(b.path));
+    .sort((a, b) => relevance(b) - relevance(a) || distance(b.path) - distance(a.path) || Number(/(?:modules|features|pages|views)\//.test(b.path)) - Number(/(?:modules|features|pages|views)\//.test(a.path)) || a.path.localeCompare(b.path));
   const examples = moduleExamples.slice(0, 3).map(entry => ({ path: entry.path, sha256: entry.sha256,
     reason: "按目录与所属范围选出的实现样例；实际阅读其职责拆分、导出、依赖、注释及约定后再决定是否适用。" }));
   const instructionCandidates = entries.filter(entry => inScope(entry.path) && /(?:^|\/)(?:AGENTS|CLAUDE|README|ARCHITECTURE|CONTRIBUTING|conventions|coding[-_]style)\.(?:md|html)$/i.test(entry.path))
@@ -70,6 +75,8 @@ export async function implementationContext(files: ProjectFiles, entries: MapFil
     .sort((a, b) => Number(/AGENTS/.test(b.path)) - Number(/AGENTS/.test(a.path)) || distance(b.path) - distance(a.path) || a.path.length - b.path.length);
   const instructions = instructionCandidates.slice(0, 6).map(entry => ({ path: entry.path, sha256: entry.sha256 }));
   return { shared_entries, request_entries: ranked.slice(0, 5), examples, project_instructions: instructions,
+    // HTTP 基线等内部调用不重复执行面向需求的取证；project_context 显式传入查询（允许空串）。
+    ...(query !== undefined ? { implementation_candidates: await implementationCandidates(files, entries, config, paths, query) } : {}),
     truncated: reusable.length > 8 || sharedUnreadable > 0 || moduleExamples.length > 3 || instructionCandidates.length > 6 || possible.length > 20 || ranked.length > 5 || unreadable > 0,
     request_truncated: possible.length > 20 || ranked.length > 5 || unreadable > 0, unreadable: unreadable + sharedUnreadable,
     next_step: "候选清单不等于已阅读或已掌握规范。编码前读取适用规范、相似实现与依赖用法，查询相关知识；用 task_open/task_update 的 implementation_basis 保存真实引用、约束、实现选择及其验收项。新目录无命中时继续全局检索，不能认定没有现成能力。" };

@@ -1,5 +1,7 @@
 import { BusinessCheckSchema, EvaluationTagSchema } from "../quality/contracts.js";
 import { ImplementationBasisInputSchema } from "../quality/basis-contracts.js";
+import { ValidationPlanInputSchema } from "../quality/validation-contracts.js";
+import { BusinessDeltaInputSchema, BusinessDeltaCheckSchema } from "../quality/business-delta-contracts.js";
 import { z } from "zod";
 import { IdSchema, ReviewSnapshotSchema, TextSchema } from "../domain/common.js";
 import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, ValidationRecordSchema } from "../domain/task.js";
@@ -8,8 +10,9 @@ import { AcceptanceCriterionSchema, ChangeItemSchema, CorrectionSchema, Validati
 export const TaskOpenInputSchema = z.object({
   requirement: TextSchema,
   evaluation: EvaluationTagSchema.optional(),
+  validation_plan: ValidationPlanInputSchema.optional(),
   implementation_basis: ImplementationBasisInputSchema.optional().describe("Agent 编码前读取项目后记录的原文依据和实现决策；每项决策关联一个现有验收项"),
-  acceptance_criteria: z.array(z.object({ id: IdSchema, description: TextSchema, business_check: BusinessCheckSchema.optional() }).strict()).min(1).max(100),
+  acceptance_criteria: z.array(z.object({ id: IdSchema, description: TextSchema, business_check: BusinessCheckSchema.optional(), business_delta_check: BusinessDeltaCheckSchema.optional() }).strict()).min(1).max(100),
 }).strict();
 
 // 集合字段省略表示保留，传入则完整替换；服务层另行检查旧 ID 不丢失和预期修订号。
@@ -19,6 +22,8 @@ const ReviewedIds = (maximum: number) => z.array(IdSchema).max(maximum)
 export const TaskUpdateInputSchema = z.object({
   task_id: IdSchema,
   expected_revision: z.number().int().nonnegative(),
+  business_deltas: z.array(BusinessDeltaInputSchema).min(1).max(20).optional().describe("追加业务变化草案，服务保存旧规则前镜像；预期不直接覆盖当前模型"),
+  validation_plan: ValidationPlanInputSchema.optional().describe("保存或修订真实检查计划；服务绑定脚本配置指纹，计划变更后需重新运行。MCP 不执行命令"),
   implementation_basis: ImplementationBasisInputSchema.optional().describe("追加本次实现依据；保留历史，相关验收须处于 pending，保存后再逐项复核。记录时机由服务判断"),
   review_snapshot: ReviewSnapshotSchema.optional().describe("审查和执行验证前由 task_check 获取的代码指纹；提交完成的审查或验证记录时必须传入，期间代码变化将拒绝写入"),
   reviewed_ids: z.object({ change_items: ReviewedIds(500), acceptance_criteria: ReviewedIds(100), validations: ReviewedIds(100) }).strict()

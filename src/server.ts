@@ -16,6 +16,8 @@ import { KnowledgeSearchInputSchema } from "./knowledge/search.js";
 import { HistoryService } from "./history/service.js";
 import { HistoryNextInputSchema, HistoryRecordInputSchema, HistoryScanInputSchema } from "./history/contracts.js";
 import { UnderstandingService } from "./understanding/service.js";
+import { BusinessDeltaApplyInputSchema } from "./quality/business-delta-contracts.js";
+import { IdSchema } from "./domain/common.js";
 import { ContextInput, ModelRecordInput, ScanInput } from "./understanding/contracts.js";
 
 /**
@@ -51,7 +53,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
   const run = (project: string | undefined, action: (binding: WorktreeBinding) => Promise<ToolResult>) =>
     operation(async () => action(await bindingFor(project)));
   const server = new McpServer({ name: "project-dev-agent", version: VERSION }, {
-    instructions: (plugin ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。首次使用自动初始化该仓库，无需独立接入命令；已有配置直接复用。所有项目工具均需传入已配置范围内的绝对路径 project。未经用户要求，不扩大已有工作范围。" : workspace ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。` : "") + "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。编码前先查询 project_context 的 implementation_context，实际阅读项目规范、同类模块和已有基础设施；新业务目录无命中也不能跳过全局入口。已有请求封装时业务模块不得无依据另起 axios/fetch。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
+    instructions: (plugin ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。首次使用自动初始化该仓库，无需独立接入命令；已有配置直接复用。所有项目工具均需传入已配置范围内的绝对路径 project。未经用户要求，不扩大已有工作范围。" : workspace ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。` : "") + "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。编码前先查询 project_context 的 implementation_context，实际阅读项目规范、同类模块和已有基础设施；新业务目录无命中也不能跳过全局入口。优先复用适用的已有能力及用法，不得无依据另起封装。业务规则先保存变更草案，场景验收和真实检查通过后再回写模型。检查计划通过原终端 validation run 执行，MCP 不执行项目脚本。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
   });
   // instructions 与工具 annotations 是给客户端的执行提示，不替代后端校验或用户授权。
   if (plugin) {
@@ -89,18 +91,18 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).open(input)));
   server.registerTool("task_update", {
-    description: "使用最新修订号更新任务，集合完整替换且保留旧 ID。implementation_basis 追加依据修订，相关验收先重开为 pending，保存后再复核，不能在关闭时补写；历史与记录时机保留。核验前保留 task_check.review_snapshot，复核旧完成项另传 reviewed_ids，回传不能刷新旧证据。停止用 aborted 和原因，说明默认中文。",
+    description: "使用最新修订号更新任务，集合完整替换且保留旧 ID；business_deltas 追加规则变更草案，validation_plan 保存检查计划，不能与关闭同次提交。implementation_basis 追加依据修订，相关验收先重开为 pending，保存后再复核，不能在关闭时补写；历史与记录时机保留。核验前保留 task_check.review_snapshot，复核旧完成项另传 reviewed_ids，回传不能刷新旧证据。停止用 aborted 和原因，说明默认中文。",
     inputSchema: TaskUpdateInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).update(input)));
   server.registerTool("task_check", {
-    description: "省略 task_id 恢复活跃任务。quality.implementation 核对通用实现依据、记录时机及关联验收，缺失或未复核不能关闭新任务；旧任务明确标为 legacy。比较 Git 差异、清单与证据指纹，返回关联线索和业务场景；quality.reuse 另检查明确 HTTP 绕过。保留 review_snapshot 后实际审查/验证，再传 task_update。include_evaluation 附有限项目统计，无真实配对不计算改善。本工具不执行测试或保证设计与业务正确。",
+    description: "省略 task_id 恢复活跃任务。quality.implementation 核对通用实现依据、记录时机及关联验收，缺失或未复核不能关闭新任务；旧任务明确标为 legacy。比较 Git 差异、清单与证据指纹，返回关联线索和业务场景；quality.reuse 另检查明确 HTTP 绕过，quality.execution 核对真实终端检查，quality.business_delta 核对业务草案与回写回执。保留 review_snapshot 后实际审查/验证，再传 task_update。include_evaluation 附有限项目统计，无真实配对不计算改善。本工具不执行测试或保证设计与业务正确。",
     inputSchema: TaskCheckInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new TaskService(binding).check(input)));
   // 确认知识、历史习惯和模块理解均可供检索，但各自的生效状态由返回数据区分。
   server.registerTool("knowledge_search", {
-    description: "按模块、受影响路径和关键词检索项目规则。来源有效的确认规则可使用；候选和过期来源仅作为复核线索。将实际采用的规则 ID 与版本记录到任务中。",
+    description: "按模块、受影响路径和关键词检索项目规则。来源有效的确认规则可使用；候选和过期来源仅作为复核线索。match_explanation 说明路径、模块和词语的匹配理由；适用条件仍需核实。将实际采用的规则 ID 与版本记录到任务中。",
     inputSchema: KnowledgeSearchInputSchema.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new KnowledgeService(binding).search(input)));
@@ -134,7 +136,7 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).scan(input)));
   server.registerTool("project_context", {
-    description: "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供项目级请求入口、已有模块用法和规范候选；编码前实际阅读。返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
+    description: "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供项目级能力、已有模块用法和规范候选；implementation_candidates 按符号及词法排序并给出当前源码位置和直接用法，未命中需继续查找；编码前实际阅读。返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
     inputSchema: ContextInput.safeExtend(scope),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).context(input)));
@@ -143,6 +145,11 @@ export function createServer(bindingFor: (project?: string) => Promise<WorktreeB
     inputSchema: ModelRecordInput.safeExtend(scope),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ project, ...input }) => run(project, (binding) => new UnderstandingService(binding).record(input)));
+  server.registerTool("project_model_apply", {
+    description: "Agent 内部业务变更发布入口：完成草案关联场景验收与真实检查后，提交当前源码支持的 observed_rule 和 sources，或显式删除依据。核验任务修订号并幂等回写模型；不会把未实现的 intended 自动变为当前行为。失败保留可恢复日志，关闭前核对回执。",
+    inputSchema: BusinessDeltaApplyInputSchema.extend({ task_id: IdSchema, expected_revision: z.number().int().nonnegative() }).safeExtend(scope),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ project, ...input }) => run(project, binding => new TaskService(binding).applyBusiness(input)));
   return server;
 }
 

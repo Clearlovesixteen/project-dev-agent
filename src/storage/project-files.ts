@@ -70,8 +70,8 @@ export class ProjectFiles {
   }
 
   /** Publish a complete new file atomically; existing content is never replaced. */
-  async create(relative: string, content: string): Promise<void> {
-    await this.write(relative, content);
+  async create(relative: string, content: string, maximum = 65_536): Promise<void> {
+    await this.write(relative, content, undefined, maximum);
   }
 
   /** Used only by explicit local setup/review commands, not by MCP knowledge tools. */
@@ -79,8 +79,9 @@ export class ProjectFiles {
     await this.write(relative, content, previous);
   }
 
-  private async write(relative: string, content: string, previous?: string): Promise<void> {
-    if (Buffer.byteLength(content) > 65_536) throw new AppError("FILE_LIMIT", "生成文件超过 64 KiB 限制");
+  private async write(relative: string, content: string, previous?: string, maximum = 65_536): Promise<void> {
+    // 默认知识文件仍限制 64 KiB；只有内部运行记录显式申请有界的较大容量。
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 1_048_576 || Buffer.byteLength(content) > maximum) throw new AppError("FILE_LIMIT", `生成文件超过 ${maximum} 字节限制`);
     await this.path(relative, true);
     const parent = dirname(relative);
     if (parent !== ".") await this.directory(parent);

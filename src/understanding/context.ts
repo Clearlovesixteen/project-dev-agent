@@ -12,6 +12,7 @@ import { businessScenarios } from "../quality/scenarios.js";
 import { impactCandidates } from "../quality/impact.js";
 import { auditModels } from "./model-audit.js";
 import { materializeModel, modelPreview, relatedModelIds, selectModelRules } from "./model-view.js";
+import { lexicalProvider } from "./retrieval.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -34,7 +35,7 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   const terms = [...new Intl.Segmenter("zh", { granularity: "word" }).segment(request.query.toLowerCase())].filter((term) => term.isWordLike).map((term) => term.segment).slice(0, 50);
   const score = (text: string) => terms.filter((term) => text.toLowerCase().includes(term)).length;
   const matched = entries.filter((entry) => (!paths.length || paths.some((path) => intersects(path, entry.path))) && (!request.modules.length || request.modules.includes(entry.module)))
-    .map((entry) => ({ entry, score: score([entry.path, entry.module, entry.role, ...entry.imports.map((item) => item.specifier)].join(" ")) }))
+    .map((entry) => ({ entry, score: lexicalProvider.rank(entry, request.query).score }))
     .filter((entry) => !terms.length || paths.length || request.modules.length || entry.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.path.localeCompare(b.entry.path));
   const selected = matched.slice(0, request.limit).map(({ entry }) => ({ entry, relation: "matched" }));
@@ -120,7 +121,7 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-    implementation_context: await implementationContext(files, entries, config, paths),
+    implementation_context: await implementationContext(files, entries, config, paths, request.query),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),
     snapshot: { head: map.head, scanned_at: map.scanned_at, coverage: map.coverage }, files: fileResults,
