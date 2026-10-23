@@ -81,5 +81,15 @@
     "关闭保护不能拦截 Codex 直接写文件；按当前 Skill 明确调用后由 Agent 维护流程",
     "无参考原因及语义取舍由执行者核实，不能把候选索引当成穷尽证明",
     "当前为工具、兼容与原生插件生命周期回归；尚无真实同需求独立模型前后对照的质量改善结论"
-  ]
+  ],
+  "public_install": {
+    "result": "passed",
+    "source": "https://github.com/Clearlovesixteen/project-dev-agent.git",
+    "version": "0.9.0",
+    "node": "v18.19.1",
+    "tools": 14,
+    "bundle_matches_tested_release": true,
+    "generation_rules_installed": true,
+    "isolated_codex_home": true
+  }
 }
