@@ -79,5 +79,33 @@
     "检查命令由 Codex 选择并经原终端权限流程运行，MCP不执行项目脚本；不能绕过宿主权限",
     "本地记录仍可由电脑文件所有者修改；快照不含忽略依赖、外部服务或瞬时修改后恢复的状态",
     "未进行同需求独立模型前后对照，不报告代码质量或返工的改善百分比"
-  ]
+  ],
+  "public_install": {
+    "result": "passed",
+    "source": "https://github.com/Clearlovesixteen/project-dev-agent.git",
+    "version": "0.10.0",
+    "node": "v18.19.1",
+    "tools": 15,
+    "bundle_matches_tested_release": true,
+    "generation_rules_installed": true,
+    "isolated_codex_home": true
+  },
+  "github_actions": {
+    "head_sha": "e02aca6b7b45b087d8921e0e2946a815e3b2ebe1",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/39893957265",
+    "matrix": [
+      {
+        "job": "runtime (18.19.0)",
+        "conclusion": "success"
+      },
+      {
+        "job": "runtime (18.19.1)",
+        "conclusion": "success"
+      },
+      {
+        "job": "runtime (20.19.6)",
+        "conclusion": "success"
+      }
+    ]
+  }
 }
