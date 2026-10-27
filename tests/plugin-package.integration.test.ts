@@ -59,7 +59,7 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   const call = async (client: Client, name: string, args: Record<string, unknown> = {}) =>
     ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
   const tools = (await first.listTools()).tools;
-  assert.equal(tools.length, 15);
+  assert.equal(tools.length, 16);
   assert.ok(tools.every((tool) => /[\u3400-\u9fff]/.test(tool.description ?? "")));
   assert.ok(tools.find((tool) => tool.name === "project_prepare")?.inputSchema.required?.includes("project"));
   const preview = await call(first, "project_prepare", { project: fixture.path });

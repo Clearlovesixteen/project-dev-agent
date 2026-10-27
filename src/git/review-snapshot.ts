@@ -1,54 +1,54 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, open, readlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { AppError } from "../domain/error.js";
-import { ProjectFiles, hasCode } from "../storage/project-files.js";
+import { ProjectFiles } from "../storage/project-files.js";
 import type { WorktreeBinding } from "./baseline.js";
 import { changedPaths } from "./changes.js";
+import type { WorkspaceBaseline } from "../domain/workspace-baseline.js";
+import { entryIdentity, workspaceContent } from "./workspace-content.js";
 
-/** 将审查绑定到实际内容。Git 基线代表未改文件，另对全部有效改动和未跟踪文件取指纹。 */
-export async function reviewSnapshot(binding: WorktreeBinding, baseline: string): Promise<{ hash: string; paths: string[] }> {
-  const paths = await changedPaths(binding, baseline);
-  if (paths.length > 10_000) throw new AppError("REVIEW_SNAPSHOT_LIMIT", "审查快照涉及的文件超过 10000 个，请缩小任务范围");
-  const files = new ProjectFiles(binding.root), hash = createHash("sha256");
-  // 旧版可能批量刷新过未复核项；升级后让活跃任务显式复核一次，已结束任务保留原记录。
-  hash.update(JSON.stringify(["review-v2", baseline, paths]));
+/** 指纹覆盖完整有效工作区；任务路径另与接入内容比较，已有改动不冒充本轮成果。 */
+export async function reviewSnapshot(
+  binding: WorktreeBinding,
+  baseline: string,
+  initial?: WorkspaceBaseline,
+) {
+  const gitPaths = await changedPaths(binding, baseline),
+    paths = [
+      ...new Set([
+        ...gitPaths,
+        ...(initial?.entries.map((item) => item.path) ?? []),
+      ]),
+    ].sort();
+  if (paths.length > 10000)
+    throw new AppError("REVIEW_SNAPSHOT_LIMIT", "审查快照超过10000个文件");
+  const files = new ProjectFiles(binding.root),
+    hash = createHash("sha256"),
+    delta: string[] = [];
   let total = 0;
-  for (const relative of paths) {
-    const parent = dirname(relative);
-    let path: string;
-    try {
-      path = join(parent === "." ? binding.root : await files.path(parent), relative.split("/").at(-1)!);
-      const before = await lstat(path);
-      if (before.isSymbolicLink()) {
-        // 仅记录链接本身，绝不读取其指向的仓库外内容。
-        hash.update(JSON.stringify([relative, "symlink", await readlink(path)]));
-        continue;
-      }
-      if (!before.isFile()) throw new AppError("REVIEW_SNAPSHOT_UNSUPPORTED", `无法核验非普通文件：${relative}`);
-      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const start = await handle.stat(), content = createHash("sha256"), buffer = Buffer.alloc(65_536);
-        if (!start.isFile() || start.ino !== before.ino || start.dev !== before.dev) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "生成审查快照时文件发生变化，请重新核验");
-        for (;;) {
-          const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
-          if (!bytesRead) break;
-          total += bytesRead;
-          if (total > 128 * 1024 * 1024) throw new AppError("REVIEW_SNAPSHOT_LIMIT", "审查改动超过 128 MiB，请缩小任务范围");
-          content.update(buffer.subarray(0, bytesRead));
-        }
-        const end = await handle.stat(), current = await lstat(path);
-        if (start.size !== end.size || start.mtimeMs !== end.mtimeMs || start.ctimeMs !== end.ctimeMs || current.ino !== end.ino || current.dev !== end.dev) {
-          throw new AppError("REVIEW_SNAPSHOT_CHANGED", "生成审查快照时文件发生变化，请重新核验");
-        }
-        hash.update(JSON.stringify([relative, "file", end.mode & 0o111, content.digest("hex")]));
-      } finally { await handle.close(); }
-    } catch (error) {
-      if (hasCode(error, "ENOENT")) hash.update(JSON.stringify([relative, "missing"]));
-      else throw error;
-    }
+  hash.update(JSON.stringify(["review-v2", baseline, paths]));
+  for (const path of paths) {
+    const { entry, bytes } = await workspaceContent(files, path);
+    total += bytes;
+    if (total > 128 * 1024 * 1024)
+      throw new AppError("REVIEW_SNAPSHOT_LIMIT", "审查改动超过128 MiB");
+    if (entry.kind === "file")
+      hash.update(JSON.stringify([path, "file", entry.mode, entry.sha256]));
+    else if (entry.kind === "symlink")
+      hash.update(JSON.stringify([path, "symlink", entry.target]));
+    else hash.update(JSON.stringify([path, "missing"]));
+    const before = initial?.entries.find((item) => item.path === path);
+    if (!before || entryIdentity(before) !== entryIdentity(entry))
+      delta.push(path);
   }
-  if (JSON.stringify(paths) !== JSON.stringify(await changedPaths(binding, baseline))) throw new AppError("REVIEW_SNAPSHOT_CHANGED", "生成审查快照时改动列表发生变化，请重新核验");
-  return { hash: hash.digest("hex"), paths };
+  if (
+    JSON.stringify(gitPaths) !==
+    JSON.stringify(await changedPaths(binding, baseline))
+  )
+    throw new AppError("REVIEW_SNAPSHOT_CHANGED", "快照期间改动列表变化");
+  return {
+    hash: hash.digest("hex"),
+    paths: delta,
+    all_paths: paths,
+    preexisting_paths: initial?.entries.map((item) => item.path) ?? [],
+  };
 }

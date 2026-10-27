@@ -2,7 +2,7 @@
 
 工具包括 `project_prepare`、`task_open`、`task_update`、`task_check`、`knowledge_search` 和 `experience_propose`，具体参数以工具声明为准。以下示例展示数据形状，应按真实项目填写，不能当作业务需求清单。自然语言字段默认使用中文，标识和引用原文保持不变。
 
-工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次插件使用会初始化当前仓库并准备本地忽略规则。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动，不会自动让脏工作树满足建任务条件。
+工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次插件使用会初始化当前仓库并准备本地忽略规则。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动；0.11 起 task_open 捕获接入内容基线，无需先提交。未解决合并冲突仍阻止接入。
 
 新对话或进程重启后，用仅包含 `project` 的 `task_check` 恢复唯一活跃任务；没有任务时返回 `NO_ACTIVE_TASK`。更新使用恢复记录中的最新修订号。指定任务 ID 也可读取已关闭或中止的历史记录。同一任务的所有调用必须使用同一个项目。
 
@@ -68,7 +68,7 @@
 
 旧版本记录可读取和中止，缺少指纹的完成记录需通过 `reviewed_ids` 显式复核才能关闭。指纹覆盖 Git 基线、有效改动和未跟踪文件，未覆盖被 Git 忽略的依赖或外部服务状态。
 
-结束前用 `task_check` 检查任务。`structurally_reviewed` 只表示记录与文件覆盖符合结构要求，不独立验证业务正确性；完整任务位于 `recorded_task`。工作完成后用最新修订号、有效记录和 `phase: closed` 关闭。停止工作使用 `phase: aborted` 并填写 `abort_reason`。结束的任务是只读历史，后续改动需从干净基线另建任务。
+结束前用 `task_check` 检查任务。`structurally_reviewed` 只表示记录与文件覆盖符合结构要求，不独立验证业务正确性；完整任务位于 `recorded_task`。工作完成后用最新修订号、有效记录和 `phase: closed` 关闭。停止工作使用 `phase: aborted` 并填写 `abort_reason`。结束的任务是只读历史，后续需求可保留已有改动，从新的接入内容基线建立任务。
 
 ## 生码规则如何进入任务记录
 
@@ -153,3 +153,27 @@ Agent 在原终端执行当前插件 `validation run --project <绝对仓库> --
 验收中的自动验证记录可附 `run_id`；不存在、失败或与当前代码不符的记录不能自报为 passed。旧的文字验证保留，不能替代新任务的真实检查计划。无生产代码变化时可不设自动计划；显式空计划须附 `not_applicable_reason`。生产HTML及未知代码类型不会因后缀未识别就默认为纯文档。手工业务验收不冒充测试。
 
 边界：开始/结束快照不涵盖被忽略的依赖、外部服务或运行中改后恢复的瞬态；本地资料不对文件所有者提供防篡改保证。超时会终止直接进程组并在硬截止结算失败，脱离进程组的后代不能保证全部回收。旧任务没有 validation_policy 时兼容保留；采用新计划后按真实运行核验。
+
+
+## 0.11：连续开发、来源与纠正
+
+`task_open` 自动保存 `workspace_baseline`，任务增量相对接入时有效内容计算；哈希仍覆盖完整工作区。接入前每文件最多8 MiB、共64 MiB、最多2000个改动路径，超限明确失败，不留下可用的部分基线。分块资料在 `.project-dev/local/baselines/`，不保存或重放 index。旧任务继续使用原 Git 基线。
+
+新任务保存 `scope_paths`（本需求相对路径，最多30条）、`feedback_review`、`business_assessment` 及 `requirement_sources`。以下是组合示例：
+
+```json
+{
+  "scope_paths":["src/orders"],
+  "business_assessment":{"state":"unchanged","reason":"本次仅调整订单列表布局，不改变状态、权限或提交规则","model_ids":[],"delta_ids":[]},
+  "requirement_sources":[{"id":"prototype","kind":"unavailable","locator":"本次原型地址","reason":"当前原型无法读取，视觉对齐保留待核验"}],
+  "acceptance_criteria":[{"id":"layout","description":"按参考图核对列表布局","requirement_check":{"kind":"visual","source_ids":["prototype"]}}]
+}
+```
+
+来源 kind 可为 request/correction/document/image/unavailable。request 引用本任务原始要求；correction 指定 `correction_id` 与原话；document 提供本项目 path、实际 quote、可选 sha256；image 使用 `.project-dev/local/requirements/` 内真实图片及可选 sha256；unavailable 保留 locator/reason。服务保存来源版本并为本次真实复核的验收绑定 `requirement_versions`，不能由调用方刷新旧证据。默认 task-request 来源保留本轮要求；未显式分类的旧调用兼容 technical，但 Agent 必须正确分类实际业务和视觉验收。
+
+修改来源前把相关验收重开为 pending，来源追加历史，上限100条。验收含义或类别改变时额外传 `acceptance_revision:{reason,correction_id}`，引用已保存的纠正；服务保存 `acceptance_revisions` 前后定义，最多50版。不能直接把视觉项降为技术项或沿用旧通过结论。新任务缺少业务影响评估不能关闭；changed 绑定当前有效的 model_ids/delta_ids，unknown 继续待核实。旧任务缺少新策略时明确 legacy，不补造历史。
+
+`knowledge_search.feedback` 返回 version/items。使用相同 scope_paths 查询，`feedback_review:{version,decisions:[{id,disposition:"apply"|"not_applicable",reason,acceptance_ids}]}` 保存适用选择；apply 必须关联实际验收，修订先重开为 pending。暂无相关纠正时服务保存空版本，新纠正出现后旧版本失效。最多返回20条，截断不能当成完整复核。
+
+正式终端工具通道：`node <当前运行文件> tools preflight` 与 `tools call --tool <工具> --project <仓库> --file <JSON>`，默认沿用原生插件配置。preflight 只证明独立STDIO可连接，host_tool_visibility 为 not_checked；不能据此宣称当前会话已加载工具。只有原本明确使用手动范围的源码模式可附 --workspace。二者复用同一 MCP 工具校验，不执行任意业务脚本。不得用临时桥或切换单仓库模式绕开个人范围。

@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+import { Workspace } from "./workspace.js";
+import { toolClient } from "./tools/client.js";
+import { TaskStore } from "./storage/task-store.js";
+import { baselineContent } from "./git/workspace-baseline.js";
+import { assertBaseline } from "./git/index.js";
+import { RelativePathSchema } from "./domain/common.js";
 import { execFileSync } from "node:child_process";
 import { lstat, open } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -10,7 +16,11 @@ import { TaskSchema } from "./domain/task.js";
 import { createSample } from "./sample/create.js";
 import { VERSION } from "./version.js";
 import { prepareProject } from "./personal-setup.js";
-import { startServer, startWorkspaceServer, startPluginServer } from "./server.js";
+import {
+  startServer,
+  startWorkspaceServer,
+  startPluginServer,
+} from "./server.js";
 import { PluginSettings } from "./plugin-settings.js";
 import { initializeProject } from "./setup.js";
 import { reviewKnowledge } from "./knowledge/review.js";
@@ -36,6 +46,12 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
     移除匹配的已安装 Skill 文件及此 MCP 连接，保留项目记录。
   doctor
     检查 Node、Git 和 MCP SDK 初始化状态；此命令不验证 Codex 连接。
+  tools preflight [--workspace <手动允许目录>]
+    检查当前运行文件的STDIO启动和工具列表，不等于当前Codex已加载工具。
+  tools call --tool <工具名> --project <仓库绝对路径> --file <参数JSON> [--workspace <手动允许目录>]
+    Agent内部正式调用通道，默认使用个人插件配置并复用相同范围和修订校验。
+  baseline read --project <仓库绝对路径> --task-id <任务ID> --path <相对路径>
+    读取接入时内容以比较同一文件的后续增量，不修改源码和Git暂存状态。
   validation run --project <仓库绝对路径> --task-id <任务ID> --check-id <计划检查ID>
     Agent 内部执行入口：在原终端权限下运行已保存计划，记录真实退出码、日志和代码快照。
   serve --project <工作区绝对路径>
@@ -81,14 +97,21 @@ function print(value: unknown): void {
 }
 
 async function readContractFile(path: string): Promise<string> {
-  if (!(await lstat(path)).isFile()) throw new Error("数据契约输入必须是普通文件");
+  if (!(await lstat(path)).isFile())
+    throw new Error("数据契约输入必须是普通文件");
   const handle = await open(path, "r");
   try {
-    if (!(await handle.stat()).isFile()) throw new Error("数据契约输入必须是普通文件");
+    if (!(await handle.stat()).isFile())
+      throw new Error("数据契约输入必须是普通文件");
     const buffer = Buffer.alloc(1_000_001);
     let offset = 0;
     while (offset < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      const { bytesRead } = await handle.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      );
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
@@ -105,6 +128,7 @@ async function main(): Promise<void> {
       help: { type: "boolean", short: "h" },
       destination: { type: "string" },
       type: { type: "string" },
+      tool: { type: "string" },
       file: { type: "string" },
       project: { type: "string" },
       workspace: { type: "string" },
@@ -133,28 +157,111 @@ async function main(): Promise<void> {
     return;
   }
   if (positionals.length === 1 && positionals[0] === "doctor") {
-    const server = new McpServer({ name: "project-dev-agent-foundation", version: VERSION });
+    const server = new McpServer({
+      name: "project-dev-agent-foundation",
+      version: VERSION,
+    });
     await server.close();
-    print({ outcome: "ok", version: VERSION, node: process.version,
-      git: execFileSync("git", ["--version"], { encoding: "utf8" }).trim(), mcp_sdk_initialization: "ok",
-      codex_connection: "not_checked" });
+    print({
+      outcome: "ok",
+      version: VERSION,
+      node: process.version,
+      git: execFileSync("git", ["--version"], { encoding: "utf8" }).trim(),
+      mcp_sdk_initialization: "ok",
+      codex_connection: "not_checked",
+    });
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "validation" && positionals[1] === "run") {
-    if (!values.project || !values["task-id"] || !values["check-id"]) throw new Error("validation run 需要 --project、--task-id 和 --check-id");
-    const result = await runValidation(await bindWorktree(values.project), values["task-id"], values["check-id"]);
-    print(result); if (result.outcome !== "ok") process.exitCode = 1;
+  if (positionals.length === 2 && positionals[0] === "tools") {
+    if (!["preflight", "call"].includes(positionals[1]!))
+      throw new Error("tools支持preflight或call");
+    if (positionals[1] === "call" && (!values.tool || !values.file))
+      throw new Error("tools call需要--tool与--file");
+    const result = await toolClient({
+      entry: process.argv[1]!,
+      ...(values.project ? { project: values.project } : {}),
+      ...(values.workspace ? { workspace: values.workspace } : {}),
+      ...(positionals[1] === "call"
+        ? {
+            tool: values.tool!,
+            arguments: JSON.parse(await readContractFile(values.file!)),
+          }
+        : {}),
+    });
+    print(result);
+    if (result.outcome !== "ok") process.exitCode = 1;
     return;
   }
-  if (positionals.length === 1 && ["connect", "disconnect"].includes(positionals[0]!)) {
-    if (!values.workspace) throw new Error("connect/disconnect 需要 --workspace <绝对目录>");
-    print(await connectCodex({ workspace: values.workspace, codex: values.codex, apply: values.apply, disconnect: positionals[0] === "disconnect" }));
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "baseline" &&
+    positionals[1] === "read"
+  ) {
+    if (!values.project || !values["task-id"] || !values.path)
+      throw new Error("baseline read需要--project、--task-id、--path");
+    const binding = values.workspace ? await (await Workspace.open(values.workspace)).bind(values.project) : await new PluginSettings().bind(values.project),
+      task = await new TaskStore(binding.root).load(values["task-id"]);
+    await assertBaseline(binding, task);
+    const text = await baselineContent(
+      binding,
+      task.baseline_head,
+      RelativePathSchema.parse(values.path),
+      task.workspace_baseline,
+    );
+    print({
+      outcome: "ok",
+      code: "BASELINE_CONTENT",
+      data: {
+        path: values.path,
+        text: text.slice(0, 65536),
+        truncated: text.length > 65536,
+      },
+      diagnostics: [],
+    });
+    return;
+  }
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "validation" &&
+    positionals[1] === "run"
+  ) {
+    if (!values.project || !values["task-id"] || !values["check-id"])
+      throw new Error("validation run 需要 --project、--task-id 和 --check-id");
+    const result = await runValidation(
+      await bindWorktree(values.project),
+      values["task-id"],
+      values["check-id"],
+    );
+    print(result);
+    if (result.outcome !== "ok") process.exitCode = 1;
+    return;
+  }
+  if (
+    positionals.length === 1 &&
+    ["connect", "disconnect"].includes(positionals[0]!)
+  ) {
+    if (!values.workspace)
+      throw new Error("connect/disconnect 需要 --workspace <绝对目录>");
+    print(
+      await connectCodex({
+        workspace: values.workspace,
+        codex: values.codex,
+        apply: values.apply,
+        disconnect: positionals[0] === "disconnect",
+      }),
+    );
     return;
   }
   if (positionals.length === 1 && positionals[0] === "serve") {
     // mcp.json 使用 serve --plugin；另外两个入口兼容手动绑定仓库或工作目录的安装方式。
     // 三种范围来源互斥，启动后由 STDIO 传输协议消息，不再向 stdout 打印普通命令结果。
-    if ([values.project, values.workspace, values.plugin].filter(Boolean).length !== 1) throw new Error("serve 必须且只能指定 --project、--workspace 或 --plugin 中的一项");
+    if (
+      [values.project, values.workspace, values.plugin].filter(Boolean)
+        .length !== 1
+    )
+      throw new Error(
+        "serve 必须且只能指定 --project、--workspace 或 --plugin 中的一项",
+      );
     if (values.plugin) await startPluginServer();
     else if (values.workspace) await startWorkspaceServer(values.workspace);
     else await startServer(values.project!);
@@ -164,77 +271,170 @@ async function main(): Promise<void> {
     const settings = new PluginSettings(values["codex-home"]);
     if (positionals[1] === "status") print(await settings.status());
     else if (positionals[1] === "configure" && values.workspace) {
-      print(await settings.configure({ workspace: values.workspace, apply: values.apply,
-        expected_revision: values["expected-revision"] === "null" ? null : values["expected-revision"] }));
-    } else throw new Error("请使用 plugin status 或 plugin configure --workspace");
+      print(
+        await settings.configure({
+          workspace: values.workspace,
+          apply: values.apply,
+          expected_revision:
+            values["expected-revision"] === "null"
+              ? null
+              : values["expected-revision"],
+        }),
+      );
+    } else
+      throw new Error("请使用 plugin status 或 plugin configure --workspace");
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "project" && positionals[1] === "prepare") {
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "project" &&
+    positionals[1] === "prepare"
+  ) {
     if (!values.project) throw new Error("project prepare 需要 --project 参数");
-    print(await prepareProject(await bindWorktree(values.project), { apply: values.apply }));
+    print(
+      await prepareProject(await bindWorktree(values.project), {
+        apply: values.apply,
+      }),
+    );
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "project" && positionals[1] === "init") {
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "project" &&
+    positionals[1] === "init"
+  ) {
     if (!values.project) throw new Error("project init 需要 --project 参数");
     print(await initializeProject(values.project, values.apply));
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "knowledge" && positionals[1] === "review") {
-    if (!values.project || !values.file || !values.reviewer) throw new Error("knowledge review 需要 --project、--file 和 --reviewer 参数");
-    print({ outcome: "ok", ...(await reviewKnowledge(values.project, values.file, values.reviewer)) });
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "knowledge" &&
+    positionals[1] === "review"
+  ) {
+    if (!values.project || !values.file || !values.reviewer)
+      throw new Error(
+        "knowledge review 需要 --project、--file 和 --reviewer 参数",
+      );
+    print({
+      outcome: "ok",
+      ...(await reviewKnowledge(values.project, values.file, values.reviewer)),
+    });
     return;
   }
-  if (positionals.length === 2 && ((positionals[0] === "project" && ["scan", "context"].includes(positionals[1]!)) || (positionals[0] === "model" && positionals[1] === "record"))) {
+  if (
+    positionals.length === 2 &&
+    ((positionals[0] === "project" &&
+      ["scan", "context"].includes(positionals[1]!)) ||
+      (positionals[0] === "model" && positionals[1] === "record"))
+  ) {
     if (!values.project) throw new Error("项目理解命令需要 --project 参数");
-    const service = new UnderstandingService(await bindWorktree(values.project));
+    const service = new UnderstandingService(
+      await bindWorktree(values.project),
+    );
     let result;
     if (positionals[1] === "scan") result = await service.scan({});
-    else if (positionals[1] === "context") result = await service.context({ query: values.query ?? "", paths: values.path ? [values.path] : [],
-      model_id: values["model-id"], model_revision: values["model-revision"] === undefined ? undefined : Number(values["model-revision"]),
-      rule_ids: values["rule-id"],
-      model_offset: values["model-offset"] === undefined ? 0 : Number(values["model-offset"]) });
-    else if (values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
+    else if (positionals[1] === "context")
+      result = await service.context({
+        query: values.query ?? "",
+        paths: values.path ? [values.path] : [],
+        model_id: values["model-id"],
+        model_revision:
+          values["model-revision"] === undefined
+            ? undefined
+            : Number(values["model-revision"]),
+        rule_ids: values["rule-id"],
+        model_offset:
+          values["model-offset"] === undefined
+            ? 0
+            : Number(values["model-offset"]),
+      });
+    else if (values.file)
+      result = await service.record(
+        JSON.parse(await readContractFile(values.file)),
+      );
     else throw new Error("model record 需要 --file 参数");
-    print(result); if (result.outcome === "error") process.exitCode = 1; return;
-  }
-  if (positionals.length === 2 && positionals[0] === "history") {
-    if (!values.project) throw new Error("history 需要 --project 参数");
-    const service = new HistoryService(await bindWorktree(values.project), values["codex-home"]);
-    let result;
-    if (positionals[1] === "scan") result = await service.scan({ refresh: values.refresh });
-    else if (positionals[1] === "next") result = await service.next({ batch_id: values["batch-id"] });
-    else if (["pause", "resume"].includes(positionals[1]!)) result = await service.next({ action: positionals[1] });
-    else if (positionals[1] === "record" && values.file) result = await service.record(JSON.parse(await readContractFile(values.file)));
-    else if (positionals[1] === "propose" && values.id) result = await service.propose(values.id);
-    else throw new Error("请使用 history scan、history next、history pause/resume、history record --file 或 history propose --id");
     print(result);
     if (result.outcome === "error") process.exitCode = 1;
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "knowledge" && positionals[1] === "search") {
-    if (!values.project || !values.query) throw new Error("knowledge search 需要 --project 和 --query 参数");
-    const result = await new KnowledgeService(await bindWorktree(values.project)).search({ query: values.query });
+  if (positionals.length === 2 && positionals[0] === "history") {
+    if (!values.project) throw new Error("history 需要 --project 参数");
+    const service = new HistoryService(
+      await bindWorktree(values.project),
+      values["codex-home"],
+    );
+    let result;
+    if (positionals[1] === "scan")
+      result = await service.scan({ refresh: values.refresh });
+    else if (positionals[1] === "next")
+      result = await service.next({ batch_id: values["batch-id"] });
+    else if (["pause", "resume"].includes(positionals[1]!))
+      result = await service.next({ action: positionals[1] });
+    else if (positionals[1] === "record" && values.file)
+      result = await service.record(
+        JSON.parse(await readContractFile(values.file)),
+      );
+    else if (positionals[1] === "propose" && values.id)
+      result = await service.propose(values.id);
+    else
+      throw new Error(
+        "请使用 history scan、history next、history pause/resume、history record --file 或 history propose --id",
+      );
+    print(result);
+    if (result.outcome === "error") process.exitCode = 1;
+    return;
+  }
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "knowledge" &&
+    positionals[1] === "search"
+  ) {
+    if (!values.project || !values.query)
+      throw new Error("knowledge search 需要 --project 和 --query 参数");
+    const result = await new KnowledgeService(
+      await bindWorktree(values.project),
+    ).search({ query: values.query });
     print(result);
     if (result.outcome !== "ok") process.exitCode = 1;
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "sample" && positionals[1] === "create") {
-    if (!values.destination) throw new Error("sample create 需要 --destination <新目录>");
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "sample" &&
+    positionals[1] === "create"
+  ) {
+    if (!values.destination)
+      throw new Error("sample create 需要 --destination <新目录>");
     const result = await createSample(resolve(values.destination));
     print({ outcome: "ok", ...result });
     return;
   }
-  if (positionals.length === 2 && positionals[0] === "contract" && positionals[1] === "check") {
-    const schemas = { task: TaskSchema, knowledge: KnowledgeSchema, result: ToolResultSchema };
+  if (
+    positionals.length === 2 &&
+    positionals[0] === "contract" &&
+    positionals[1] === "check"
+  ) {
+    const schemas = {
+      task: TaskSchema,
+      knowledge: KnowledgeSchema,
+      result: ToolResultSchema,
+    };
     const type = values.type;
     if (!type || !Object.hasOwn(schemas, type) || !values.file) {
-      throw new Error("contract check 需要 --type <task|knowledge|result> 和 --file <JSON 文件>");
+      throw new Error(
+        "contract check 需要 --type <task|knowledge|result> 和 --file <JSON 文件>",
+      );
     }
     const raw = await readContractFile(resolve(values.file));
     const schema = schemas[type as keyof typeof schemas];
     const result = schema.safeParse(JSON.parse(raw) as unknown);
     if (!result.success) {
-      print({ outcome: "error", code: "INVALID_CONTRACT", issues: result.error.issues });
+      print({
+        outcome: "error",
+        code: "INVALID_CONTRACT",
+        issues: result.error.issues,
+      });
       process.exitCode = 1;
       return;
     }
@@ -245,6 +445,12 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`${JSON.stringify({ outcome: "error", code: "COMMAND_FAILED", message: error instanceof Error ? error.message : String(error) })}\n`);
+  process.stderr.write(
+    `${JSON.stringify({
+      outcome: "error",
+      code: "COMMAND_FAILED",
+      message: error instanceof Error ? error.message : String(error),
+    })}\n`,
+  );
   process.exitCode = 1;
 });

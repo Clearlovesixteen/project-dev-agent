@@ -17,7 +17,7 @@ test("real STDIO MCP client discovers the tools and completes open/update/check 
   const client = new Client({ name: "project-dev-integration", version: "0.1.0" });
   t.after(async () => { await client.close(); });
   await client.connect(transport);
-  assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name).sort(), ["experience_propose", "history_next", "history_record", "project_scan", "project_context", "project_model_record", "project_model_apply", "history_scan", "knowledge_search", "project_prepare", "task_check", "task_open", "task_update"].sort());
+  assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name).sort(), ["project_feedback_record", "experience_propose", "history_next", "history_record", "project_scan", "project_context", "project_model_record", "project_model_apply", "history_scan", "knowledge_search", "project_prepare", "task_check", "task_open", "task_update"].sort());
   const opened = await client.callTool({ name: "task_open", arguments: {
     requirement: "Add disabled account support", acceptance_criteria: [{ id: "access", description: "Disabled accounts lose access" }],
   } });

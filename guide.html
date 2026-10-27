@@ -36,7 +36,7 @@
 </tr>
 <tr>
 <td><code>task_open</code></td>
-<td>从干净 Git 基线建立任务和验收项</td>
+<td>保存接入时工作区内容，建立任务和验收项</td>
 </tr>
 <tr>
 <td><code>task_update</code></td>
@@ -77,7 +77,7 @@ npm test
 npm run test:integration
 </code></pre></div>
 <p>测试覆盖关联待核对项、陈旧修订号、冲突基线、任务恢复、知识范围和来源变化、纠正复用、初始化幂等及真实 STDIO 客户端调用。实测状态见 <a href="docs/verification.html">验证报告</a>。</p>
-<p>同一工作树只允许一个活动任务。任务开始前须干净且已有提交；任务中的正常提交仍与原基线比较。关闭任务要求清单与验收有证据；中止保留历史。工具核对结构化记录与文件覆盖，无法独立证明业务正确，也无法发现所有未登记的业务关联。核对后若再次修改代码，需要重新审查相关证据。</p>
+<p>同一工作树只允许一个活动任务。任务需要已有 Git 提交；0.11 起允许接入时已有未提交改动，保存初始内容并跟踪后续增量，不改暂存区。任务中的正常提交仍保留原基线。关闭任务要求清单与验收有证据；中止保留历史。工具核对结构化记录与文件覆盖，无法独立证明业务正确，也无法发现所有未登记的业务关联。核对后若再次修改代码，需要重新审查相关证据。</p>
 <p>检索使用范围筛选与关键词排序，尚未提供 AST 影响分析、向量语义搜索或跨仓库影响分析（workspace 模式只提供隔离路由）。审查人字段记录来源，不提供身份认证。真实团队的纠偏、漏改和额外负担，需要试用后才能得出结论。</p>
 <p>后续使用 <a href="docs/pilot-guide.html">试用指南</a> 与 <a href="docs/sharing-outline.html">分享提纲</a>。</p>
 </article><footer class="footer"><span>Project Dev Agent · 从个人使用到团队实践</span><a href="#content">回到顶部 ↑</a></footer></main><aside class="toc"  aria-label="本页目录"><p class="toc-title">本页内容</p><a href="#section-1">快速开始</a><a href="#section-2">项目数据</a><a href="#section-3">验证与边界</a></aside></div></div><div class="toast" role="status" aria-live="polite"></div><script>

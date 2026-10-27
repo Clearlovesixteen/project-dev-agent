@@ -9,7 +9,7 @@ import { runValidation } from "../../src/quality/validation-runner.js";
 export async function withImplementationBasis<T extends { acceptance_criteria: { id: string }[] }>(root: string, input: T) {
   const text = await readFile(join(root, "AGENTS.md"), "utf8");
   const line = text.split(/\r?\n/).findIndex(value => value.trim());
-  return { ...input, validation_plan: { checks: [{ id: "project-tests", description: "运行样例已有业务测试", command: "node", args: ["--test"], acceptance_ids: [input.acceptance_criteria[0]!.id] }] }, implementation_basis: { references: [{ id: "convention", path: "AGENTS.md", sha256: digest(text), line: line + 1, quote: text.split(/\r?\n/)[line]!.trim() }],
+  return { ...input, business_assessment:{state:"unchanged",reason:"本夹具核对工具流程和明确改动，未改变已采用的业务模型规则",model_ids:[],delta_ids:[]}, validation_plan: { checks: [{ id: "project-tests", description: "运行样例已有业务测试", command: "node", args: ["--test"], acceptance_ids: [input.acceptance_criteria[0]!.id] }] }, implementation_basis: { references: [{ id: "convention", path: "AGENTS.md", sha256: digest(text), line: line + 1, quote: text.split(/\r?\n/)[line]!.trim() }],
     decisions: [{ id: "scope", constraint: "沿用样例已有职责和约定，落实本次需求", implementation: "在现有职责边界内修改，用本次验收核对实现与要求",
       reference_ids: ["convention"], acceptance_id: input.acceptance_criteria[0]!.id }] } };
 }

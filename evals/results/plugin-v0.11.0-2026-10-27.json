@@ -1,0 +1,92 @@
+{
+  "version": "0.11.0",
+  "verified_on": "2026-10-27",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 241,
+      "pass": 241,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "9464579dd1fbed9e6d7674b4455970f775dc54352b680143345156465f651c54"
+    },
+    {
+      "node": "18.19.0",
+      "tests": 241,
+      "pass": 241,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "cac76109444ba9744a66d0cf21d381968392a61f2fdc4dcaa2a4b0f57d4e19e4"
+    },
+    {
+      "node": "18.19.1",
+      "tests": 241,
+      "pass": 241,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "log_sha256": "42acbf137ce693334b1aa1fc06023b37243e35ef0ad582124429ac22fbebfe39"
+    }
+  ],
+  "plugin_runtime_sha256": "a1e23c204daf60d0cff120f6a04bb71b449f7b086b854916311c3cb99d49cc11",
+  "native_upgrade": {
+    "verified_at": "2026-10-27T08:21:39.935Z",
+    "scenario": "Published v0.10.0 to v0.11.0 using isolated native Git marketplace",
+    "refresh_updates_cached_runtime": true,
+    "refresh_updates_installed_version": true,
+    "legacy_task_not_forced_to_invent_execution": true,
+    "legacy_model_migrated_and_patched_after_restart": true,
+    "formal_terminal_preflight_passed": true,
+    "dirty_workspace_native_lifecycle_passed": true,
+    "generic_basis_native_lifecycle_passed": true,
+    "feedback_native_without_active_task_passed": true,
+    "model_and_history_preserved": true,
+    "corrected_and_disabled_legacy_batches_preserved_after_append_and_archive": true,
+    "unchanged_v0100_task_evidence_preserved": true,
+    "generation_rules_installed": true,
+    "installed_runtime_versions": [
+      "0.10.0",
+      "0.11.0"
+    ],
+    "unchanged_v0100_rule_fingerprint_preserved": true,
+    "workspace_and_task_preserved": true,
+    "result": "passed",
+    "from_version": "0.10.0",
+    "to_version": "0.11.0",
+    "node": "18.19.1",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true
+  },
+  "changes": [
+    "服务捕获接入时工作区内容与初始来源，允许暂存、未暂存、新增及删除内容；完整工作区指纹仍绑定审查与真实执行结果",
+    "即时纠正独立于任务、核对本项目用户原话并保留修订停用链；新相关反馈需重新取用和复核",
+    "历史来源游标识别同一长会话追加，project_prepare在已有来源变化时增量扫描，未分析批次不记为完成",
+    "新任务业务影响判断绑定模型、变更草案与场景；需求和原型来源绑定验收版本，缺失原型不能完成视觉验收",
+    "验收含义或类别变化关联需求纠正，先保存pending并保留前后定义，原始要求来源不可被覆盖",
+    "正式终端调用通道复用同一STDIO工具注册、个人范围与修订校验，不依赖临时Python桥或固定版本路径"
+  ],
+  "coverage": [
+    "初始内容保护、index不变、同文件后续增量、恢复HEAD、重命名、删除、新增、二进制和符号链接自身指纹",
+    "即时纠正无活跃任务保存、原话真实性、候选范围、重启查询、替代停用、旧反馈版本失效及旧任务隔离",
+    "同一长会话追加后的历史新批次与语义待处理状态",
+    "视觉来源缺失、伪造图片/原文、来源更新、验收类别降级与修订留档、原始来源保留",
+    "真实STDIO正式通道与插件配置范围，原有业务草案→终端测试→回写→重启关闭闭环",
+    "已发布0.10.0原生升级、旧模型迁移与历史保留；升级运行文件中的已有改动接续、无活跃任务即时纠正与终端preflight"
+  ],
+  "limitations": [
+    "分类、纠正提取、业务建模和视觉判断由当前Codex执行，来源匹配和哈希不证明理解、语义正确或视觉相似",
+    "Skill仅在明确调用的开发流程内指导运行，MCP不能拦截模型直接写文件或保证所有纠正都被准确提取",
+    "历史探测与分析由当前会话触发，不在后台自动分析；来源只覆盖本机可读取且可归属当前项目的日志",
+    "即时纠正始终候选，核对记录时原话；一次性要求不进入后续全局候选，不能自动确认团队规则",
+    "本地记录仍可由电脑文件所有者修改；有效工作区指纹不含忽略依赖、外部服务或瞬时修改后恢复",
+    "视觉参考只核对当前项目授权缓存的版本，不自动证明外部原型网站或PRD已经更新；默认technical兼容旧调用，实际分类仍需Agent正确维护",
+    "接入内容上限2000条、单文件8MiB、总内容64MiB；初始内容不推断作者，不保存或重放Git index",
+    "尚未在用户正在开发的WMS任务上写入或回放，未做同需求独立模型质量前后对照，不报告改善百分比"
+  ]
+}

@@ -77,8 +77,8 @@ test("preparation preserves existing work and rejects unsafe or busy Git metadat
   await unlink(lock);
   const data = (await prepareProject(binding, { apply: true })).data as { worktree_clean: boolean; ready_to_open: boolean };
   assert.equal(data.worktree_clean, false);
-  assert.equal(data.ready_to_open, false);
-  assert.equal((await new TaskService(binding).open(request)).code, "WORKTREE_DIRTY");
+  assert.equal(data.ready_to_open, true);
+  assert.equal((await new TaskService(binding).open(request)).code, "TASK_OPENED");
   assert.equal(git(fixture.path, ["status", "--porcelain=v1", "--untracked-files=all"]), status);
   assert.equal(await readFile(join(fixture.path, "existing-work.txt"), "utf8"), "developer's unfinished work\n");
   const other = await createGitFixture();
@@ -126,7 +126,7 @@ test("one STDIO connection routes independent projects and recovers tasks after 
   const client = await connect();
   const call = async (name: string, arguments_: Record<string, unknown>) => ToolResultSchema.parse((await client.callTool({ name, arguments: arguments_ })).structuredContent);
   const tools = (await client.listTools()).tools;
-  assert.equal(tools.length, 13);
+  assert.equal(tools.length, 14);
   assert.ok(tools.every((tool) => tool.inputSchema.required?.includes("project")));
   assert.equal((await call("task_check", { project: outside.path })).code, "PROJECT_OUTSIDE_WORKSPACE");
   await symlink(outside.path, join(fixture.root, "linked-project"));

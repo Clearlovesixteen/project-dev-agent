@@ -29,7 +29,7 @@ test("真实发布运行文件贯通：草案、终端执行、场景验收、�
   const input=await withImplementationBasis(fixture.path,{requirement:"账户ID去除空白后至少2个字符。",acceptance_criteria:[{id:"normal",description:"有效ID创建成功"},{id:"boundary",description:"单字符和空白ID均拒绝"}]});
   let task=(await call(first,"task_open",input)).data;
   const proposed={...oldRule,description:"账户ID去除空白后至少2个字符",basis:"intended",source_ids:["request"]};
-  let result=await call(first,"task_update",{task_id:task.id,expected_revision:task.revision,business_deltas:[{id:"id-length",model_id:"accounts",base_revision:1,operation:"modify",rule_id:oldRule.id,expected_rule_fingerprint:ruleFingerprint(oldRule as any),reason:"实现本次ID长度要求",acceptance_ids:["normal","boundary"],proposed_rule:proposed,sources:[{id:"request",kind:"task",task_id:task.id,quote:task.requirement}]}]});
+  let result=await call(first,"task_update",{task_id:task.id,expected_revision:task.revision,business_assessment:{state:"changed",reason:"本次需求明确改变账户ID最小长度规则，需修改模型并验证正常和边界",model_ids:["accounts"],delta_ids:["id-length"]},business_deltas:[{id:"id-length",model_id:"accounts",base_revision:1,operation:"modify",rule_id:oldRule.id,expected_rule_fingerprint:ruleFingerprint(oldRule as any),reason:"实现本次ID长度要求",acceptance_ids:["normal","boundary"],proposed_rule:proposed,sources:[{id:"request",kind:"task",task_id:task.id,quote:task.requirement}]}]});
   assert.equal(result.code,"TASK_UPDATED");task=result.data;
   const before=(await call(first,"project_context",{model_id:"accounts"})).data.models[0];assert.equal(before.rules[0].description,oldRule.description);
   const changed=original.replace('!id.trim()', 'id.trim().length < 2');await writeFile(join(fixture.path,"src/service.js"),changed);

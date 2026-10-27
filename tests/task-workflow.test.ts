@@ -122,6 +122,7 @@ test("用户修订要求后保留来源和原始需求，并在重新验收前�
 
   // 新要求先改变验收条件并清空旧证据，不能因代码尚未变化就沿用原通过结论。
   const revised = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: original.revision,
+    acceptance_revision:{reason:"用户新要求将菜单标题改为订单管理，保留原验收定义",correction_id:"title-request"},
     acceptance_criteria: [{ id: "title", description: "说明标题改为订单管理", status: "pending", evidence: [] }],
     corrections: [{ id: "title-request", description: "标题改为订单管理", rationale: "本次新增要求取代原文案",
       sources: [{ kind: "experience", reference: "fixture:user-message-2", description: "测试场景中的后续用户要求" }] }],

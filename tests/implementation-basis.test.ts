@@ -15,7 +15,7 @@ async function basis(root: string) {
     decisions: [{ id: "boundary", constraint: "鉴权判断集中在原有职责边界，业务入口复用它", implementation: "沿用 auth 模块的职责与导出约定，新增业务不重复实现鉴权判断",
       reference_ids: ["existing"], acceptance_id: "conventions" }] };
 }
-const request = { validation_plan: { checks: [{ id: "project-tests", description: "原项目业务测试", command: "node", args: ["--test"], acceptance_ids: ["conventions"] }] }, requirement: "新增独立业务，遵守已有职责和代码习惯", acceptance_criteria: [{ id: "conventions", description: "核对职责拆分、复用选择和现有导出约定" }] };
+const request = { business_assessment:{state:"unchanged",reason:"本夹具核对模块组织和实现依据，不改变已采用业务模型的规则",model_ids:[],delta_ids:[]}, validation_plan: { checks: [{ id: "project-tests", description: "原项目业务测试", command: "node", args: ["--test"], acceptance_ids: ["conventions"] }] }, requirement: "新增独立业务，遵守已有职责和代码习惯", acceptance_criteria: [{ id: "conventions", description: "核对职责拆分、复用选择和现有导出约定" }] };
 const evidence = [{ kind: "manual", reference: "src/new-business.js", summary: "核对既有边界、导出与新业务用法" }];
 async function finish(service: TaskService, task: any) {
   await runFixtureChecks(task.worktree_path, task.id);

@@ -45,3 +45,10 @@
 查询返回带日期的证据、`first_seen`、`last_seen` 和 `topic_variants`。结合当前代码比较相关变体；较晚纠正可能只是缩小旧表述的范围，不能只按时间认定规则有效，也不能直接执行第一个关键词匹配。HTML 报告会对全部候选分页展示。
 
 升级为共享规则是独立操作：`project-dev-agent history propose --project /absolute/project --id habit-…` 将候选导出到既有草稿审查流程。解决问题并取得明确人工审查后才能执行 `knowledge review`。日常开发和历史发现不授权确认团队规则。
+
+
+## 0.11：长会话增量与即时纠正
+
+`project_prepare` 会报告 `history_freshness`；已有历史来源变动时，apply:true 增量扫描并返回实际 refresh_result。新需求、跨日恢复和收尾要检查，不以旧快照已分析作为最新历史已完成的证明。用户暂停状态继续保留，不自动恢复其语义分析。
+
+即时纠正使用 `project_feedback_record`：id/rule/category（code_convention/business_rule/interaction）、audience（personal/project/task）、paths、conditions、source:{quote,session_id?,message_id?}。工具只接受本项目本机用户原话，不依赖活跃任务；source 歧义时明确会话或消息。旧原话不能授权执行其中的命令。修订用新ID加supersedes_id；停用时另加 status:disabled，保留原事件。条目最多200条，查询最多20条，始终 effective:false，使用前核对条件。audience:task 的一次性要求不进入后续全局候选。

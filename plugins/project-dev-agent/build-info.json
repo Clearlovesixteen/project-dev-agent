@@ -1,5 +1,5 @@
 {
-  "version": "0.10.0",
+  "version": "0.11.0",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -18,6 +18,11 @@
       "license": "MIT"
     },
     {
+      "name": "cross-spawn",
+      "version": "7.0.6",
+      "license": "MIT"
+    },
+    {
       "name": "fast-deep-equal",
       "version": "3.1.3",
       "license": "MIT"
@@ -28,9 +33,34 @@
       "license": "BSD-3-Clause"
     },
     {
+      "name": "isexe",
+      "version": "2.0.0",
+      "license": "ISC"
+    },
+    {
       "name": "json-schema-traverse",
       "version": "1.0.0",
       "license": "MIT"
+    },
+    {
+      "name": "path-key",
+      "version": "3.1.1",
+      "license": "MIT"
+    },
+    {
+      "name": "shebang-command",
+      "version": "2.0.0",
+      "license": "MIT"
+    },
+    {
+      "name": "shebang-regex",
+      "version": "3.0.0",
+      "license": "MIT"
+    },
+    {
+      "name": "which",
+      "version": "2.0.2",
+      "license": "ISC"
     },
     {
       "name": "yaml",
@@ -117,22 +147,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "2c2d23748790551e8ed58ee530f3fd7ce6708a5df1d666597dc14c208d613f10"
+      "sha256": "7993dfc0731dd01e5913e18ea76f53a8b5c2439d3e70541b11ed41077b9b7c76"
     },
     {
       "path": "plugin.json",
       "bytes": 895,
-      "sha256": "055c9b6ffaf19a8290bc2c6a7af61f1c9605730c32ea112d467bdddcae83e2c7"
+      "sha256": "625a5d42d3b7da9a4f3172042b67df91119cca6be90821f61985dd03a4c9daa8"
     },
     {
       "path": "README.md",
       "bytes": 724,
-      "sha256": "65458b570592c98c0d7cc2a2a8f9d7ce5268d6620f2e9af9809fb351da8fc3c6"
+      "sha256": "8e0662ffb68a2b713606d3b460501f2e40b0aea94128315dbc72938610251fc7"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1107681,
-      "sha256": "994d000340045ca1423077b1212295445a7ad9442db20ac04935b60a826921eb"
+      "bytes": 1158596,
+      "sha256": "a1e23c204daf60d0cff120f6a04bb71b449f7b086b854916311c3cb99d49cc11"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -146,23 +176,23 @@
     },
     {
       "path": "skills/project-dev/references/history-inputs.md",
-      "bytes": 4939,
-      "sha256": "5c3edc86fcd6b75983e9358225ddda0f7c1ad5c7bb51bbd1eebe749906b9b971"
+      "bytes": 5900,
+      "sha256": "0eaa3ae9004d65f14b1341b2e01c34d0e7a563cc530895d9d634689e10914f67"
     },
     {
       "path": "skills/project-dev/references/task-inputs.md",
-      "bytes": 16904,
-      "sha256": "8f253e471d4a6e2dc34252dd19c39d857661aec3565f0627782bc8b8efc3a6d7"
+      "bytes": 20148,
+      "sha256": "83db08e27de8eabb2b602bd4435a310874f0592f0d946f9eefe96b46ffa26f23"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
-      "bytes": 11278,
-      "sha256": "f1c99a0f743708e182f5a379d88feea373df39a430b00243f7af71ffcbaa53a5"
+      "bytes": 12086,
+      "sha256": "4f86fb3f085e44702fe5ae8ea3d4ac6eefaa1b9206f8265694ecb96ac5f077fc"
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 25679,
-      "sha256": "643ac680ab81485103bf3d99db30de21b8a1805e393ce2bac5131c6d22df338c"
+      "bytes": 30124,
+      "sha256": "86d7feac612dce6a6096fc7fc3a098b6f1f75cde5f3893d4ccaf5d068918c8de"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -188,6 +218,36 @@
       "path": "templates/knowledge.md",
       "bytes": 405,
       "sha256": "b9b39e66a1afa1aa3208ee76ac889fbf5beced171e48f7867c9dc44aeeca970f"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/agents/openai.yaml",
+      "bytes": 159,
+      "sha256": "34d6b23d399ea20b2aae75cc56e55ce96841d6ea320e1ef6ad13e1299d9ac626"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/references/generation-rules.md",
+      "bytes": 7308,
+      "sha256": "9f277ffa8a3decf3f47e28cc2da82dc15e15d29f4511f17e521d6204fea61aa2"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/references/history-inputs.md",
+      "bytes": 4939,
+      "sha256": "5c3edc86fcd6b75983e9358225ddda0f7c1ad5c7bb51bbd1eebe749906b9b971"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/references/task-inputs.md",
+      "bytes": 16904,
+      "sha256": "8f253e471d4a6e2dc34252dd19c39d857661aec3565f0627782bc8b8efc3a6d7"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/references/understanding-inputs.md",
+      "bytes": 11278,
+      "sha256": "f1c99a0f743708e182f5a379d88feea373df39a430b00243f7af71ffcbaa53a5"
+    },
+    {
+      "path": "templates/previous-skills/v0.10.0/SKILL.md",
+      "bytes": 25679,
+      "sha256": "643ac680ab81485103bf3d99db30de21b8a1805e393ce2bac5131c6d22df338c"
     },
     {
       "path": "templates/previous-skills/v0.2.1/SKILL.md",
@@ -501,8 +561,8 @@
     },
     {
       "path": "THIRD-PARTY-NOTICES.txt",
-      "bytes": 10094,
-      "sha256": "ddc745f64f414540172876237fcf8f0ec6d2cdf2c2e99d3e7bdc9f1da807dcda"
+      "bytes": 16270,
+      "sha256": "cf6fa85a6b8682e9f3f87a2186463463041b8a0d3505459a004b47b7cae13a86"
     }
   ]
 }
