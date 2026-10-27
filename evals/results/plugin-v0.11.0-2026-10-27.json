@@ -88,5 +88,53 @@
     "视觉参考只核对当前项目授权缓存的版本，不自动证明外部原型网站或PRD已经更新；默认technical兼容旧调用，实际分类仍需Agent正确维护",
     "接入内容上限2000条、单文件8MiB、总内容64MiB；初始内容不推断作者，不保存或重放Git index",
     "尚未在用户正在开发的WMS任务上写入或回放，未做同需求独立模型质量前后对照，不报告改善百分比"
-  ]
+  ],
+  "public_install_attempts": [
+    {
+      "result": "timed_out",
+      "stage": "marketplace_add",
+      "timeout_ms": 90000,
+      "exit_signal": "SIGTERM",
+      "source": "https://github.com/Clearlovesixteen/project-dev-agent.git",
+      "isolated_codex_home": true,
+      "note": "刷新前下载阶段无输出；不计为安装通过。"
+    }
+  ],
+  "github_actions": {
+    "head_sha": "967dc25dad61bd0da9d3ec13059e712eec982a10",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/40474363187",
+    "matrix": [
+      {
+        "job": "runtime (18.19.1)",
+        "conclusion": "success"
+      },
+      {
+        "job": "runtime (18.19.0)",
+        "conclusion": "success"
+      },
+      {
+        "job": "runtime (20.19.6)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "public_install": {
+    "result": "not_verified",
+    "source": "https://github.com/Clearlovesixteen/project-dev-agent.git",
+    "stage": "marketplace_add",
+    "reason": "当前主机HTTPS Git访问超时，未下载完成，不计为公开安装通过。",
+    "diagnostics": [
+      {
+        "operation": "git ls-remote HTTPS",
+        "result": "timed_out",
+        "timeout_seconds": 30
+      },
+      {
+        "operation": "git ls-remote HTTPS HTTP/1.1",
+        "exit_code": 128,
+        "seconds": 15.31,
+        "reason": "低速超时，不修改全局Git设置"
+      }
+    ]
+  }
 }
