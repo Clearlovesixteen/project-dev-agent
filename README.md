@@ -4,7 +4,7 @@
 
 这是接入 Codex 的开发辅助插件，通过**项目结构扫描、业务建模、历史习惯整理和关联改动检查**，帮助 Codex 按当前项目的实际情况开发。适合已经用 Codex 修改项目、但仍需要反复纠正实现思路的开发者，可以用于不同业务项目。
 
-当前版本：**v0.11.0，供个人使用和小范围团队验证**。通过公开的 GitHub 插件源分发原生 Codex 插件，运行代码和依赖已打包。同事无需克隆源码、运行 npm 或手动同步 Skill。
+当前版本：**v0.11.1，供个人使用和小范围团队验证**。通过公开的 GitHub 插件源分发原生 Codex 插件，运行代码和依赖已打包。同事无需克隆源码、运行 npm 或手动同步 Skill。
 
 ## 它能帮你做什么
 
@@ -126,7 +126,7 @@
 ### 1. 添加插件源并安装
 
 ```bash
-codex plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main
+codex plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main --sparse .agents/plugins --sparse plugins/project-dev-agent
 codex plugin add project-dev-agent@project-dev-team
 ```
 
@@ -137,7 +137,7 @@ codex plugin add project-dev-agent@project-dev-team
 如果终端找不到 `codex`，可以使用桌面应用内已有的 CLI 路径。部分 macOS 安装可执行：
 
 ```bash
-"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main
+"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin marketplace add https://github.com/Clearlovesixteen/project-dev-agent.git --ref main --sparse .agents/plugins --sparse plugins/project-dev-agent
 "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex" plugin add project-dev-agent@project-dev-team
 ```
 
@@ -289,9 +289,13 @@ $project-dev-update 更新 Project Dev Agent 到最新版。
 它会调用 Codex 原生插件管理器刷新配置好的插件源，并核对安装版本。也可以直接执行：
 
 ```bash
-codex plugin marketplace upgrade project-dev-team
-codex plugin list --marketplace project-dev-team --json
+codex -c 'marketplaces.project-dev-team.sparse_paths=[".agents/plugins","plugins/project-dev-agent"]' plugin marketplace upgrade project-dev-team --json
+codex -c 'marketplaces.project-dev-team.sparse_paths=[".agents/plugins","plugins/project-dev-agent"]' plugin list --marketplace project-dev-team --json
 ```
+
+**v0.11.1 修复了旧更新入口重复完整克隆仓库的问题。** 官方源只需目录清单和预构建插件两个目录。首次安装使用 `--sparse`；已有安装通过 `-c` 给本次刷新指定相同目录，保留原有仓库地址、SSH/HTTPS 协议与 ref，不必移除旧源，也不修改个人持久配置。已有额外稀疏目录时应合并保留；自定义源不能直接套用官方目录。
+
+遇到下载超时、连接中断或 `early EOF`，更新入口用同一轻量命令最多重试一次。认证、主机密钥、权限和配置错误立即停止；不会自动切换协议或跳过校验。刷新成功后同时核对源版本与安装版本，失败时保留旧版，不把“命令已执行”当作“更新成功”。稀疏下载降低传输量，仍需要网络可达，不保证任何网络条件都能成功。
 
 已实测：刷新 Git 插件源会更新已启用插件的版本缓存。更新后**新建对话或重启 Codex**，使 MCP 进程和 Skill 加载新版；运行中的旧对话不会自动切换。更新前先完成或保存当前开发任务。
 
@@ -299,7 +303,7 @@ codex plugin list --marketplace project-dev-team --json
 
 **本版本验证的是原生插件安装和刷新机制。** 尚未验证所有客户端的“更新”按钮位置，也不承诺后台定时更新或旧会话热更新。支持的客户端可以通过自己的插件界面管理启用和卸载；没有相应入口时使用上面的已验证命令。
 
-`main` 是更新通道；`v0.11.0` 是本次版本标签。跟随 `main` 才能持续收到新版本；固定到标签的安装只会保留对应版本。
+`main` 是更新通道；`v0.11.1` 是本次版本标签。跟随 `main` 才能持续收到新版本；固定到标签的安装只会保留对应版本。
 
 ### 从 v0.4 手动连接迁移
 
@@ -362,9 +366,11 @@ MCP 是 Codex 调用这些工具的接口。业务含义由当前 Codex 模型�
 - **清单与验证记录不保证实现正确。** Skill 是执行指导，不是强制拦截机制；真实项目的测试与代码审查仍然需要。
 - **插件在本机运行。** GitHub 用于分发工具版本，没有团队中央数据服务。业务仓库及 Git 元数据必须位于配置的 workspace 内，范围外的 worktree 需要正确的目录配置。
 
+v0.11.1 在 Node **20.19.6** 通过全部 **241 项测试**，类型检查和三个 Skill 格式校验通过。在 Node **18.19.1** 使用真实已发布 **0.10.0 → 0.11.1** 完成隔离原生升级：Git 命令跟踪确认部分克隆与两个稀疏目录；模拟下载失败时保留旧版，恢复后普通插件列表和新 MCP 进程均为新版，持久配置和活动任务保留。见 [v0.11.1 验证数据](evals/results/plugin-v0.11.1-2026-10-28.json)。
+
 v0.11.0 在 Node **18.19.0、18.19.1 和 20.19.6** 上逐版本通过全部 **241 项测试**，类型检查和三个 Skill 格式校验通过。在 Node 18.19.1 完成已发布 **0.10.0 → 0.11.0** 的隔离原生升级，保留旧任务、设置、模型、历史和代码指纹；升级后运行文件完成已有改动接续、即时纠正和正式终端启动检查。测试运行文件哈希与发布包一致。功能发布提交的 GitHub Actions 三版本矩阵全部通过。见 [v0.11.0 验证数据](evals/results/plugin-v0.11.0-2026-10-27.json)。
 
-本版公开 HTTPS 源的全新安装在当前主机下载阶段超时，尚未验证通过；不与已通过的隔离原生升级混用。具体失败阶段保留在本版验证数据中。
+v0.11.0 发布时，公开 HTTPS 源的全新安装在当前主机下载阶段超时，未计为通过。该历史失败与本次原生稀疏升级验证分别记录，不将隔离升级等同于所有网络和客户端的安装通过。
 
 以下为历史版本验证：
 
@@ -383,6 +389,7 @@ v0.10.0 在 Node **18.19.0、18.19.1 和 20.19.6** 上逐版本通过全部 **22
 | 项目使用 Node 18，旧说明要求升级到 20 | 更新插件到 v0.6.2 或更高版本，插件运行支持 Node 18.19.0+。保留业务项目的 Node 设置，重启 Codex 后确认工具可用。 |
 | Skill 或 MCP 工具没有出现 | 确认原生插件已安装并启用，Node 与 Git 可用；重启 Codex 并新建对话，检查旧连接或项目级 Skill 是否重复。 |
 | `PLUGIN_NOT_CONFIGURED` | 先使用“项目开发”，它会通过 `project_prepare` 自动初始化当前仓库；更新后仍遇到旧流程时，重启 Codex 并新建对话。 |
+| 下载超时或 `early EOF`，仍停留旧版 | 使用上方带 `-c` 稀疏目录的更新命令。旧版更新 Skill 尚未包含修复，可先执行一次命令升级。重复失败时检查当前协议的网络连通性，不反复完整克隆或绕过 SSH 校验。 |
 | 更新后仍显示旧运行版本 | 区分安装版本与当前进程版本；更新后重启 Codex 并新建对话。 |
 | `PROJECT_OUTSIDE_WORKSPACE` | 检查当前业务仓库及其 Git 元数据是否位于配置的 workspace 内。 |
 | 建任务仍返回 `WORKTREE_DIRTY` | 当前进程可能仍在用旧版本；更新到 0.11 后新建对话。新版会保存接入内容，未解决合并冲突仍须处理。 |

@@ -1,0 +1,60 @@
+{
+  "version": "0.11.1",
+  "verified_on": "2026-10-28",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "native_upgrade": {
+    "verified_at": "2026-10-28T04:02:03.916Z",
+    "scenario": "Published 0.10.0 to 0.11.1 using an isolated native Git marketplace",
+    "failed_refresh_preserved_installed_version": true,
+    "upgrade_uses_partial_clone": true,
+    "upgrade_sparse_paths": [
+      ".agents/plugins",
+      "plugins/project-dev-agent"
+    ],
+    "refresh_updates_cached_runtime": true,
+    "refresh_updates_installed_version": true,
+    "ordinary_plugin_list_sees_new_version": true,
+    "installed_runtime_versions": [
+      "0.10.0",
+      "0.11.1"
+    ],
+    "workspace_and_task_preserved": true,
+    "persistent_configuration_preserved": true,
+    "result": "passed",
+    "node": "18.19.1",
+    "isolated_codex_home": true,
+    "loopback_marketplace": true
+  },
+  "regression_red": {
+    "result": "failed_as_expected",
+    "assertion": "更新仍在完整克隆仓库",
+    "operation": "native marketplace upgrade before applying sparse override"
+  },
+  "changes": [
+    "更新Skill使用单次稀疏配置覆盖，仅检出目录清单和发布插件，避免下载源码历史中的全部文件",
+    "保留用户已配置的仓库地址、SSH/HTTPS协议、ref和已有额外稀疏目录；不删源、不手改缓存",
+    "网络下载失败最多重试一次，认证、主机密钥、权限和配置错误停止；核对来源、安装与运行版本",
+    "首次安装说明增加原生--sparse参数，旧版安装可直接运行单次覆盖命令完成引导升级"
+  ],
+  "limitations": [
+    "稀疏下载仍依赖当前协议的GitHub网络连通性，不保证网络不可达时能升级",
+    "旧会话不会热切换MCP或Skill，需要新建对话或重启Codex",
+    "旧版本更新Skill不包含新命令，首次修复需按README的单次覆盖命令升级",
+    "隔离原生升级不等同于所有桌面客户端更新按钮的界面验证"
+  ],
+  "runtime_suites": [
+    {
+      "node": "20.19.6",
+      "tests": 241,
+      "pass": 241,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "duration_ms": 578595.069041
+    }
+  ],
+  "plugin_runtime_sha256": "e1dd622c092c4ab84f5b213b72ad63923323082bd19ef2adddf0eb975587ac33"
+}

@@ -1,5 +1,5 @@
 {
-  "version": "0.11.0",
+  "version": "0.11.1",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -147,22 +147,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "7993dfc0731dd01e5913e18ea76f53a8b5c2439d3e70541b11ed41077b9b7c76"
+      "sha256": "0f25ec3e0f910a2621fa816e164fcd776636dcb671c22d0ed8e48d8d4263847d"
     },
     {
       "path": "plugin.json",
       "bytes": 895,
-      "sha256": "625a5d42d3b7da9a4f3172042b67df91119cca6be90821f61985dd03a4c9daa8"
+      "sha256": "d016a5da12a185ef9019844832c197b8d90c200ffac477494c4c262e667357cb"
     },
     {
       "path": "README.md",
       "bytes": 724,
-      "sha256": "8e0662ffb68a2b713606d3b460501f2e40b0aea94128315dbc72938610251fc7"
+      "sha256": "1b3db2e5bde71982230f83cf3691b1807aba0cc9486775dbefdeef92d351f32c"
     },
     {
       "path": "runtime/cli.mjs",
       "bytes": 1158596,
-      "sha256": "a1e23c204daf60d0cff120f6a04bb71b449f7b086b854916311c3cb99d49cc11"
+      "sha256": "e1dd622c092c4ab84f5b213b72ad63923323082bd19ef2adddf0eb975587ac33"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -211,8 +211,8 @@
     },
     {
       "path": "skills/project-dev-update/SKILL.md",
-      "bytes": 2489,
-      "sha256": "6373d0c0e80ccb432453d35261865c14b555c042ca3fc5f3e059d1efbc5f3499"
+      "bytes": 4004,
+      "sha256": "d209011ef062375d1b7949bc1d224f0098d7d6dbceae276fd5c13b3e477bc174"
     },
     {
       "path": "templates/knowledge.md",
