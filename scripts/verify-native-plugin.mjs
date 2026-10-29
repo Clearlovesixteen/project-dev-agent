@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { verifyHookDiscovery } from "./verify-hook-discovery.mjs";
 
 const codex = process.argv[2];
 if (!codex) throw new Error("Pass the installed Codex CLI executable path");
@@ -36,6 +37,14 @@ const native = async (args) => {
   evidence.steps.push({ command: ["codex", ...args], result: output }); return output;
 };
 const git = (args, cwd) => run("git", args, cwd);
+async function manifestAt(directory) {
+  try { return { path: join(directory, "plugin.json"), value: JSON.parse(await readFile(join(directory, "plugin.json"), "utf8")) }; }
+  catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const path = join(directory, ".codex-plugin/plugin.json");
+    return { path, value: JSON.parse(await readFile(path, "utf8")) };
+  }
+}
 async function connect(directory) {
   const client = new Client({ name: "native-plugin-upgrade-verification", version: "1" });
   await client.connect(new StdioClientTransport({ command: process.execPath,
@@ -52,7 +61,7 @@ try {
   await cp(join(root, ".agents/plugins"), join(repository, ".agents/plugins"), { recursive: true });
   const source = join(repository, "plugins/project-dev-agent");
   await cp(join(root, "plugins/project-dev-agent"), source, { recursive: true });
-  const manifest = JSON.parse(await readFile(join(source, "plugin.json"), "utf8"));
+  const { path: manifestPath, value: manifest } = await manifestAt(source);
   const current = manifest.version;
   let prior = `${current}-upgrade-test.1`;
   if (priorTag) {
@@ -61,12 +70,12 @@ try {
     await git(["archive", "--format=tar", `--output=${archive}`, priorTag, ".agents/plugins", "plugins/project-dev-agent"], root);
     await rm(source, { recursive: true });
     await run("tar", ["-xf", archive, "-C", repository], temporary);
-    prior = JSON.parse(await readFile(join(source, "plugin.json"), "utf8")).version;
+    prior = (await manifestAt(source)).value.version;
     assert.notEqual(prior, current, "Previous release must differ from the target");
     evidence.scenario = `Published ${prior} to ${current} using an isolated native Git marketplace`;
   } else {
     manifest.version = prior;
-    await writeFile(join(source, "plugin.json"), JSON.stringify(manifest));
+    await writeFile(manifestPath, JSON.stringify(manifest));
     const bundle = await readFile(join(source, "runtime/cli.mjs"), "utf8");
     assert.equal(bundle.split(JSON.stringify(current)).length, 2, "Runtime version must occur exactly once");
     await writeFile(join(source, "runtime/cli.mjs"), bundle.replace(JSON.stringify(current), JSON.stringify(prior)));
@@ -150,6 +159,7 @@ try {
   evidence.installed_runtime_versions = [prior, current];
   evidence.workspace_and_task_preserved = true;
   evidence.persistent_configuration_preserved = true;
+  evidence.native_hook_discovery = await verifyHookDiscovery(codex, home, sample.path, pluginId);
   evidence.result = "passed";
   await mkdir(join(root, "work"), { recursive: true });
   // Temporary paths in the detailed local log are not release artifacts.
@@ -158,9 +168,11 @@ try {
     refresh_updates_cached_runtime: evidence.refresh_updates_cached_runtime, installed_runtime_versions: evidence.installed_runtime_versions,
     upgrade_uses_partial_clone: evidence.upgrade_uses_partial_clone,
     failed_refresh_preserved_installed_version: evidence.failed_refresh_preserved_installed_version,
-    persistent_configuration_preserved: true, workspace_and_task_preserved: true }));
+    persistent_configuration_preserved: true, workspace_and_task_preserved: true,
+    native_hook_discovery: evidence.native_hook_discovery }));
 } finally {
   await Promise.allSettled(clients.map((client) => client.close()));
   if (http?.listening) await new Promise((done) => http.close(done));
-  await rm(temporary, { recursive: true, force: true });
+  if (process.env.PROJECT_DEV_KEEP_VERIFY !== "1") await rm(temporary, { recursive: true, force: true });
+  else console.error(`Verification kept at ${temporary}`);
 }

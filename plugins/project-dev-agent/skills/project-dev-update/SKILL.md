@@ -38,7 +38,7 @@ codex -c 'marketplaces.project-dev-team.sparse_paths=[".agents/plugins","plugins
 
 ## 核验结果
 
-刷新成功后，用相同 `-c` 覆盖执行 `plugin list --marketplace project-dev-team --json`，核对安装版本。读取本次 `upgradedRoots` 内对应的 `plugins/project-dev-agent/plugin.json`（本地源则读取其现有根目录），比较源版本与安装版本；版本不一致或没有可核对的源版本、安装记录时，不能报告“已是最新版”。
+刷新成功后，用相同 `-c` 覆盖执行 `plugin list --marketplace project-dev-team --json`，核对安装版本。读取本次 `upgradedRoots` 内对应发布目录的清单：旧版为 `plugins/project-dev-agent/plugin.json`，0.12 起为 `plugins/project-dev-agent/.codex-plugin/plugin.json`，本地源则在其现有根目录查找。只在第一个文件确实不存在时检查兼容入口，读取失败或内容损坏不能当作版本不存在。比较源版本与安装版本；版本不一致或没有可核对的源版本、安装记录时，不能报告“已是最新版”。不要为满足旧路径另写根清单，否则宿主会选错入口而漏掉钩子。
 
 若源已成功刷新，但原生客户端未同步已安装缓存，使用相同覆盖执行 `plugin add project-dev-agent@project-dev-team --json` 确保安装，再核验版本；刷新失败时不得继续此步并把旧缓存当作新版。
 

@@ -6,7 +6,7 @@ import { digest } from "../knowledge/document.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { MAP_DIR } from "./contracts.js";
 import { LegacyContent, SavedLegacyModel, SavedModelV2, type RecordRequest, type SavedModel } from "./model-contracts.js";
-import { ModelEvidence, ruleFingerprint, sourceFingerprint, sourcePath } from "./model-evidence.js";
+import { ModelEvidence, dependencyFingerprint, entityFingerprint, ruleFingerprint, sourceFingerprint, sourcePath } from "./model-evidence.js";
 import { prepareModel, priorRelation, priorRule } from "./model-update.js";
 import { excluded, mapConfigHash } from "./scan.js";
 import { mapFiles, modelIndex, models, optional, readMap, save } from "./store.js";
@@ -59,10 +59,20 @@ export async function recordModel(files: ProjectFiles, binding: WorktreeBinding,
       if (relation.target_model_id && (!target || target.related_paths.some((path) => excluded(path, config)))) {
         throw new AppError("PROJECT_MODEL_RELATION_TARGET", "引用的业务模型不存在或已排除；先查询可用模型");
       }
+      if (relation.target_rule_ids && (!target || target.schema_version !== 2 || relation.target_rule_ids.some(id => !target.rules.some(rule => rule.id === id))))
+        throw new AppError("PROJECT_MODEL_TARGET_RULE", "目标规则 ID 不存在，不能保存虚构的关联");
+      if (relation.target_entity_ids?.some(id => !target?.entities.some(entity => entity.id === id)))
+        throw new AppError("PROJECT_MODEL_ENTITY_REFERENCE", "目标实体 ID 不存在");
       relations.push({ ...relation, evidence_versions: await versions(relation.source_ids),
         rule_versions: relation.rule_ids.map((id) => ({ id, fingerprint: ruleFingerprint(content.rules.find((rule) => rule.id === id)!) })),
         target_sha256: await evidence.currentPath(relation.target_path),
-        ...(target ? { target_model_revision: target.revision } : {}) });
+        ...(target ? { target_model_revision: target.revision } : {}),
+        ...(relation.entity_ids ? { entity_versions: relation.entity_ids.map(id => ({ id,
+          fingerprint: entityFingerprint(content.entities.find(entity => entity.id === id)!, [...sources.values()]) })) } : {}),
+        ...(target?.schema_version === 2 && relation.target_entity_ids ? { target_entity_versions: relation.target_entity_ids.map(id => ({ id,
+          fingerprint: entityFingerprint(target.entities.find(entity => entity.id === id)!, target.sources) })) } : {}),
+        ...(target?.schema_version === 2 && relation.target_rule_ids ? { target_rule_versions: relation.target_rule_ids.map(id => ({ id,
+          fingerprint: dependencyFingerprint(target.rules.find(rule => rule.id === id)!) })) } : {}) });
     }
     const refreshed = new Set([...validated].flatMap((id) => { const path = sourcePath(sources.get(id)!); return path ? [path] : []; }));
     for (const relation of content.relations) if (reviewedRelations.has(relation.id)) refreshed.add(relation.target_path);

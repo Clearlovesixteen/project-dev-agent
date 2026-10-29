@@ -3,3 +3,9 @@ dist/
 work/
 .project-dev/local/
 .DS_Store
+tools/diagnostics-collector/worker.mjs
+tools/diagnostics-collector/wrangler.toml
+tools/diagnostics-collector/.wrangler/
+
+# 本地讨论方案含业务示例，仅供当前维护者查看。
+docs/plans/2026-10-29-auto-context-observability.html

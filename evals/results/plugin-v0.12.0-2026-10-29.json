@@ -1,0 +1,121 @@
+{
+  "version": "0.12.0",
+  "verified_on": "2026-10-29",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "typecheck": "passed",
+  "skill_validation": "passed",
+  "full_regression": {
+    "node": "20.19.6",
+    "tests": 256,
+    "passed": 256,
+    "failed": 0,
+    "phase": "before final fault-boundary additions"
+  },
+  "final_targeted": {
+    "node": "20.19.6",
+    "tests": 34,
+    "passed": 34,
+    "failed": 0,
+    "coverage": [
+      "Skill migration and setup assets",
+      "Native hook input limits and deadline",
+      "MCP interaction and idempotency",
+      "Developer report and collector contracts"
+    ]
+  },
+  "minimum_runtime": {
+    "node": "18.19.0",
+    "tests": 21,
+    "passed": 21,
+    "failed": 0
+  },
+  "native_upgrade": {
+    "result": "passed",
+    "from": "0.11.1",
+    "to": "0.12.0",
+    "node": "18.19.0",
+    "isolated_codex_home": true,
+    "failed_refresh_preserved_installed_version": true,
+    "upgrade_uses_partial_clone": true,
+    "persistent_configuration_preserved": true,
+    "workspace_and_task_preserved": true,
+    "hook_discovery": {
+      "result": "passed",
+      "operation": "hooks/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "hooks": [
+        {
+          "event": "sessionStart",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "userPromptSubmit",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "stop",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": true,
+          "timeout_seconds": 3
+        }
+      ],
+      "mcp_servers": [
+        "project_dev"
+      ],
+      "warnings": [],
+      "errors": []
+    }
+  },
+  "html_qa": {
+    "viewports": 8,
+    "overflow": false,
+    "network_requests": 0,
+    "page_errors": 0,
+    "fixture_only": true
+  },
+  "collector": {
+    "shared_event_whitelist": "passed",
+    "authentication": "passed",
+    "batch_acknowledgement": "passed",
+    "deduplication_and_retention_sqlite": "passed",
+    "remote_deployed": false
+  },
+  "limitations": [
+    "Hook discovery is verified through the real host; trust was not changed and no model conversation was created. Actual automatic semantic adherence still needs pilot development tasks.",
+    "Automatic context requires supported Codex hooks and review/trust of the current definitions. Existing installs remain manual until enabled.",
+    "No online collector account or URL has been supplied. Remote reporting remains unconfigured and off; deployment artifacts use GitHub-managed code with a maintainer-owned Workers/D1 service.",
+    "Metadata and receipt matches do not prove business correctness, source reuse or reduced rework."
+  ],
+  "final_regression": {
+    "node": "18.19.1",
+    "tests": 262,
+    "passed": 262,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "post_review_node20": {
+    "node": "20.19.6",
+    "tests": 3,
+    "passed": 3,
+    "failed": 0,
+    "coverage": [
+      "Final profile directory isolation",
+      "MCP interaction and retry counters"
+    ]
+  },
+  "bundled_sha256": {
+    ".codex-plugin/plugin.json": "b98633cf5541c8d167942691c9bbe2ef6dd9ede99943055e007c53f6087b8d39",
+    "runtime/cli.mjs": "0a580f73cdd6a2179ffdfbfd7a93e10708164a9c65eb5b77193c2af0eed1381b",
+    "runtime/hooks.mjs": "18e79d2de6cb9e38cb3a68c54cc7b6c9ea856ddfa795e050f0c433b9e8e8e084"
+  }
+}

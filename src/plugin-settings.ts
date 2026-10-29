@@ -26,11 +26,11 @@ export const PluginConfigureInput = z.object({
 
 /** 个人配置保存在 Codex 用户目录，与可替换的插件版本缓存分开，升级后继续复用。 */
 export class PluginSettings {
-  constructor(private readonly codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")) {}
+  constructor(readonly home = process.env.CODEX_HOME || join(homedir(), ".codex")) {}
 
   private async files(): Promise<ProjectFiles> {
-    if (!isAbsolute(this.codexHome)) throw new AppError("PLUGIN_HOME_INVALID", "CODEX_HOME 必须是已存在目录的绝对路径");
-    return new ProjectFiles(await realpath(this.codexHome));
+    if (!isAbsolute(this.home)) throw new AppError("PLUGIN_HOME_INVALID", "CODEX_HOME 必须是已存在目录的绝对路径");
+    return new ProjectFiles(await realpath(this.home));
   }
 
   private async read(files: ProjectFiles) {

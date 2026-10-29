@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { AppError } from "../domain/error.js";
 import { IdSchema } from "../domain/common.js";
 import { TaskSchema, type Task } from "../domain/task.js";
+import { assertTaskOwner } from "../workflow/interaction.js";
 
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_TASK_ENTRIES = 1_000;
@@ -31,6 +32,7 @@ const IMMUTABLE_FIELDS = [
   "scope_paths",
   "feedback_policy",
   "development_policy",
+  "spec_input", "owner", "operation_key", "operation_fingerprint",
 ] as const;
 
 interface StatePaths {
@@ -112,6 +114,12 @@ export class TaskStore {
         const existing = await this.readTask(join(paths.tasks, entry.name));
         if (existing.id !== id)
           throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
+        if (candidate.operation_key && existing.operation_key === candidate.operation_key) {
+          assertTaskOwner(existing);
+          if (candidate.operation_fingerprint !== existing.operation_fingerprint)
+            throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
+          return structuredClone(existing);
+        }
         if (existing.phase === "active") {
           throw new AppError(
             "ACTIVE_TASK_EXISTS",
@@ -207,6 +215,7 @@ export class TaskStore {
       if (current.id !== safeId)
         throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
       this.assertBinding(current, paths.root);
+      assertTaskOwner(current);
       if (current.phase !== "active")
         throw new AppError(
           "TASK_READ_ONLY",

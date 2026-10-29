@@ -29,6 +29,7 @@ export const ScanInput = z.object({}).strict();
 export const ContextInput = z.object({ query: z.string().trim().max(2_000).default(""), paths: z.array(ConcretePath).max(30).default([]),
   modules: z.array(z.string().max(200)).max(20).default([]), limit: z.number().int().min(1).max(20).default(10),
   model_offset: z.number().int().min(0).max(200).default(0).describe("模型列表的分页起点；使用上次返回的 next_model_offset"),
+  relation_depth: z.number().int().min(1).max(2).default(1).describe("业务关系展开层数，默认一层，最多两层；超出预算会明确截断"),
   model_id: IdSchema.optional().describe("按 ID 单独读取一个模型的完整详情，仍执行来源排除和版本核验"),
   model_revision: z.number().int().positive().optional().describe("读取详情时核对摘要中的修订号，防止两次查询间内容变化"),
   rule_ids: z.array(IdSchema).min(1).max(20).optional().describe("配合 model_id 只读取所需规则、关联关系及证据；省略则返回完整详情"),

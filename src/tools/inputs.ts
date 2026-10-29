@@ -17,6 +17,7 @@ import {
   BusinessDeltaCheckSchema,
 } from "../quality/business-delta-contracts.js";
 import { z } from "zod";
+import { SpecificationInput } from "../requirements/spec-input.js";
 import {
   IdSchema,
   ReviewSnapshotSchema,
@@ -33,6 +34,7 @@ import {
 export const TaskOpenInputSchema = z
   .object({
     requirement: TextSchema,
+    spec_input: SpecificationInput.optional(),
     scope_paths: z.array(RelativePathSchema).max(30).optional(),
     feedback_review: FeedbackReviewSchema.optional(),
     business_assessment: BusinessAssessmentSchema.optional(),

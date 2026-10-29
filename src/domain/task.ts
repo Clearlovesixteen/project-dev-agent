@@ -20,6 +20,7 @@ import {
 } from "../quality/business-delta-contracts.js";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { SpecificationInput } from "../requirements/spec-input.js";
 import {
   EvidenceSchema,
   IdSchema,
@@ -153,6 +154,10 @@ export const TaskSchema = z
     workspace_baseline: WorkspaceBaselineSchema.optional(),
     phase: z.enum(["active", "closed", "aborted"]),
     requirement: TextSchema,
+    spec_input: SpecificationInput.optional(),
+    owner: z.object({ session_id: z.string().min(1).max(200), actor_id: z.string().min(1).max(200) }).strict().optional(),
+    operation_key: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    operation_fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     scope_paths: z.array(RelativePathSchema).max(30).optional(),
     feedback_policy: z.literal(1).optional(),
     development_policy: z.literal(1).optional(),
@@ -184,6 +189,8 @@ export const TaskSchema = z
   })
   .strict()
   .superRefine((task, ctx) => {
+    if (!!task.operation_key !== !!task.operation_fingerprint || task.operation_key && !task.owner)
+      ctx.addIssue({ code: "custom", message: "幂等标识须同时保存需求指纹及所属会话" });
     for (const key of [
       "acceptance_criteria",
       "change_items",

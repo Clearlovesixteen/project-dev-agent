@@ -1,5 +1,5 @@
 {
-  "version": "0.11.1",
+  "version": "0.12.0",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -80,6 +80,11 @@
   ],
   "files": [
     {
+      "path": ".codex-plugin/plugin.json",
+      "bytes": 791,
+      "sha256": "b98633cf5541c8d167942691c9bbe2ef6dd9ede99943055e007c53f6087b8d39"
+    },
+    {
       "path": "fixtures/sample-project-template/.gitignore",
       "bytes": 34,
       "sha256": "983ba77d5c5a07e5e9a61210933137cde8d2843e9eda1fcdd3d6779fd80c72fa"
@@ -140,29 +145,34 @@
       "sha256": "dee0ceaaac7cf5b9b526941aa30a2e0ce38daed1eabb137e6fcbb4739f6dc868"
     },
     {
+      "path": "hooks/hooks.json",
+      "bytes": 485,
+      "sha256": "b1d4dc8be6b204098996e72bcea6401d0ab4f86e7f6407efe0558796d270cda1"
+    },
+    {
       "path": "mcp.json",
-      "bytes": 202,
-      "sha256": "7457c6421078bb146aa98f25777433bf7567c4ec451ca4b22af62507a71df1b7"
+      "bytes": 274,
+      "sha256": "f6d2424307cec314630a043f6cdb96daf8dd9a60c07521be3d12ccb3e08c7ff1"
     },
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "0f25ec3e0f910a2621fa816e164fcd776636dcb671c22d0ed8e48d8d4263847d"
-    },
-    {
-      "path": "plugin.json",
-      "bytes": 895,
-      "sha256": "d016a5da12a185ef9019844832c197b8d90c200ffac477494c4c262e667357cb"
+      "sha256": "dd162a7e48b47b9236ef223fdef39d9f2b5eb0600b9ee4e908188860a05a3647"
     },
     {
       "path": "README.md",
-      "bytes": 724,
-      "sha256": "1b3db2e5bde71982230f83cf3691b1807aba0cc9486775dbefdeef92d351f32c"
+      "bytes": 819,
+      "sha256": "1865467a2b9435f0e2d049a079c19c0a4399144c24df14559417c4a842afd7bf"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1158596,
-      "sha256": "e1dd622c092c4ab84f5b213b72ad63923323082bd19ef2adddf0eb975587ac33"
+      "bytes": 1198532,
+      "sha256": "0a580f73cdd6a2179ffdfbfd7a93e10708164a9c65eb5b77193c2af0eed1381b"
+    },
+    {
+      "path": "runtime/hooks.mjs",
+      "bytes": 733643,
+      "sha256": "18e79d2de6cb9e38cb3a68c54cc7b6c9ea856ddfa795e050f0c433b9e8e8e084"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -180,19 +190,29 @@
       "sha256": "0eaa3ae9004d65f14b1341b2e01c34d0e7a563cc530895d9d634689e10914f67"
     },
     {
+      "path": "skills/project-dev/references/spec-and-interaction.md",
+      "bytes": 2134,
+      "sha256": "bfe1b8997fc99e437617fcd5c99bc680730bbbaf036418d0118fe01e97ad69c0"
+    },
+    {
       "path": "skills/project-dev/references/task-inputs.md",
       "bytes": 20148,
       "sha256": "83db08e27de8eabb2b602bd4435a310874f0592f0d946f9eefe96b46ffa26f23"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
-      "bytes": 12086,
-      "sha256": "4f86fb3f085e44702fe5ae8ea3d4ac6eefaa1b9206f8265694ecb96ac5f077fc"
+      "bytes": 13512,
+      "sha256": "3735dd9ca9a958f0dd662dc97b0b711198224ebabf7fb162e51418b7384927a9"
+    },
+    {
+      "path": "skills/project-dev/references/workflow.md",
+      "bytes": 29718,
+      "sha256": "5a077bd1da7cf23c67433d813a9df622ca515b8bed80eca13dfcfdda4f3213a8"
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 30124,
-      "sha256": "86d7feac612dce6a6096fc7fc3a098b6f1f75cde5f3893d4ccaf5d068918c8de"
+      "bytes": 3466,
+      "sha256": "1011c5ec8e88ee0a9b61f6862bf43daea60b60877487034d1196dbec62679a4a"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -201,8 +221,8 @@
     },
     {
       "path": "skills/project-dev-setup/SKILL.md",
-      "bytes": 2923,
-      "sha256": "f213ae580d7b6e8d58957d3d2e701096b840e5e9bcf99675599c7d7d213acca4"
+      "bytes": 4825,
+      "sha256": "1edb0b53b92b8d7eb524886154b37a2997cf4748ad79540c2fc1e4017c5927aa"
     },
     {
       "path": "skills/project-dev-update/agents/openai.yaml",
@@ -211,8 +231,8 @@
     },
     {
       "path": "skills/project-dev-update/SKILL.md",
-      "bytes": 4004,
-      "sha256": "d209011ef062375d1b7949bc1d224f0098d7d6dbceae276fd5c13b3e477bc174"
+      "bytes": 4306,
+      "sha256": "c5fec2b8259a6ab8d0d8eed1db9cd67134ff74fc7bb2eb7738561f329b13026d"
     },
     {
       "path": "templates/knowledge.md",
@@ -248,6 +268,31 @@
       "path": "templates/previous-skills/v0.10.0/SKILL.md",
       "bytes": 25679,
       "sha256": "643ac680ab81485103bf3d99db30de21b8a1805e393ce2bac5131c6d22df338c"
+    },
+    {
+      "path": "templates/previous-skills/v0.11.1/references/generation-rules.md",
+      "bytes": 7308,
+      "sha256": "9f277ffa8a3decf3f47e28cc2da82dc15e15d29f4511f17e521d6204fea61aa2"
+    },
+    {
+      "path": "templates/previous-skills/v0.11.1/references/history-inputs.md",
+      "bytes": 5900,
+      "sha256": "0eaa3ae9004d65f14b1341b2e01c34d0e7a563cc530895d9d634689e10914f67"
+    },
+    {
+      "path": "templates/previous-skills/v0.11.1/references/task-inputs.md",
+      "bytes": 20148,
+      "sha256": "83db08e27de8eabb2b602bd4435a310874f0592f0d946f9eefe96b46ffa26f23"
+    },
+    {
+      "path": "templates/previous-skills/v0.11.1/references/understanding-inputs.md",
+      "bytes": 12086,
+      "sha256": "4f86fb3f085e44702fe5ae8ea3d4ac6eefaa1b9206f8265694ecb96ac5f077fc"
+    },
+    {
+      "path": "templates/previous-skills/v0.11.1/SKILL.md",
+      "bytes": 30124,
+      "sha256": "86d7feac612dce6a6096fc7fc3a098b6f1f75cde5f3893d4ccaf5d068918c8de"
     },
     {
       "path": "templates/previous-skills/v0.2.1/SKILL.md",

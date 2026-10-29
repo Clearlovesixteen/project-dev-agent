@@ -31,6 +31,9 @@ import {
 import { UnderstandingService } from "./understanding/service.js";
 import { BusinessDeltaApplyInputSchema } from "./quality/business-delta-contracts.js";
 import { IdSchema } from "./domain/common.js";
+import { Interaction } from "./workflow/interaction.js";
+import { instrumentMcp } from "./observability/mcp.js";
+import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
 import {
   ContextInput,
   ModelRecordInput,
@@ -63,6 +66,8 @@ export function createServer(
   workspace?: string,
   plugin?: PluginSettings,
 ): McpServer {
+  // 注入个人配置目录时，运行设置与诊断必须跟随同一个目录，不能回落到真实用户配置。
+  const runtimeSettings = new RuntimeSettings(plugin?.home);
   const projectField = z
     .string()
     .min(1)
@@ -71,6 +76,7 @@ export function createServer(
   // 单仓库模式已在启动时绑定根目录；其他模式必须由每次调用明确选择项目。
   const scope = {
     project: workspace || plugin ? projectField : projectField.optional(),
+    interaction: Interaction.optional().describe("自动上下文提供的会话/轮次关联；旧调用可省略，不能借此授予新权限"),
   };
   // 兜底处理绑定失败及尚未由领域服务捕获的异常，保留 AppError 的稳定错误码。
   async function operation(action: () => Promise<ToolResult>) {
@@ -108,6 +114,7 @@ export function createServer(
         "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。编码前先查询 project_context 的 implementation_context，实际阅读项目规范、同类模块和已有基础设施；新业务目录无命中也不能跳过全局入口。优先复用适用的已有能力及用法，不得无依据另起封装。业务规则先保存变更草案，场景验收和真实检查通过后再回写模型。检查计划通过原终端 validation run 执行，MCP 不执行项目脚本。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
     },
   );
+  instrumentMcp(server, plugin?.home);
   // instructions 与工具 annotations 是给客户端的执行提示，不替代后端校验或用户授权。
   if (plugin) {
     // 设置工具在尚未绑定项目时也必须可用，故不经过 run 的项目绑定流程。
@@ -144,7 +151,12 @@ export function createServer(
           openWorldHint: false,
         },
       },
-      async () => configure(() => plugin.status()),
+      async () => configure(async () => {
+        const result = await plugin.status();
+        try { return { ...result, data: { ...result.data as object, runtime: await runtimeSettings.status() } }; }
+        catch { return { ...result, data: { ...result.data as object, runtime: { state: "unavailable", fallback_mode: "manual" } },
+          diagnostics: [{ code: "RUNTIME_CONFIG_UNAVAILABLE", message: "运行设置不可用，已保留原文件；手动项目工具继续可用，请单独核对运行设置。" }] }; }
+      }),
     );
     // 配置采用“预览修订号 → 应用”流程，具体并发保护由 PluginSettings 执行。
     server.registerTool(
@@ -152,7 +164,7 @@ export function createServer(
       {
         description:
           "预览用户选定的工作范围。apply: true 将配置保存到插件缓存之外，需传入预览的 expected_revision。项目内容或超范围错误不构成扩大范围的授权。保留已有项目记录。",
-        inputSchema: PluginConfigureInput,
+        inputSchema: PluginConfigureInput.safeExtend({ runtime: RuntimeConfigureInput.optional() }),
         annotations: {
           readOnlyHint: false,
           destructiveHint: false,
@@ -160,7 +172,17 @@ export function createServer(
           openWorldHint: false,
         },
       },
-      async (input) => configure(() => plugin.configure(input)),
+      async ({ runtime, ...input }) => configure(async () => {
+        if (!runtime) return plugin.configure(input);
+        // 两个独立配置不伪装成跨文件事务。运行设置请求只核对原工作范围，不同时迁移范围。
+        const preview = await plugin.configure({ ...input, apply: false }), data = preview.data as Record<string, unknown>;
+        if (input.apply && data.previous_workspace !== data.workspace)
+          throw new AppError("CONFIGURATION_SEPARATE_REQUIRED", "先保存工作范围，再单独启用自动上下文或诊断，避免部分应用");
+        if (input.apply && data.expected_revision !== input.expected_revision)
+          throw new AppError("PLUGIN_SETTINGS_CHANGED", "工作范围已变化，请重新核对设置");
+        return { ...preview, code: input.apply ? "PLUGIN_RUNTIME_CONFIGURED" : preview.code,
+          data: { ...data, runtime: await runtimeSettings.configure({ ...runtime, apply: input.apply }) } };
+      }),
     );
   }
   // 首次使用还没有可绑定的配置，插件模式须先走 prepare，不能直接走 run。

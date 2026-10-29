@@ -25,6 +25,17 @@ export function ruleFingerprint(rule: RuleV2): string {
   return digest(JSON.stringify(fields));
 }
 
+/** 关联方同时绑定规则内容及其实际核对过的依据版本，不因摘要修订而全部失效。 */
+export function dependencyFingerprint(rule: RuleV2 & { evidence_versions: { id: string; fingerprint: string }[] }) {
+  return digest(JSON.stringify([ruleFingerprint(rule), rule.evidence_versions]));
+}
+
+export function entityFingerprint(entity: SavedModel["entities"][number], sources: SourceV2[]) {
+  return digest(JSON.stringify([entity, (entity.source_ids ?? []).map(id => {
+    const source = sources.find(item => item.id === id); return [id, source ? sourceFingerprint(source) : null];
+  })]));
+}
+
 /** 单次查询或修订共用读取缓存，避免同一来源被每条规则反复读取。 */
 export class ModelEvidence {
   private readonly fileCache = new Map<string, Promise<string>>();

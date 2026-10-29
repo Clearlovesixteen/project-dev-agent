@@ -11,8 +11,9 @@ import { ModelEvidence, sourcePath } from "./model-evidence.js";
 import { businessScenarios } from "../quality/scenarios.js";
 import { impactCandidates } from "../quality/impact.js";
 import { auditModels } from "./model-audit.js";
-import { materializeModel, modelPreview, relatedModelIds, selectModelRules } from "./model-view.js";
+import { materializeModel, modelPreview, selectModelRules } from "./model-view.js";
 import { lexicalProvider } from "./retrieval.js";
+import { businessGraph } from "./business-graph.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -88,6 +89,7 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     return { state: stale ? "needs_rescan" : detail.status === "needs_review" ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
       files: [], modules: [], models: [detail], models_truncated: detail.content_truncated, next_model_offset: null,
       model_audit: auditModels(eligibleModels, new Set([model.id])),
+      business_graph: businessGraph(eligibleModels, new Set([model.id]), request.relation_depth),
       ...(request.rule_ids ? { business_checks: businessScenarios([detail]) } : {}),
       report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
   }
@@ -98,7 +100,8 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
     .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
   const directIds = new Set(directModels.map((item) => item.model.id));
-  const relationIds = relatedModelIds(eligibleModels, directIds);
+  const graph = businessGraph(eligibleModels, directIds, request.relation_depth);
+  const relationIds = new Set(graph.nodes.map(node => node.id).filter(id => !directIds.has(id)));
   const rankedModels = [...directModels, ...eligibleModels.filter((model) => !directIds.has(model.id) && relationIds.has(model.id))
     .sort((a, b) => a.id.localeCompare(b.id)).map((model) => ({ model, score: 0 }))];
   const modelResults: Record<string, unknown>[] = [];
@@ -123,6 +126,7 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
     implementation_context: await implementationContext(files, entries, config, paths, request.query),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
+    business_graph: graph,
     impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),
     snapshot: { head: map.head, scanned_at: map.scanned_at, coverage: map.coverage }, files: fileResults,
     files_truncated: matched.length > request.limit || relatedTotal > 10 || fileResults.length < selected.length,

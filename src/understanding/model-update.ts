@@ -27,7 +27,7 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
     entities: old.entities, flows: old.flows, related_paths: old.related_paths, questions: old.questions, ...patch.metadata,
     sources: mergeItems(old.sources, patch.upsert_sources, patch.remove_source_ids),
     rules: mergeItems(old.rules.map(({ evidence_versions, ...rule }) => rule), patch.upsert_rules, patch.remove_rule_ids),
-    relations: mergeItems(old.relations.map(({ evidence_versions, rule_versions, target_sha256, target_model_revision, ...relation }) => relation), patch.upsert_relations, patch.remove_relation_ids),
+    relations: mergeItems(old.relations.map(({ evidence_versions, rule_versions, target_sha256, target_model_revision, target_rule_versions, entity_versions, target_entity_versions, ...relation }) => relation), patch.upsert_relations, patch.remove_relation_ids),
   } : body);
   for (const values of [content.sources, content.rules, content.relations]) unique(values.map((item) => item.id));
   unique(content.entities.map((item) => item.name)); unique(content.flows.map((item) => item.name));
@@ -42,6 +42,13 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
     unique(ids);
     return ids.map((id) => { const source = sourceMap.get(id); if (!source) throw new AppError("PROJECT_MODEL_SOURCE_REFERENCE", `不存在的证据 ID：${id}`); return source; });
   };
+  unique(content.entities.flatMap(entity => entity.id ? [entity.id] : []));
+  for (const entity of content.entities) {
+    if (entity.source_ids) requireSources(entity.source_ids);
+    if (entity.aliases?.length && (!entity.id || !entity.source_ids?.length))
+      throw new AppError("PROJECT_MODEL_ENTITY_EVIDENCE", "术语别名需要稳定实体 ID 和明确来源，不能按同名自动合并");
+    if (entity.aliases) unique(entity.aliases);
+  }
   for (const rule of content.rules) {
     const sources = requireSources(rule.source_ids);
     if (rule.basis === "observed" && !sources.some((source) => source.kind === "code")) throw new AppError("PROJECT_MODEL_BASIS", "代码当前行为至少需要一条代码依据");
@@ -52,6 +59,11 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
     if (relation.rule_ids.some((id) => !content.rules.some((rule) => rule.id === id))) throw new AppError("PROJECT_MODEL_RULE_REFERENCE", "业务关系引用了不存在的规则");
     if (!content.related_paths.includes(relation.target_path)) throw new AppError("PROJECT_MODEL_SOURCE_SCOPE", "业务关系的目标文件须包含在 related_paths 中");
     if (relation.target_model_id === content.id) throw new AppError("PROJECT_MODEL_RELATION_INVALID", "本模型内通过 rule_ids 引用规则，无需引用自身模型");
+    if (relation.entity_ids?.some(id => !content.entities.some(entity => entity.id === id)))
+      throw new AppError("PROJECT_MODEL_ENTITY_REFERENCE", "关系引用了不存在的本地实体 ID");
+    if ((relation.target_rule_ids || relation.target_entity_ids) && !relation.target_model_id)
+      throw new AppError("PROJECT_MODEL_RELATION_TARGET", "跨模型实体或规则引用必须指定 target_model_id");
+    for (const ids of [relation.entity_ids, relation.target_entity_ids, relation.target_rule_ids]) if (ids) unique(ids);
   }
   return {
     content, old,

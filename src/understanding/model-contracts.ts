@@ -8,7 +8,9 @@ export const FileSource = z.object({ path: ConcretePath, sha256: HASH, line: z.n
 export const ModelMetadata = z.object({
   module: z.string().trim().min(1).max(200), title: z.string().trim().min(1).max(200),
   scope: z.array(ConcretePath).min(1).max(10), summary: ShortText,
-  entities: z.array(z.object({ name: z.string().max(100), meaning: ShortText }).strict()).max(10),
+  entities: z.array(z.object({ id: IdSchema.optional(), name: z.string().max(100), meaning: ShortText,
+    aliases: z.array(z.string().trim().min(1).max(100)).max(8).optional(),
+    source_ids: z.array(IdSchema).min(1).max(10).optional() }).strict()).max(10),
   flows: z.array(z.object({ name: z.string().max(100), steps: z.array(ShortText).min(1).max(8) }).strict()).max(5),
   related_paths: z.array(ConcretePath).min(1).max(20), questions: z.array(ShortText).max(10),
 }).strict();
@@ -31,6 +33,9 @@ export const BusinessRelation = z.object({
   id: IdSchema, rule_ids: z.array(IdSchema).min(1).max(10),
   kind: z.enum(["enforced_by", "used_by", "depends_on"]), target_path: ConcretePath,
   target_model_id: IdSchema.optional(), reason: ShortText, source_ids: z.array(IdSchema).min(1).max(10),
+  entity_ids: z.array(IdSchema).min(1).max(10).optional(),
+  target_entity_ids: z.array(IdSchema).min(1).max(10).optional(),
+  target_rule_ids: z.array(IdSchema).min(1).max(20).optional(),
 }).strict();
 export const ModelContentV2 = ModelMetadata.extend({
   id: IdSchema, rules: z.array(BusinessRule).min(1).max(20), sources: z.array(ModelSource).min(1).max(30),
@@ -40,6 +45,9 @@ const EvidenceVersions = z.array(z.object({ id: IdSchema, fingerprint: HASH }).s
 export const SavedRule = BusinessRule.extend({ evidence_versions: EvidenceVersions });
 export const SavedRelation = BusinessRelation.extend({
   evidence_versions: EvidenceVersions, rule_versions: EvidenceVersions, target_sha256: HASH, target_model_revision: z.number().int().positive().optional(),
+  target_rule_versions: z.array(z.object({ id: IdSchema, fingerprint: HASH }).strict()).min(1).max(20).optional(),
+  entity_versions: z.array(z.object({ id: IdSchema, fingerprint: HASH }).strict()).min(1).max(10).optional(),
+  target_entity_versions: z.array(z.object({ id: IdSchema, fingerprint: HASH }).strict()).min(1).max(10).optional(),
 });
 const SavedMetadata = {
   project: z.string(), revision: z.number().int().positive(), recorded_at: z.string(), scan_id: HASH,

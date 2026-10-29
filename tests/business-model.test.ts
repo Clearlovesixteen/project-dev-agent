@@ -247,3 +247,25 @@ test("任务原始需求与名为 requirement 的纠正分别绑定证据，缓�
   assert.notEqual(saved.sources[0].sha256, saved.sources[1].sha256);
   assert.ok(saved.rules.every((rule: any) => rule.freshness === "current"));
 });
+
+test("精确关系只依赖目标规则；无关摘要与规则修订不扩散，术语别名必须有来源", async t => {
+  const { service, input, patch, detail } = await setup(t);
+  const target = { ...await input("shared"), title: "共享订单规则", relations: [],
+    entities: [{ id: "order", name: "订单", meaning: "业务单据", aliases: ["订单单据"], source_ids: ["orders-source"] }] };
+  assert.equal((await service.record({ ...target, entities: [{ id: "order", name: "订单", meaning: "业务单据", aliases: ["未经依据的别名"] }] })).code, "PROJECT_MODEL_ENTITY_EVIDENCE");
+  assert.equal((await service.record(target)).outcome, "ok");
+  const local = await input();
+  const relation = { ...local.relations[0]!, target_model_id: "shared", target_rule_ids: ["detail"], target_entity_ids: ["order"] };
+  assert.equal((await service.record({ ...local, relations: [{ ...relation, target_rule_ids: ["missing"] }] })).code, "PROJECT_MODEL_TARGET_RULE");
+  assert.equal((await service.record({ ...local, relations: [relation] })).outcome, "ok");
+  assert.equal((await detail()).relations[0].freshness, "current");
+  assert.equal((await patch(1, { metadata: { summary: "只改摘要" } }, "shared")).outcome, "ok");
+  assert.equal((await detail()).relations[0].freshness, "current");
+  assert.equal((await patch(2, { upsert_rules: [{ ...target.rules[0], description: "无关规则的新解释" }] }, "shared")).outcome, "ok");
+  assert.equal((await detail()).relations[0].freshness, "current");
+  assert.equal((await patch(3, { upsert_rules: [{ ...target.rules[2], description: "详情行为发生变化" }] }, "shared")).outcome, "ok");
+  assert.equal((await detail()).relations[0].freshness, "needs_review");
+  const graph = ((await service.context({ model_id: "shared", relation_depth: 2 })).data as any).business_graph;
+  assert.ok(graph.edges.some((edge: any) => edge.from_model === "orders" && edge.to_model === "shared"));
+  assert.equal(graph.depth, 2);
+});

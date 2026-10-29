@@ -39,7 +39,9 @@ import {
   projectEvaluation,
   assertBusinessAcceptance,
 } from "./quality/review.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { assertTaskOwner, currentInteraction, interactionOwner } from "./workflow/interaction.js";
+import { validateSpecification } from "./requirements/spec-input.js";
 import { z } from "zod";
 import { AppError } from "./domain/error.js";
 import { TaskSchema, type Task } from "./domain/task.js";
@@ -198,6 +200,8 @@ export class TaskService {
           "纠正版本、ID或关联验收不匹配，请重新查询当前范围",
         );
       const now = new Date().toISOString();
+      const interaction = currentInteraction();
+      const spec = request.spec_input ? validateSpecification(request.spec_input, ["task-request", ...(request.requirement_sources ?? []).map(source => source.id)]) : undefined;
       const task = TaskSchema.parse({
         schema_version: 1,
         id: randomUUID(),
@@ -209,6 +213,12 @@ export class TaskService {
         workspace_baseline: workspaceBaseline,
         phase: "active",
         requirement: request.requirement,
+        ...(spec ? { spec_input: spec } : {}),
+        ...(interaction ? { owner: interactionOwner(interaction) } : {}),
+        ...(interaction?.operation_id ? {
+          operation_key: createHash("sha256").update(JSON.stringify([interaction.session_id, interaction.actor_id ?? "main", interaction.operation_id])).digest("hex"),
+          operation_fingerprint: createHash("sha256").update(JSON.stringify(request)).digest("hex"),
+        } : {}),
         ...(request.evaluation ? { evaluation: request.evaluation } : {}),
         implementation_baseline: await captureImplementationBaseline(current),
         development_policy: 1,
@@ -261,7 +271,7 @@ export class TaskService {
       const saved = await this.store.create(task);
       return {
         outcome: "ok",
-        code: "TASK_OPENED",
+        code: saved.id === task.id ? "TASK_OPENED" : "TASK_REUSED",
         data: saved,
         diagnostics: [],
       };
@@ -273,6 +283,7 @@ export class TaskService {
     return this.execute(async () => {
       const request = TaskUpdateInputSchema.parse(input);
       const prior = await this.store.load(request.task_id);
+      assertTaskOwner(prior);
       // 基线失效仍允许显式中止并留下原因，但不能继续把普通更新或关闭记为有效。
       if (request.phase !== "aborted")
         await assertBaseline(this.binding, prior);
@@ -672,6 +683,7 @@ export class TaskService {
           diagnostics: [],
         };
       const task_id = task.id;
+      if (!request.task_id) assertTaskOwner(task);
       if (task.repo_identity !== this.binding.repo_identity)
         throw new AppError("TASK_BINDING_MISMATCH", "该任务属于其他仓库");
       if (task.phase !== "active") {

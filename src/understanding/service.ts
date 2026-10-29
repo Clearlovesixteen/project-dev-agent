@@ -7,6 +7,7 @@ import { MAP_DIR, ModelRecordInput, ScanInput } from "./contracts.js";
 import { locked, understandingStatus } from "./store.js";
 import { scanProject } from "./scan.js";
 import { projectContext } from "./context.js";
+import { provideContext } from "../context/provider.js";
 import { renderProjectReport } from "./report.js";
 import { recordModel } from "./model-record.js";
 
@@ -33,7 +34,7 @@ export class UnderstandingService {
   /** 查询时核验所选来源；需要重扫或覆盖不完整时返回 incomplete，供调用方补充检查。 */
   async context(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
-      const data = await projectContext(this.files, input);
+      const data = await provideContext(this.files, input);
       return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data, diagnostics: [] };
     });
   }

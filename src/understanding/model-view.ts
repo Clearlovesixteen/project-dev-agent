@@ -1,5 +1,5 @@
 import { AppError } from "../domain/error.js";
-import { ModelEvidence, ruleFingerprint, sourceFingerprint } from "./model-evidence.js";
+import { ModelEvidence, dependencyFingerprint, entityFingerprint, ruleFingerprint, sourceFingerprint } from "./model-evidence.js";
 import type { SavedModel } from "./model-contracts.js";
 
 /** 逐条检查规则与关系；整个模型过期并不代表其中每条规则都需要重新分析。 */
@@ -25,6 +25,11 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
   const relations = [];
   for (const relation of model.relations) {
     const review_reasons: { source_id?: string; rule_id?: string; state: string }[] = reasons(relation);
+    for (const id of relation.entity_ids ?? []) {
+      const entity = model.entities.find(item => item.id === id);
+      if (!entity || relation.entity_versions?.find(item => item.id === id)?.fingerprint !== entityFingerprint(entity, model.sources))
+        review_reasons.push({ state: "entity_revised" });
+    }
     for (const id of relation.rule_ids) {
       const rule = rules.find((item) => item.id === id), version = relation.rule_versions.find((item) => item.id === id);
       if (!rule || !version || version.fingerprint !== ruleFingerprint(rule) || rule.freshness !== "current") review_reasons.push({ rule_id: id, state: "rule_needs_review" });
@@ -33,6 +38,22 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
     if (relation.target_model_id) {
       const target = visible.find((item) => item.id === relation.target_model_id);
       if (!target) review_reasons.push({ state: "target_model_missing_or_excluded" });
+      else if (relation.target_rule_ids && relation.target_rule_versions && target.schema_version === 2) {
+        // 新关系只跟踪实际依赖规则；其他规则和摘要的修订不会触发无关扩散。
+        for (const id of relation.target_rule_ids) {
+          const rule = target.rules.find(item => item.id === id), version = relation.target_rule_versions.find(item => item.id === id);
+          if (!rule || !version || dependencyFingerprint(rule) !== version.fingerprint) {
+            review_reasons.push({ rule_id: id, state: "target_rule_revised" }); continue;
+          }
+          for (const sourceId of rule.source_ids) {
+            const source = target.sources.find(item => item.id === sourceId);
+            if (!source || rule.evidence_versions.find(item => item.id === sourceId)?.fingerprint !== sourceFingerprint(source)
+              || await evidence.sourceState(source) !== "current") {
+              review_reasons.push({ rule_id: id, state: "target_rule_needs_review" }); break;
+            }
+          }
+        }
+      }
       else if (target.revision !== relation.target_model_revision) review_reasons.push({ state: "target_model_revised" });
       else {
         // 只检查一层目标的原始依据，避免循环关系递归展开；不宣称覆盖跨系统调用图。
@@ -43,6 +64,16 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
           return !source || rule.evidence_versions.find((item) => item.id === id)?.fingerprint !== sourceFingerprint(source);
         }));
         if (staleRules || [...targetStates, ...sourceStates].some((state) => state !== "current")) review_reasons.push({ state: "target_model_needs_review" });
+      }
+      if (target?.schema_version === 2) for (const id of relation.target_entity_ids ?? []) {
+        const entity = target.entities.find(item => item.id === id);
+        if (!entity || relation.target_entity_versions?.find(item => item.id === id)?.fingerprint !== entityFingerprint(entity, target.sources)) {
+          review_reasons.push({ state: "target_entity_revised" }); continue;
+        }
+        for (const sourceId of entity.source_ids ?? []) {
+          const source = target.sources.find(item => item.id === sourceId);
+          if (!source || await evidence.sourceState(source) !== "current") { review_reasons.push({ state: "target_entity_needs_review" }); break; }
+        }
       }
     }
     relations.push({ ...relation, freshness: review_reasons.length ? "needs_review" : "current", review_reasons });
@@ -61,7 +92,8 @@ export function selectModelRules(model: Awaited<ReturnType<typeof materializeMod
   if (ids.some((id) => !model.rules.some((rule) => rule.id === id))) throw new AppError("PROJECT_MODEL_RULE_NOT_FOUND", "规则 ID 不存在，请读取最新模型摘要");
   const rules = model.rules.filter((rule) => ids.includes(rule.id));
   const relations = model.relations.filter((relation) => relation.rule_ids.some((id) => ids.includes(id)));
-  const referenced = new Set([...rules.flatMap((rule) => rule.source_ids), ...relations.flatMap((relation) => relation.source_ids)]);
+  const referenced = new Set([...rules.flatMap((rule) => rule.source_ids), ...relations.flatMap((relation) => relation.source_ids),
+    ...model.entities.flatMap(entity => entity.source_ids ?? [])]);
   return { ...model, rules, relations, sources: model.sources.filter((source) => referenced.has(source.id)),
     content_truncated: true, selected_rule_ids: ids, total_rule_count: model.rules.length,
     details_request: { model_id: model.id, model_revision: model.revision } };

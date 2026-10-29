@@ -1,0 +1,15 @@
+name = "project-dev-diagnostics"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DIAGNOSTICS_DB"
+database_name = "project-dev-diagnostics"
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+
+[triggers]
+crons = ["17 3 * * *"]
+
+# 写入令牌通过 wrangler secret put WRITE_TOKEN 配置，不能提交到 GitHub。
+# 该服务只提供 POST /events；查看与导出使用维护者自己的 Cloudflare 账户权限。

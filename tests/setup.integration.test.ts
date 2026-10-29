@@ -28,6 +28,8 @@ test("setup previews without writing, preserves project instructions and is repe
   const rules = await readFile(new URL("../../skills/project-dev/references/generation-rules.md", import.meta.url), "utf8");
   for (const directory of [".agents/skills/project-dev", ".project-dev/local/plugin/skills/project-dev"]) {
     assert.equal(await readFile(join(fixture.path, directory, "references/generation-rules.md"), "utf8"), rules);
+    assert.ok((await readFile(join(fixture.path, directory, "references/workflow.md"), "utf8")).includes("task_check"));
+    assert.ok((await readFile(join(fixture.path, directory, "references/spec-and-interaction.md"), "utf8")).includes("PRD"));
   }
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: fixture.path, encoding: "utf8" });
   assert.ok(!status.includes(".project-dev/local"));

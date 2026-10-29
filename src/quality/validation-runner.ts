@@ -209,6 +209,12 @@ export async function runValidation(
     output_truncated,
   });
   await saveValidationRun(files, run);
+  // 仅上报已保存的真实执行状态，不上报命令、输出、路径或错误消息。
+  await (await import("../runtime/best-effort.js")).bestEffort(async () => new (await import("../observability/writer.js")).DiagnosticWriter().record("validation.finished", {
+    project: binding.root, task: taskId, trace: id,
+    outcome: state === "passed" ? "ok" : "incomplete", reason: `VALIDATION_${state.toUpperCase()}`,
+    duration: Date.parse(run.finished_at) - Date.parse(run.started_at), attributes: { transport: "runner", coverage: "observed" },
+  }));
   return {
     outcome: state === "passed" ? ("ok" as const) : ("incomplete" as const),
     code: state === "passed" ? "VALIDATION_PASSED" : "VALIDATION_NOT_PASSED",

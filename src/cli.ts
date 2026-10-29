@@ -7,7 +7,11 @@ import { assertBaseline } from "./git/index.js";
 import { RelativePathSchema } from "./domain/common.js";
 import { execFileSync } from "node:child_process";
 import { lstat, open } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
+import { RuntimeSettings } from "./runtime/config.js";
+import { developerInsights, importedInsights, renderInsights } from "./observability/insights.js";
+import { ProjectFiles } from "./storage/project-files.js";
 import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { KnowledgeSchema } from "./domain/knowledge.js";
@@ -34,6 +38,16 @@ import { runValidation } from "./quality/validation-runner.js";
 const HELP = `project-dev-agent — Codex 插件 v${VERSION}
 
 可用命令：
+  runtime status
+    查看自动上下文模式及诊断开关；不会返回写入凭证。
+  runtime configure --file <设置JSON>
+    预览或保存运行设置。mode 为 manual/observe/auto，保存需要 apply 和 expected_revision。
+  insights report [--days <1-30>] [--output <新HTML文件>]
+    插件维护者生成本地诊断，包含问题聚类、链路和覆盖限制，不增加普通用户步骤。
+  insights issues [--days <1-30>]
+    返回按版本、事件和错误码归类的可观测问题。
+  insights trace --id <链路摘要> [--days <1-30>]
+    读取一条去标识诊断链路，不读取对话或源码。
   plugin status
     查看插件版本，以及保存在插件缓存之外的工作目录配置。
   plugin configure --workspace <绝对目录> [--apply --expected-revision <uuid|null>]
@@ -149,11 +163,32 @@ async function main(): Promise<void> {
       "model-offset": { type: "string" },
       refresh: { type: "boolean", default: false },
       "codex-home": { type: "string" },
+      days: { type: "string" },
+      output: { type: "string" },
     },
     allowPositionals: true,
   });
   if (values.help || positionals.length === 0) {
     process.stdout.write(HELP);
+    return;
+  }
+  if (positionals.length === 2 && positionals[0] === "runtime") {
+    const settings = new RuntimeSettings();
+    if (positionals[1] === "status") print(await settings.status());
+    else if (positionals[1] === "configure" && values.file) print(await settings.configure(JSON.parse(await readContractFile(values.file))));
+    else throw new Error("runtime 支持 status，或 configure --file <设置JSON>");
+    return;
+  }
+  if (positionals.length === 2 && positionals[0] === "insights") {
+    if (!["report", "issues", "trace"].includes(positionals[1]!)) throw new Error("insights 支持 report/issues/trace");
+    if (positionals[1] === "trace" && !values.id) throw new Error("insights trace 需要 --id");
+    const report = values.file ? importedInsights(JSON.parse(await readContractFile(values.file)), values.days ? Number(values.days) : 7, values.id)
+      : await developerInsights({ ...(values.days ? { days: Number(values.days) } : {}), ...(values.id ? { trace: values.id } : {}) });
+    if (values.output) {
+      const output = resolve(values.output), files = new ProjectFiles(await realpath(dirname(output)));
+      await files.create(basename(output), renderInsights(report), 1_048_576);
+      print({ outcome: "ok", report: output, sample_events: report.sample_events, coverage: report.coverage });
+    } else print(positionals[1] === "issues" ? { issues: report.issues, coverage: report.coverage, limitations: report.limitations } : report);
     return;
   }
   if (positionals.length === 1 && positionals[0] === "doctor") {
