@@ -131,7 +131,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
       reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK", attributes: { tool, transport } });
     const eventName = tool === "task_open" ? value.code === "TASK_OPENED" ? "workflow.bound" : undefined : tool === "task_update" ? "task.transitioned"
       : tool === "task_check" ? "quality.checked" : tool === "project_model_record" || tool === "project_model_apply" ? "model.changed"
-      : tool === "feedback_record" ? "feedback.recorded" : tool === "project_context" ? "context.lookup" : undefined;
+      : tool === "project_feedback_record" || tool === "feedback_record" ? "feedback.recorded" : tool === "project_context" ? "context.lookup" : undefined;
     if (eventName && value.outcome !== "error") {
       const spec = value.data?.spec_input as { kind?: TelemetryAttributes["input_kind"] } | undefined;
       await writer.record(eventName, { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace,

@@ -7,7 +7,7 @@ export const EventName = z.enum(["hook.received", "hook.finished", "scope.resolv
 /** 字段白名单：不允许自由文本、路径、查询、命令或协议输入混进遥测。 */
 export const EventAttributes = z.object({
   tool: z.enum(["plugin_status", "plugin_configure", "project_prepare", "project_scan", "project_context", "knowledge_search",
-    "task_open", "task_update", "task_check", "feedback_record", "experience_propose", "history_scan", "history_next", "history_record",
+    "task_open", "task_update", "task_check", "project_feedback_record", "feedback_record", "experience_propose", "history_scan", "history_next", "history_record",
     "project_model_record", "project_model_apply"]).optional(),
   input_kind: z.enum(["request", "prd", "sdd", "combined", "unknown"]).optional(),
   query_fingerprint: Opaque.optional(), context_id: Opaque.optional(),

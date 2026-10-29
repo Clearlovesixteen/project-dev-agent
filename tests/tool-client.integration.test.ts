@@ -11,7 +11,10 @@ const exec = promisify(execFile),
 test("正式终端通道经真实STDIO调用同一工具，区分独立启动与宿主工具可见性", async (t) => {
   const f = await createGitFixture();
   t.after(f.cleanup);
-  const env = { ...process.env };
+  // 独立进程会移除 NODE_TEST_CONTEXT，仍须显式隔离 HOME，避免合成测试写入维护者的真实诊断。
+  const home = join(f.root, "isolated-codex");
+  await mkdir(home);
+  const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: home };
   delete env.NODE_TEST_CONTEXT;
   const preflight = JSON.parse(
     (

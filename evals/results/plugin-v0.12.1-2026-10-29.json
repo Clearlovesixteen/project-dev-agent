@@ -1,0 +1,83 @@
+{
+  "version": "0.12.1",
+  "verified_on": "2026-10-29",
+  "base_feature_version": "0.12.0",
+  "build_node": "20.19.6",
+  "runtime_minimum": "18.19.0",
+  "changes": [
+    "修正 project_feedback_record 与诊断白名单的工具名对应，记录实际纠正工具结果及纠正事件",
+    "通过 SDK 实际工具清单校验全部 16 个工具的诊断覆盖",
+    "终端集成测试使用隔离 CODEX_HOME，防止合成样本进入维护者的诊断"
+  ],
+  "typecheck": "passed",
+  "skills": "passed",
+  "full_regression": {
+    "node": "18.19.1",
+    "tests": 263,
+    "passed": 263,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "minimum_runtime": {
+    "node": "18.19.0",
+    "tests": 15,
+    "passed": 15,
+    "failed": 0
+  },
+  "native_upgrade": {
+    "node": "18.19.0",
+    "from": "0.12.0",
+    "to": "0.12.1",
+    "result": "passed",
+    "failed_refresh_preserved_installed_version": true,
+    "persistent_configuration_preserved": true,
+    "workspace_and_task_preserved": true,
+    "upgrade_uses_partial_clone": true,
+    "hook_discovery": {
+      "result": "passed",
+      "operation": "hooks/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "hooks": [
+        {
+          "event": "sessionStart",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "userPromptSubmit",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "stop",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": true,
+          "timeout_seconds": 3
+        }
+      ],
+      "mcp_servers": [
+        "project_dev"
+      ],
+      "warnings": [],
+      "errors": []
+    }
+  },
+  "bundled_sha256": {
+    ".codex-plugin/plugin.json": "92d8fc33045aa78f6b857b077434a698ebe90a363375fcda54943063da022cd0",
+    "runtime/cli.mjs": "34a308100edf9b7fe8b8a2a5408b2403adcdfdf7517fe32c132d546c5eff6ffe",
+    "runtime/hooks.mjs": "396597a097d0c5116593cbd244931d09891ea1671a615f2f873e15cb26f8bb2f"
+  },
+  "inherited_validation": "plugin-v0.12.0-2026-10-29.json",
+  "limitations": [
+    "没有设置在线接收端，远程上报仍未配置且关闭；收集端部署需维护者自己的账户。",
+    "宿主发现和独立可执行入口已验证；未创建模型测试会话，未替用户修改信任。自动语义遵循仍需真实开发试点。",
+    "元数据、回执和通过的测试不等于已证明业务正确性或实际返工改善。"
+  ]
+}
