@@ -50,5 +50,39 @@
     "原生MCP连接和16工具发现不等于业务理解或生码质量验收。",
     "0.13.0真实宿主自动收尾上报已验收；更新后的钩子信任状态需由宿主再次核对。"
   ],
-  "native_codex_cli": "0.164.0-alpha.11.1"
+  "native_codex_cli": "0.164.0-alpha.11.1",
+  "ci": {
+    "commit": "00e50b1e74eda6fad16496ef76fe840329cc9cd3",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/41012387747",
+    "result": "passed",
+    "runtime_matrix": [
+      "18.19.0",
+      "18.19.1",
+      "20.19.6"
+    ],
+    "tests_per_runtime": 278
+  },
+  "installed_runtime_verification": {
+    "version": "0.13.1",
+    "result": "passed",
+    "release_hashes_match": true,
+    "existing_private_runtime_preserved": true,
+    "workspace_settings_preserved": true,
+    "native_mcp_connection": {
+      "result": "passed",
+      "operation": "mcpServerStatus/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "server_version": "0.13.1",
+      "tool_count": 16
+    },
+    "hook_trust": {
+      "sessionStart": "modified",
+      "userPromptSubmit": "modified",
+      "stop": "modified"
+    },
+    "automatic_host_check": "awaiting_user_hook_review_after_patch",
+    "changes_trust": false,
+    "verified_at": "2026-10-30T06:11:37.694Z"
+  }
 }
