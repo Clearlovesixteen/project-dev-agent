@@ -27,12 +27,17 @@ function finish(result: Record<string, unknown>) {
     process.exit(0);
   });
 }
-const hardTimer = setTimeout(() => { expired = true; controller.abort(); finish({}); }, 1800);
-const softTimer = setTimeout(async () => {
-  expired = true; controller.abort();
-  await bestEffort(() => new DiagnosticWriter().record("telemetry.gap", { ...correlation, outcome: "degraded", reason: "HOOK_DEADLINE" }), 150);
-  finish({});
-}, 1500);
+let hardTimer: NodeJS.Timeout, softTimer: NodeJS.Timeout;
+function budget(soft: number, hard: number) {
+  clearTimeout(hardTimer); clearTimeout(softTimer);
+  hardTimer = setTimeout(() => { expired = true; controller.abort(); finish({}); }, hard);
+  softTimer = setTimeout(async () => {
+    expired = true; controller.abort();
+    await bestEffort(() => new DiagnosticWriter().record("telemetry.gap", { ...correlation, outcome: "degraded", reason: "HOOK_DEADLINE" }), 150);
+    finish({});
+  }, soft);
+}
+budget(1500, 1800);
 try {
   const chunks: Buffer[] = []; let bytes = 0;
   for await (const chunk of process.stdin) {
@@ -42,6 +47,8 @@ try {
   }
   const pluginRoot = process.env.PROJECT_DEV_PLUGIN_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const input: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  // 仅完整读入的异步 Stop 允许更长网络预算；输入未结束和同步项目辅助仍走原短期限。
+  if (input && typeof input === "object" && "hook_event_name" in input && input.hook_event_name === "Stop") budget(5500, 6000);
   if (input && typeof input === "object" && "session_id" in input && typeof input.session_id === "string" && input.session_id.length <= 200) {
     const turn = "turn_id" in input && typeof input.turn_id === "string" && input.turn_id.length <= 200 ? input.turn_id : undefined;
     correlation = { session: input.session_id, trace: turn ?? invocation };
@@ -49,4 +56,4 @@ try {
   const output = await handleHook(input, pluginRoot, undefined, { trace: invocation, signal: controller.signal });
   if (!expired) finish(output);
 } catch { if (!expired) finish({}); }
-finally { clearTimeout(softTimer); if (!expired) clearTimeout(hardTimer); }
+finally { clearTimeout(softTimer!); if (!expired) clearTimeout(hardTimer!); }

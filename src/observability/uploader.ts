@@ -6,30 +6,14 @@ import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
 import { DiagnosticEvent, type TelemetryEvent } from "./contracts.js";
 import { DiagnosticWriter, EVENT_DIRECTORY } from "./writer.js";
+import { sendDiagnosticBatch } from "./transport.js";
 
 const CURSOR = "project-dev-agent/telemetry/upload.json";
 const Cursor = z.object({ epoch: z.uuid(), positions: z.record(z.string(), z.number().int().nonnegative()),
   failures: z.number().int().min(0).max(10).default(0), next_attempt: z.number().nonnegative().default(0) }).strict();
 
-/** 有界响应和禁止跳转，写入凭证不会被接收端重定向到其他域名。 */
-async function acknowledgement(response: Response) {
-  if (!response.ok) throw new Error(`UPLOAD_HTTP_${response.status}`);
-  if (!response.body) throw new Error("UPLOAD_RESPONSE_INVALID");
-  const reader = response.body.getReader(), chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const part = await reader.read(); if (part.done) break;
-      bytes += part.value.length;
-      if (bytes > 4096) throw new Error("UPLOAD_RESPONSE_LIMIT");
-      chunks.push(part.value);
-    }
-    return z.object({ batch_id: z.string(), acknowledged: z.number().int().nonnegative() }).strict().parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-  } finally { await reader.cancel().catch(() => {}); }
-}
-
 /** 每次最多 50 条；确认落库后推进游标，失败退避，关闭后不会补传此前记录。 */
-export async function uploadDiagnostics(home?: string, timeoutMs = 1500) {
+export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
   let release: (() => Promise<void>) | undefined;
   const settings = new RuntimeSettings(home);
   try {
@@ -83,12 +67,9 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 1500) {
       const batchId = createHash("sha256").update(JSON.stringify(batch)).digest("hex");
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), Math.min(5000, Math.max(50, timeoutMs)));
       try {
-        const response = await fetch(diagnostics.endpoint, {
-          method: "POST", redirect: "error", signal: controller.signal,
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${diagnostics.write_token}` },
+        const ack = await sendDiagnosticBatch({ endpoint: diagnostics.endpoint, token: diagnostics.write_token, signal: controller.signal,
           body: JSON.stringify({ schema_version: 1, batch_id: batchId, events: batch }),
         });
-        const ack = await acknowledgement(response);
         if (ack.batch_id !== batchId || ack.acknowledged !== batch.length) throw new Error("UPLOAD_ACK_MISMATCH");
       } catch (error) {
         if (await unchanged()) {
@@ -97,7 +78,7 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 1500) {
             next_attempt: Date.now() + Math.min(3_600_000, 30_000 * 2 ** (failures - 1)) });
         }
         const reason = error instanceof Error && (/^UPLOAD_HTTP_[1-5][0-9]{2}$/.test(error.message)
-          || ["UPLOAD_ACK_MISMATCH", "UPLOAD_RESPONSE_LIMIT", "UPLOAD_RESPONSE_INVALID"].includes(error.message)) ? error.message
+          || ["UPLOAD_ACK_MISMATCH", "UPLOAD_RESPONSE_LIMIT", "UPLOAD_RESPONSE_INVALID", "UPLOAD_PROXY_INVALID"].includes(error.message)) ? error.message
           : error instanceof Error && error.name === "AbortError" ? "UPLOAD_TIMEOUT" : "UPLOAD_NETWORK_OR_RESPONSE";
         await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason });
         return { state: "unavailable", sent: 0 };

@@ -1,0 +1,45 @@
+{
+  "version": "0.12.2",
+  "verified_on": "2026-10-30",
+  "scope": "诊断代理传输与异步收尾期限修复；团队默认配置保持原有行为",
+  "local_checks": [
+    { "runtime": "Node 20.19.6", "suite": "full", "passed": 268, "failed": 0, "skipped": 0 },
+    { "runtime": "Node 18.19.0", "suite": "proxy, diagnostics, packaged hooks and standalone package", "passed": 15, "failed": 0, "skipped": 0 }
+  ],
+  "regression": {
+    "original_delayed_ack_test": "failed: original packaged Stop exited before upload cursor persistence",
+    "fixed_delayed_ack_test": "passed: 1800ms collector confirmation advances cursor and completes hook",
+    "sync_hook_deadline_preserved": true,
+    "proxy_tunnel_and_no_proxy_checked": true,
+    "global_dispatcher_unchanged": true
+  },
+  "native_upgrade": {
+    "from": "0.12.1", "to": "0.12.2", "runtime": "Node 18.19.0", "result": "passed",
+    "isolated_codex_home": true,
+    "failed_refresh_preserves_old_version": true,
+    "workspace_and_task_preserved": true,
+    "persistent_configuration_preserved": true,
+    "host_discovers_all_three_hooks": true,
+    "stop_async_timeout_seconds": 8,
+    "changes_hook_trust": false
+  },
+  "live_collector_check": {
+    "fixture": "controlled invocation of the real packaged Stop entry with explicitly enabled maintainer diagnostics",
+    "host_generated_event": false,
+    "runtime": "Node 20.19.6",
+    "temporary_proxy_environment_added": false,
+    "existing_system_proxy_used": true,
+    "hook_exit": 0,
+    "stdout": {},
+    "duration_ms": 5243,
+    "cursor_failures": 0,
+    "d1_rows_before": 23,
+    "d1_rows_after": 73,
+    "actual_tool_event_persisted": true
+  },
+  "limitations": [
+    "本地受控调用证明真实打包入口可上传和落库；宿主在后续真实会话收尾中的自动调用应单独观察。",
+    "PAC 与仅 SOCKS 的系统代理暂不解析；环境代理只接受 HTTP/HTTPS。",
+    "元数据与入库条数不代表业务理解、代码质量或返工改善。"
+  ]
+}

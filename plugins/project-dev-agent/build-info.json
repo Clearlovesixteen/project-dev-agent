@@ -1,5 +1,5 @@
 {
-  "version": "0.12.1",
+  "version": "0.12.2",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -58,6 +58,11 @@
       "license": "MIT"
     },
     {
+      "name": "undici",
+      "version": "6.29.1",
+      "license": "MIT"
+    },
+    {
       "name": "which",
       "version": "2.0.2",
       "license": "ISC"
@@ -82,7 +87,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 791,
-      "sha256": "92d8fc33045aa78f6b857b077434a698ebe90a363375fcda54943063da022cd0"
+      "sha256": "a8f3470d3dac4f67e3dafaaa9fe03bb7e4b62ca8bd7ab4925e79354ec8d43468"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -147,7 +152,7 @@
     {
       "path": "hooks/hooks.json",
       "bytes": 485,
-      "sha256": "b1d4dc8be6b204098996e72bcea6401d0ab4f86e7f6407efe0558796d270cda1"
+      "sha256": "378998b4d7ba6253e0577c18afb1d7cb5201fa702502cbeed7c332a573a40af1"
     },
     {
       "path": "mcp.json",
@@ -157,22 +162,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "0861dbdfa7eff950af7e5a692926867a9539932af295c4b1eb7a2920bae5bd99"
+      "sha256": "b54359bac8d23a11417d999c5e4a34a5c2bfa381cd3864a63c1b4d912fece776"
     },
     {
       "path": "README.md",
       "bytes": 819,
-      "sha256": "4f9ecb28dde7a1e2ed995292fd9cb2ada7216adfca75a259b5343dfef558abfd"
+      "sha256": "0c0037fd0e723ed1211effec0de21130f83896ed6af136f78c9d312bd056bcc7"
     },
     {
       "path": "runtime/cli.mjs",
       "bytes": 1198589,
-      "sha256": "34a308100edf9b7fe8b8a2a5408b2403adcdfdf7517fe32c132d546c5eff6ffe"
+      "sha256": "92ee20bc38191ca4840d42dbfcb171741ee0fa1dca5905b7a9b42da4e719a487"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 733669,
-      "sha256": "396597a097d0c5116593cbd244931d09891ea1671a615f2f873e15cb26f8bb2f"
+      "bytes": 1153042,
+      "sha256": "fd3be0fe679fed9c6582e07596fd4b1560e558561e717680f73f4a9f4ef92852"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -606,8 +611,8 @@
     },
     {
       "path": "THIRD-PARTY-NOTICES.txt",
-      "bytes": 16270,
-      "sha256": "cf6fa85a6b8682e9f3f87a2186463463041b8a0d3505459a004b47b7cae13a86"
+      "bytes": 17392,
+      "sha256": "6199b21e1a5eedc6bc24535a93e1e3154440501b0b9d00d6692d44df92679216"
     }
   ]
 }
