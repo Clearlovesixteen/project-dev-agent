@@ -95,5 +95,32 @@
     "host_discovers_all_three_hooks": true,
     "stop_async_timeout_seconds": 8,
     "changes_hook_trust": false
+  },
+  "ci": {
+    "commit": "5a664ae99ec0da3e61593386cfdb7a4b82d5b860",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/41001839413",
+    "result": "passed",
+    "runtime_matrix": [
+      "18.19.0",
+      "18.19.1",
+      "20.19.6"
+    ],
+    "tests_per_runtime": 278
+  },
+  "installed_runtime_verification": {
+    "version": "0.13.0",
+    "result": "passed",
+    "release_hashes_match": true,
+    "existing_private_runtime_preserved": true,
+    "workspace_settings_preserved": true,
+    "all_hooks_discovered": true,
+    "hook_trust": {
+      "sessionStart": "modified",
+      "userPromptSubmit": "modified",
+      "stop": "modified"
+    },
+    "automatic_host_check": "awaiting_user_hook_review",
+    "changes_trust": false,
+    "verified_at": "2026-10-30T04:17:11.550Z"
   }
 }
