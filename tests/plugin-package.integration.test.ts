@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -30,7 +30,8 @@ test("release inventory matches bundled assets and carries no external dependenc
   assert.equal(pkg.engines.node, ">=18.19.0");
   assert.equal(JSON.parse(await readFile(join(packageRoot, "build-info.json"), "utf8")).node, pkg.engines.node);
   const mcp = JSON.parse(await readFile(join(packageRoot, "mcp.json"), "utf8"));
-  assert.deepEqual(mcp.mcpServers.project_dev.args, ["${PLUGIN_ROOT}/runtime/cli.mjs", "serve", "--plugin"]);
+  assert.deepEqual(mcp.mcpServers.project_dev.args, ["runtime/cli.mjs", "serve", "--plugin"]);
+  assert.equal(mcp.mcpServers.project_dev.cwd, ".");
   // 默认约束通过 Skill 的本地引用加载，发布包必须携带同一份可读取的参考资料。
   const rules = "skills/project-dev/references/generation-rules.md";
   assert.ok(info.files.some((file) => file.path === rules));
@@ -50,8 +51,10 @@ test("standalone plugin runs without source or node_modules and preserves task/c
   assert.equal(sample.outcome, "ok");
   async function connect(root: string) {
     const client = new Client({ name: "plugin-test", version: "1" });
+    const config = JSON.parse(await readFile(join(root, "mcp.json"), "utf8")).mcpServers.project_dev;
+    // 使用发布配置中的参数和相对工作目录，避免手工拼路径掩盖原生启动配置错误。
     const transport = new StdioClientTransport({ command: process.execPath,
-      args: [join(root, "runtime/cli.mjs"), "serve", "--plugin"], env, stderr: "pipe" });
+      args: config.args, cwd: resolve(root, config.cwd ?? "."), env, stderr: "pipe" });
     t.after(() => client.close());
     await client.connect(transport); return client;
   }

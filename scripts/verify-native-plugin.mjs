@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { verifyHookDiscovery } from "./verify-hook-discovery.mjs";
+import { verifyNativeMcp } from "./verify-native-mcp.mjs";
 
 const codex = process.argv[2];
 if (!codex) throw new Error("Pass the installed Codex CLI executable path");
@@ -160,6 +161,7 @@ try {
   evidence.workspace_and_task_preserved = true;
   evidence.persistent_configuration_preserved = true;
   evidence.native_hook_discovery = await verifyHookDiscovery(codex, home, sample.path, pluginId);
+  evidence.native_mcp_connection = await verifyNativeMcp(codex, home, sample.path, current);
   evidence.result = "passed";
   await mkdir(join(root, "work"), { recursive: true });
   // Temporary paths in the detailed local log are not release artifacts.
@@ -169,7 +171,7 @@ try {
     upgrade_uses_partial_clone: evidence.upgrade_uses_partial_clone,
     failed_refresh_preserved_installed_version: evidence.failed_refresh_preserved_installed_version,
     persistent_configuration_preserved: true, workspace_and_task_preserved: true,
-    native_hook_discovery: evidence.native_hook_discovery }));
+    native_hook_discovery: evidence.native_hook_discovery, native_mcp_connection: evidence.native_mcp_connection }));
 } finally {
   await Promise.allSettled(clients.map((client) => client.close()));
   if (http?.listening) await new Promise((done) => http.close(done));

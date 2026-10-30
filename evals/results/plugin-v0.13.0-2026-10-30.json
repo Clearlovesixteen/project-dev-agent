@@ -80,7 +80,8 @@
     "新安装自动配置和 Node 18 实际公开入库已验证；受控 Stop 不冒充宿主自动触发。",
     "已有关闭状态不因升级自动开启；启用前或旧周期记录不补传。",
     "Cloudflare 限流按位置近似生效，不等同严格全局费用上限。",
-    "原生钩子仍需宿主信任；元数据不能证明业务理解、代码质量或返工改善。"
+    "原生钩子仍需宿主信任；元数据不能证明业务理解、代码质量或返工改善。",
+    "原生宿主检查另发现MCP工作目录占位符未展开导致启动失败；独立SDK连接曾绕过发布配置，0.13.1补丁处理并补上真实宿主连接验收。"
   ],
   "native_upgrade": {
     "from": "0.12.2",
@@ -115,12 +116,29 @@
     "workspace_settings_preserved": true,
     "all_hooks_discovered": true,
     "hook_trust": {
-      "sessionStart": "modified",
-      "userPromptSubmit": "modified",
-      "stop": "modified"
+      "sessionStart": "trusted",
+      "userPromptSubmit": "trusted",
+      "stop": "trusted"
     },
-    "automatic_host_check": "awaiting_user_hook_review",
+    "automatic_host_check": "passed",
     "changes_trust": false,
-    "verified_at": "2026-10-30T04:17:11.550Z"
-  }
+    "verified_at": "2026-10-30T05:53:27.566Z"
+  },
+  "native_host_auto_upload": {
+    "result": "passed",
+    "ephemeral": true,
+    "host_generated_stop": true,
+    "manual_stop_invoked": false,
+    "changes_trust": false,
+    "initial_pending_events": 159,
+    "process_scoped_existing_proxy_for_host": true,
+    "runtime_version": "0.13.0",
+    "turn_status": "completed",
+    "tool_calls": 0,
+    "d1_stop_received": true,
+    "verified_at": "2026-10-30T05:59:55.999Z",
+    "natural_turns": 4,
+    "backlog_behavior": "初始积压159条，按每次最多50条依次发送；第4轮本次Stop实际入库，无手工上传。"
+  },
+  "native_codex_cli": "0.164.0-alpha.11.1"
 }

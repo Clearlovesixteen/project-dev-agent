@@ -4,8 +4,8 @@
     "project_dev": {
       "type": "stdio",
       "command": "node",
-      "args": ["${PLUGIN_ROOT}/runtime/cli.mjs", "serve", "--plugin"],
-      "cwd": "${PLUGIN_ROOT}"
+      "args": ["runtime/cli.mjs", "serve", "--plugin"],
+      "cwd": "."
     }
   }
 }

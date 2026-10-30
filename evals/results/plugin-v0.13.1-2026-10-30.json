@@ -1,0 +1,54 @@
+{
+  "version": "0.13.1",
+  "verified_on": "2026-10-30",
+  "scope": "修复原生MCP工作目录与入口路径；保持0.13默认诊断及用户配置",
+  "regression": {
+    "before": "0.13.0发布配置在当前宿主被解析为插件缓存目录/${PLUGIN_ROOT}，MCP启动ENOENT。",
+    "native_red_command": "node scripts/verify-native-mcp.mjs <codex> <CODEX_HOME> <cwd> 0.13.0",
+    "native_red_result": "failed: MCP startup failed: No such file or directory (os error 2)",
+    "manifest_based_package_test_before": "failed: spawn node ENOENT",
+    "change": "cwd使用插件根的相对目录.，入口使用runtime/cli.mjs；不依赖宿主对占位符的展开。",
+    "manifest_based_package_test_after": "passed; includes relocation and path with spaces",
+    "native_check_does_not_manually_rewrite_launch_arguments": true
+  },
+  "local_checks": [
+    {
+      "runtime": "Node 18.19.0",
+      "suite": "real manifest package launch, hooks, public defaults, collector and insights",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "typecheck",
+      "result": "passed"
+    }
+  ],
+  "native_upgrade": {
+    "from": "0.13.0",
+    "to": "0.13.1",
+    "runtime": "Node 18.19.0",
+    "result": "passed",
+    "isolated_codex_home": true,
+    "failed_refresh_preserves_old_version": true,
+    "workspace_and_task_preserved": true,
+    "persistent_configuration_preserved": true,
+    "partial_clone": true,
+    "changes_trust": false
+  },
+  "native_mcp_connection": {
+    "result": "passed",
+    "operation": "mcpServerStatus/list",
+    "creates_model_session": false,
+    "changes_trust": false,
+    "server_version": "0.13.1",
+    "tool_count": 16
+  },
+  "diagnostics_policy_changed": false,
+  "collector_deployment_changed": false,
+  "limitations": [
+    "原生MCP连接和16工具发现不等于业务理解或生码质量验收。",
+    "0.13.0真实宿主自动收尾上报已验收；更新后的钩子信任状态需由宿主再次核对。"
+  ],
+  "native_codex_cli": "0.164.0-alpha.11.1"
+}
