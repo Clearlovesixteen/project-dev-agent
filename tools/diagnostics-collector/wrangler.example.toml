@@ -8,8 +8,18 @@ binding = "DIAGNOSTICS_DB"
 database_name = "project-dev-diagnostics"
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 
+[[ratelimits]]
+name = "PUBLIC_SOURCE_LIMIT"
+namespace_id = "1310301"
+simple = { limit = 60, period = 60 }
+
+[[ratelimits]]
+name = "PUBLIC_TOTAL_LIMIT"
+namespace_id = "1310302"
+simple = { limit = 300, period = 60 }
+
 [triggers]
 crons = ["17 3 * * *"]
 
 # 写入令牌通过 wrangler secret put WRITE_TOKEN 配置，不能提交到 GitHub。
-# 该服务只提供 POST /events；查看与导出使用维护者自己的 Cloudflare 账户权限。
+# 私有 POST /events 与公开 POST /public/events 均只写；查看与导出使用维护者的账户权限。

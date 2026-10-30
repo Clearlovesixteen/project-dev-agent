@@ -1,0 +1,99 @@
+{
+  "version": "0.13.0",
+  "verified_on": "2026-10-30",
+  "scope": "公开安装者首次运行默认配置远程诊断，可关闭；已有关闭和自定义配置保留",
+  "local_checks": [
+    {
+      "runtime": "Node 20.19.6",
+      "suite": "full",
+      "passed": 278,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "runtime": "Node 18.19.0",
+      "suite": "public defaults, collector, diagnostics insights, packaged hooks and standalone package",
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "suite": "typecheck and all three skill format checks",
+      "result": "passed"
+    }
+  ],
+  "default_policy": {
+    "applies_only_without_runtime_configuration": true,
+    "existing_disabled_configuration_preserved": true,
+    "custom_and_owner_private_configuration_preserved": true,
+    "concurrent_initialization_uses_revision_protection": true,
+    "local_disabled_implies_upload_disabled": true,
+    "pre_enable_records_not_backfilled": true,
+    "project_context_mode_not_changed": true,
+    "endpoint": "https://project-dev-diagnostics.clearlovesixteen-project-dev.workers.dev/public/events",
+    "public_ingest_identifier_is_not_installation_authentication": true,
+    "administrator_or_private_write_credentials_in_bundle": false
+  },
+  "live_public_collector_check": {
+    "result": "passed",
+    "fixture": true,
+    "node": "18.19.0",
+    "version": "0.13.0",
+    "default_enabled_without_parameters": true,
+    "controlled_stop_used": true,
+    "host_generated_stop": false,
+    "public_ingest_rows": 3,
+    "private_route_rejects_public_identifier": true,
+    "repeat_deduplicated": true,
+    "disabling_survives_restart": true,
+    "disabled_run_added_rows": 0,
+    "credential_copied_from_owner": false,
+    "proxy_environment_added": false,
+    "duration_ms": 7067,
+    "verified_at": "2026-10-30T03:46:19.481Z"
+  },
+  "collector_deployment": {
+    "provider": "Cloudflare Workers + D1",
+    "version_id": "4abd7484-e2bc-4869-b3f7-a4c434333d5b",
+    "database_migrations": [
+      "0001_existing_events.sql",
+      "0002_ingest_source.sql"
+    ],
+    "migrations_result": "applied",
+    "historical_rows_default_to": "private",
+    "public_and_private_ingest_separate": true,
+    "read_api": false,
+    "ip_stored_in_diagnostics": false,
+    "per_location_source_installation_and_total_rate_limits": true,
+    "rate_limits_are_strict_global_cost_caps": false
+  },
+  "package": {
+    "version": "0.13.0",
+    "files": 107,
+    "bytes": 3018421,
+    "bundled_dependencies": 16,
+    "generated_file_hashes_verified": 106,
+    "source_and_bundled_skills_match": true
+  },
+  "limitations": [
+    "公开标识只能用于提交诊断，不能认证成员身份；公开数据是客户端提交的排查线索。",
+    "新安装自动配置和 Node 18 实际公开入库已验证；受控 Stop 不冒充宿主自动触发。",
+    "已有关闭状态不因升级自动开启；启用前或旧周期记录不补传。",
+    "Cloudflare 限流按位置近似生效，不等同严格全局费用上限。",
+    "原生钩子仍需宿主信任；元数据不能证明业务理解、代码质量或返工改善。"
+  ],
+  "native_upgrade": {
+    "from": "0.12.2",
+    "to": "0.13.0",
+    "runtime": "Node 18.19.0",
+    "result": "passed",
+    "isolated_codex_home": true,
+    "upgrade_uses_partial_clone": true,
+    "failed_refresh_preserves_old_version": true,
+    "workspace_and_task_preserved": true,
+    "persistent_configuration_preserved": true,
+    "host_discovers_all_three_hooks": true,
+    "stop_async_timeout_seconds": 8,
+    "changes_hook_trust": false
+  }
+}

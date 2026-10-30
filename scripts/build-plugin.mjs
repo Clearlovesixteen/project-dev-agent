@@ -45,7 +45,7 @@ await writeFile(join(target, "package.json"), JSON.stringify({
   name: pkg.name, version: pkg.version, private: true, type: "module", engines: runtimeEngines,
   description: pkg.description, bin: { "project-dev-agent": "runtime/cli.mjs" },
 }, null, 2) + "\n");
-await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js ${runtimeNodeMinimum}+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n直接使用 \`project-dev\` 开发，首次运行自动初始化当前 Git 仓库；需要调整工作目录或启用自动辅助时使用 \`project-dev-setup\`。原生钩子须由宿主审查信任；旧安装默认保留 manual 模式。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，项目记录在业务仓库的 \`.project-dev/local/\`，不会随插件升级被替换。\n`);
+await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js ${runtimeNodeMinimum}+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n直接使用 \`project-dev\` 开发，首次运行自动初始化当前 Git 仓库；需要调整工作目录或启用自动辅助时使用 \`project-dev-setup\`。原生钩子须由宿主审查信任；旧安装默认保留 manual 模式。新安装首次运行默认向维护者发送不含代码、需求或对话正文的运行诊断，可通过项目设置关闭；已有关闭和自定义配置保持原样。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，项目记录在业务仓库的 \`.project-dev/local/\`，不会随插件升级被替换。\n`);
 
 const dependencyRoots = new Set();
 for (const input of new Set([...Object.keys(result.metafile.inputs), ...Object.keys(hookResult.metafile.inputs)])) {

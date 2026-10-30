@@ -20,9 +20,10 @@ test("真实 STDIO 保留原 16 工具，新增输入、运行设置和回执贯
   assert.equal((await client.listTools()).tools.length, 16);
   const call = async (name: string, args: Record<string, unknown> = {}) => ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
   assert.equal((await call("project_prepare", { project: fixture.path, apply: true })).outcome, "ok");
-  const status = (await call("plugin_status")).data as { revision: string; runtime: { revision: null } };
+  const status = (await call("plugin_status")).data as { revision: string; runtime: { revision: string | null; diagnostics: { upload: boolean } } };
+  assert.equal(status.runtime.diagnostics.upload, true, "新安装在真实 MCP 启动阶段已配置默认上报");
   const configured = await call("plugin_configure", { workspace: fixture.path, expected_revision: status.revision, apply: true,
-    runtime: { mode: "auto", expected_revision: null } });
+    runtime: { mode: "auto", expected_revision: status.runtime.revision } });
   assert.equal(configured.outcome, "ok");
   const interaction = { session_id: "native-session-a", turn_id: "turn-a", operation_id: randomUUID() };
   assert.equal((await call("project_scan", { project: fixture.path, interaction })).outcome, "ok");

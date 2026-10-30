@@ -11,6 +11,7 @@ import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { DIAGNOSTIC_NOTICE, RuntimeSettings } from "../src/runtime/config.js";
 import { PluginSettings } from "../src/plugin-settings.js";
 import { DiagnosticWriter } from "../src/observability/writer.js";
+import { PUBLISHED_DIAGNOSTICS } from "../src/runtime/published-diagnostics.js";
 
 const entry = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/hooks.mjs", import.meta.url));
 async function run(home: string, input: string, end = true) {
@@ -73,4 +74,17 @@ test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子�
   const events = (await new DiagnosticWriter(home).read()).events;
   assert.ok(events.some(event => event.event_name === "hook.finished"));
   assert.ok(!events.some(event => event.reason_code === "HOOK_DEADLINE"));
+});
+
+test("新安装的真实钩子自动初始化公开上报，保存关闭后重启不重新开启", async t => {
+  const home = await mkdtemp(join(tmpdir(), "pda-hook-public-")); t.after(() => rm(home, { recursive: true, force: true }));
+  const first = await run(home, JSON.stringify({ hook_event_name: "SessionStart", session_id: "fresh-install", cwd: home }));
+  assert.equal(first.code, 0); assert.equal(first.stderr, "");
+  const settings = new RuntimeSettings(home), config = await settings.current();
+  assert.equal(config.diagnostics.upload, true); assert.equal(config.diagnostics.endpoint, PUBLISHED_DIAGNOSTICS.endpoint);
+  await settings.configure({ apply: true, expected_revision: config.revision, diagnostics: { upload: false } });
+  const revision = (await settings.current()).revision;
+  const stopped = await run(home, JSON.stringify({ hook_event_name: "Stop", session_id: "fresh-install", cwd: home }));
+  assert.equal(stopped.code, 0); assert.deepEqual(JSON.parse(stopped.stdout), {});
+  assert.equal((await settings.current()).diagnostics.upload, false); assert.equal((await settings.current()).revision, revision);
 });

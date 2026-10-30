@@ -6,12 +6,13 @@ import { z } from "zod";
 import { AppError } from "../domain/error.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode, ProjectFiles } from "../storage/project-files.js";
+import { PUBLISHED_DIAGNOSTICS } from "./published-diagnostics.js";
 
 export const DIAGNOSTIC_NOTICE = "2026-10-29-v1";
 export const RUNTIME_DIRECTORY = "project-dev-agent";
 const CONFIG_FILE = `${RUNTIME_DIRECTORY}/runtime.json`;
 
-/** 接收端必须由用户明确配置；仅回环地址允许 HTTP，便于本地部署与测试。 */
+/** 接收端来自发布者公开默认策略或用户配置；仅回环允许 HTTP，便于本地测试。 */
 export const CollectorEndpoint = z.string().url().max(2048).refine((value) => {
   const url = new URL(value);
   return !url.username && !url.password && !url.search && !url.hash
@@ -25,7 +26,7 @@ const Diagnostics = z.object({
   endpoint: CollectorEndpoint.nullable().default(null),
   enabled_at: z.string().datetime().nullable().default(null),
   upload_epoch: z.uuid().nullable().default(null),
-  // 凭证只在权限为 0600 的本地配置中保存，状态输出和遥测均不返回它。
+  // 兼容公开接收标识和私有写入凭证；保存为 0600，状态输出和遥测均不返回其值。
   write_token: z.string().regex(/^[A-Za-z0-9_-]{16,512}$/).nullable().default(null),
 }).strict();
 
@@ -38,6 +39,7 @@ export type RuntimeConfig = z.infer<typeof RuntimeConfiguration>;
 
 // Zod 4 的 default 在 partial 字段缺失时也可能生效。补丁必须移除默认值，防止关上传时清空凭证。
 const DiagnosticsPatch = z.object({
+  use_default: z.boolean().optional(),
   local: Diagnostics.shape.local.removeDefault().optional(),
   upload: Diagnostics.shape.upload.removeDefault().optional(),
   notice_version: Diagnostics.shape.notice_version.removeDefault().optional(),
@@ -78,8 +80,10 @@ export class RuntimeSettings {
       configured: !!config, revision: config?.revision ?? null, mode: config?.mode ?? "manual",
       diagnostics: { local: config?.diagnostics.local ?? true, upload: config?.diagnostics.upload ?? false,
         notice_version: config?.diagnostics.notice_version ?? null, endpoint: config?.diagnostics.endpoint ?? null,
-        credential_configured: !!config?.diagnostics.write_token },
-      notice: "可向插件维护者自动发送版本、功能结果、错误码、耗时与去标识链路；不包含代码、需求或对话正文。首次说明并启用后持续运行，可随时关闭。",
+        credential_configured: !!config?.diagnostics.write_token,
+        collector_kind: !config?.diagnostics.write_token ? "unconfigured" : config.diagnostics.write_token === PUBLISHED_DIAGNOSTICS.ingest_key
+          && config.diagnostics.endpoint === PUBLISHED_DIAGNOSTICS.endpoint ? "published_public_ingest" : "custom" },
+      notice: "新安装默认向插件维护者发送版本、功能结果、错误码、耗时与去标识链路；不含代码、需求或对话正文。可随时关闭，已保存的关闭及自定义配置不会因更新被覆盖。",
       required_notice_version: DIAGNOSTIC_NOTICE,
     };
   }
@@ -88,7 +92,12 @@ export class RuntimeSettings {
     const input = RuntimeConfigureInput.parse(value), files = await runtimeFiles(this.home);
     const proposed = async () => {
       const prior = await this.read(), base = prior ?? await this.current();
-      const diagnostics = { ...base.diagnostics, ...input.diagnostics };
+      const { use_default, ...patch } = input.diagnostics ?? {};
+      if (use_default && (patch.endpoint !== undefined || patch.write_token !== undefined))
+        throw new AppError("DIAGNOSTICS_DEFAULT_CONFLICT", "默认接收策略不能同时指定另一组地址或凭证");
+      const published = use_default ? { upload: true, notice_version: DIAGNOSTIC_NOTICE,
+        endpoint: PUBLISHED_DIAGNOSTICS.endpoint, write_token: PUBLISHED_DIAGNOSTICS.ingest_key } : {};
+      const diagnostics = { ...base.diagnostics, ...published, ...patch };
       if (!diagnostics.local) diagnostics.upload = false;
       if (!diagnostics.upload) { diagnostics.enabled_at = null; diagnostics.upload_epoch = null; }
       else if (!base.diagnostics.upload || !base.diagnostics.upload_epoch || base.diagnostics.endpoint !== diagnostics.endpoint || base.diagnostics.write_token !== diagnostics.write_token) {

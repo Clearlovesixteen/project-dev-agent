@@ -1,3 +1,4 @@
+-- 0.12 历史基线。新建与升级请使用 wrangler d1 migrations apply，包含后续来源标记。
 CREATE TABLE IF NOT EXISTS events (
   install_id TEXT NOT NULL, event_id TEXT NOT NULL, occurred_at TEXT NOT NULL,
   runtime_version TEXT NOT NULL, event_name TEXT NOT NULL, reason_code TEXT NOT NULL,

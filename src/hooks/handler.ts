@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { PluginSettings } from "../plugin-settings.js";
 import { RuntimeSettings } from "../runtime/config.js";
+import { initializePublishedDiagnostics } from "../runtime/diagnostics-bootstrap.js";
 import { DiagnosticWriter } from "../observability/writer.js";
 import { uploadDiagnostics } from "../observability/uploader.js";
 import { gitLine, readGit } from "../git/command.js";
@@ -26,6 +27,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
   control: { trace?: string; signal?: AbortSignal } = {}): Promise<Record<string, unknown>> {
   const parsed = Input.safeParse(raw);
   if (!parsed.success) return {};
+  await initializePublishedDiagnostics(home);
   const input = parsed.data, started = performance.now(), settings = new RuntimeSettings(home), writer = new DiagnosticWriter(home);
   const trace = input.turn_id ?? control.trace ?? randomUUID();
   const guard = () => { if (control.signal?.aborted) throw new Error("HOOK_DEADLINE"); };

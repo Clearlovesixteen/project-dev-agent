@@ -1,5 +1,5 @@
 {
-  "version": "0.12.2",
+  "version": "0.13.0",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -86,8 +86,8 @@
   "files": [
     {
       "path": ".codex-plugin/plugin.json",
-      "bytes": 791,
-      "sha256": "a8f3470d3dac4f67e3dafaaa9fe03bb7e4b62ca8bd7ab4925e79354ec8d43468"
+      "bytes": 941,
+      "sha256": "f0943a205168d5f9190a355d6b3370419b4a4223263dba05307fbc12f011ae27"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -162,22 +162,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "b54359bac8d23a11417d999c5e4a34a5c2bfa381cd3864a63c1b4d912fece776"
+      "sha256": "018c1dff891499e4319ce27da56366d6d373139121043c757b439be3b239d8ca"
     },
     {
       "path": "README.md",
-      "bytes": 819,
-      "sha256": "0c0037fd0e723ed1211effec0de21130f83896ed6af136f78c9d312bd056bcc7"
+      "bytes": 993,
+      "sha256": "c34f876b50d8453a6556a0ecb36f87403f38f77131c7a30fcedfeba25f21af84"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1198589,
-      "sha256": "92ee20bc38191ca4840d42dbfcb171741ee0fa1dca5905b7a9b42da4e719a487"
+      "bytes": 1199813,
+      "sha256": "56415185ec9eac029ea8b61103da71eaa98d3315c378b56ee7f2c15629492713"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1153042,
-      "sha256": "fd3be0fe679fed9c6582e07596fd4b1560e558561e717680f73f4a9f4ef92852"
+      "bytes": 1154216,
+      "sha256": "7f1425718b40112181539340456716d0d11a98f102dfdab975491e9fd255cdfb"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -216,8 +216,8 @@
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 3466,
-      "sha256": "1011c5ec8e88ee0a9b61f6862bf43daea60b60877487034d1196dbec62679a4a"
+      "bytes": 3765,
+      "sha256": "1d9e22aa34730dcbe0c76f0698f7c5ad8a21add79dbc6c4aa4d55ca085dd1a94"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -226,8 +226,8 @@
     },
     {
       "path": "skills/project-dev-setup/SKILL.md",
-      "bytes": 4825,
-      "sha256": "1edb0b53b92b8d7eb524886154b37a2997cf4748ad79540c2fc1e4017c5927aa"
+      "bytes": 6005,
+      "sha256": "6b92f11dab443b67571c433ea8a5b89692e3c5d5a4b0ee2a745dd9f68ce6a85f"
     },
     {
       "path": "skills/project-dev-update/agents/openai.yaml",

@@ -34,6 +34,7 @@ import { IdSchema } from "./domain/common.js";
 import { Interaction } from "./workflow/interaction.js";
 import { instrumentMcp } from "./observability/mcp.js";
 import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
+import { initializePublishedDiagnostics } from "./runtime/diagnostics-bootstrap.js";
 import {
   ContextInput,
   ModelRecordInput,
@@ -457,6 +458,8 @@ export async function startWorkspaceServer(path: string): Promise<void> {
 /** 原生插件模式：允许未配置时启动，由首次 project_prepare 完成初始化并保存个人设置。 */
 export async function startPluginServer(): Promise<void> {
   const settings = new PluginSettings();
+  // 默认诊断属于插件启动初始化，不改变项目工作范围，也不依赖模型记得调用设置命令。
+  await initializePublishedDiagnostics(settings.home);
   await createServer(
     (project) => settings.bind(project),
     undefined,
