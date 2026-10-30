@@ -3,8 +3,20 @@
   "verified_on": "2026-10-30",
   "scope": "诊断代理传输与异步收尾期限修复；团队默认配置保持原有行为",
   "local_checks": [
-    { "runtime": "Node 20.19.6", "suite": "full", "passed": 268, "failed": 0, "skipped": 0 },
-    { "runtime": "Node 18.19.0", "suite": "proxy, diagnostics, packaged hooks and standalone package", "passed": 15, "failed": 0, "skipped": 0 }
+    {
+      "runtime": "Node 20.19.6",
+      "suite": "full",
+      "passed": 268,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "runtime": "Node 18.19.0",
+      "suite": "proxy, diagnostics, packaged hooks and standalone package",
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    }
   ],
   "regression": {
     "original_delayed_ack_test": "failed: original packaged Stop exited before upload cursor persistence",
@@ -14,7 +26,10 @@
     "global_dispatcher_unchanged": true
   },
   "native_upgrade": {
-    "from": "0.12.1", "to": "0.12.2", "runtime": "Node 18.19.0", "result": "passed",
+    "from": "0.12.1",
+    "to": "0.12.2",
+    "runtime": "Node 18.19.0",
+    "result": "passed",
     "isolated_codex_home": true,
     "failed_refresh_preserves_old_version": true,
     "workspace_and_task_preserved": true,
@@ -38,8 +53,42 @@
     "actual_tool_event_persisted": true
   },
   "limitations": [
-    "本地受控调用证明真实打包入口可上传和落库；宿主在后续真实会话收尾中的自动调用应单独观察。",
+    "真实宿主在临时只读验收轮次自行触发 Stop 并成功入库；日常长期使用的网络波动与业务上下文质量仍需持续观察。",
     "PAC 与仅 SOCKS 的系统代理暂不解析；环境代理只接受 HTTP/HTTPS。",
     "元数据与入库条数不代表业务理解、代码质量或返工改善。"
-  ]
+  ],
+  "ci": {
+    "commit": "fb6c9e6d132c0373855142391726efb6f86c3619",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/40996837517",
+    "result": "passed",
+    "runtime_matrix": [
+      "18.19.0",
+      "18.19.1",
+      "20.19.6"
+    ],
+    "tests_per_runtime": 268,
+    "note": "修正硬截止时尽力诊断记录的测试断言后通过；运行包与发布标签保持一致。"
+  },
+  "installed_runtime_verification": {
+    "version": "0.12.2",
+    "release_hashes_match": true,
+    "controlled_stop_duration_ms": 1892,
+    "controlled_stop_d1_rows_before": 123,
+    "controlled_stop_d1_rows_after": 130,
+    "workspace_configuration_preserved": true,
+    "all_native_hooks_trusted_after_user_review": true
+  },
+  "native_host_auto_upload": {
+    "result": "passed",
+    "ephemeral": true,
+    "host_generated_stop": true,
+    "manual_stop_invoked": false,
+    "turn_status": "completed",
+    "tool_calls": 0,
+    "d1_stop_received": true,
+    "runtime_version": "0.12.2",
+    "changes_trust": false,
+    "verified_at": "2026-10-30T03:26:19.786Z",
+    "scope": "真实宿主自动收尾上报验收；不修改项目文件，不据此宣称业务上下文或生码效果已通过。"
+  }
 }
