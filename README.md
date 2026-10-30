@@ -90,6 +90,8 @@ node /实际插件目录/runtime/cli.mjs insights report --days 7 --output /已�
 
 可选收集端源码在 `tools/diagnostics-collector/`，使用 Workers + D1，无需私人服务器，**代码可由 GitHub 管理并部署，事件数据留在维护者的数据库**。当前没有预设在线接收地址，不默认配置远程上报。部署及私有查看说明见 [开发者诊断交付说明](docs/diagnostics.html)。
 
+本次 Cloudflare 部署验证使用的授权范围为 `account:read`、`user:read`、`workers:write`、**`workers_scripts:write`** 和 `d1:write`；单独的 `workers:write` 不足以管理脚本发布及 workers.dev 子域名。首次部署需初始化账户子域名，并从实际使用机器验证接收地址、持久确认和上传超时。控制面显示发布成功后，仍须通过这些检查才启用远程上报。Wrangler 仅由维护者使用，不增加同事业务项目的依赖。
+
 ## 0.11：连续开发与纠正、验收闭环
 
 使用方式保持 `$project-dev 描述需求`，同一需求的继续和纠正沿用流程；不新增用户表单、管理页面或后台进程。
