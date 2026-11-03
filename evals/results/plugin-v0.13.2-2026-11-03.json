@@ -122,5 +122,43 @@
     "队列改进不保证网络永不超时；保留持久确认、去重、退避和既有关闭设置。",
     "原生更新可能要求宿主重新审查钩子，未自动修改信任。",
     "重点兼容性检查与全量回归分别记录，不能由测试数推算生码收益。"
-  ]
+  ],
+  "ci": {
+    "commit": "f519f0b47e6dabc459d5ffd47f2c8124dcf28d01",
+    "url": "https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/41598205025",
+    "run_id": 41598205025,
+    "result": "success",
+    "runtime_matrix": [
+      "18.19.0",
+      "18.19.1",
+      "20.19.6"
+    ],
+    "workflow_status": "completed"
+  },
+  "installed_runtime_verification": {
+    "version": "0.13.2",
+    "installed_version_verified": true,
+    "runtime_hashes_match_release": true,
+    "workspace_configuration_preserved": true,
+    "runtime_configuration_preserved": true,
+    "native_update_attempts": 2,
+    "first_attempt": "download_timeout",
+    "second_attempt": "passed",
+    "trust_changed_by_agent": false,
+    "native_mcp_connection": {
+      "result": "passed",
+      "operation": "mcpServerStatus/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "server_version": "0.13.2",
+      "tool_count": 16
+    },
+    "hook_trust": {
+      "sessionStart": "modified",
+      "userPromptSubmit": "modified",
+      "stop": "modified"
+    },
+    "automatic_host_check": "awaiting_user_hook_review_after_patch",
+    "changes_trust": false
+  }
 }
