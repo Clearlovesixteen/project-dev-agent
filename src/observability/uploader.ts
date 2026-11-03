@@ -1,20 +1,21 @@
 import { createHash } from "node:crypto";
-import { opendir } from "node:fs/promises";
 import { z } from "zod";
 import { DIAGNOSTIC_NOTICE, RuntimeSettings, runtimeFiles } from "../runtime/config.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
-import { DiagnosticEvent, type TelemetryEvent } from "./contracts.js";
-import { DiagnosticWriter, EVENT_DIRECTORY } from "./writer.js";
+import { DiagnosticWriter } from "./writer.js";
 import { sendDiagnosticBatch } from "./transport.js";
+import { uploadQueue } from "./upload-queue.js";
 
 const CURSOR = "project-dev-agent/telemetry/upload.json";
 const Cursor = z.object({ epoch: z.uuid(), positions: z.record(z.string(), z.number().int().nonnegative()),
   failures: z.number().int().min(0).max(10).default(0), next_attempt: z.number().nonnegative().default(0) }).strict();
 
-/** 每次最多 50 条；确认落库后推进游标，失败退避，关闭后不会补传此前记录。 */
+/** 每批 50 条、最多四批共享发送预算；逐批确认后保存进度，不延长宿主收尾期限。 */
 export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
   let release: (() => Promise<void>) | undefined;
+  const deadline = performance.now() + (Number.isFinite(timeoutMs) ? Math.min(5000, Math.max(50, timeoutMs)) : 4000);
+  let sent = 0;
   const settings = new RuntimeSettings(home);
   try {
     const diagnostics = (await settings.current()).diagnostics;
@@ -29,65 +30,55 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     const prior = previous ? Cursor.parse(JSON.parse(previous)) : undefined;
     const sameEpoch = prior?.epoch === diagnostics.upload_epoch;
     if (sameEpoch && prior.next_attempt > Date.now()) return { state: "backoff", sent: 0 };
-    const positions = sameEpoch ? { ...prior.positions } : {} as Record<string, number>;
+    let positions = sameEpoch ? { ...prior.positions } : {} as Record<string, number>;
+    let failures = sameEpoch ? prior.failures : 0;
     const save = async (value: z.infer<typeof Cursor>) => {
       const next = JSON.stringify(value);
       if (previous !== undefined) await files.replace(CURSOR, next, previous); else await files.create(CURSOR, next);
+      previous = next;
     };
-    const names: string[] = [];
-    try {
-      for await (const entry of await opendir(await files.path(EVENT_DIRECTORY))) {
-        if (names.length >= 40) break;
-        if (/^\d{4}-\d{2}-\d{2}\.jsonl$/.test(entry.name)) names.push(entry.name);
-      }
-    } catch (error) { if (!hasCode(error, "ENOENT")) throw error; }
-    names.sort();
-    const batch: TelemetryEvent[] = [];
-    let invalid = 0;
-    outer: for (const name of names) {
-      const lines = (await files.read(`${EVENT_DIRECTORY}/${name}`, 1_056_768)).split("\n");
-      // 无换行尾部可能仍在追加，不消费、不推进游标。
-      for (let index = positions[name] ?? 0; index < lines.length - 1; index++) {
-        positions[name] = index + 1;
-        let event;
-        try { event = DiagnosticEvent.safeParse(JSON.parse(lines[index]!)); } catch { invalid++; continue; }
-        if (!event.success) { invalid++; continue; }
-        // epoch 解决首次启用同毫秒、关闭后重开、切换接收端时的历史误上传。
-        if (event.data.upload_epoch !== diagnostics.upload_epoch) continue;
-        batch.push(event.data);
-        if (batch.length === 50) break outer;
-      }
-    }
+    const queue = await uploadQueue(files, diagnostics.upload_epoch, positions);
     const unchanged = async () => {
       const current = (await settings.current()).diagnostics;
       return current.local && current.upload && current.upload_epoch === diagnostics.upload_epoch;
     };
-    if (!await unchanged()) return { state: "configuration_changed", sent: 0 };
-    if (batch.length) {
+    for (const page of queue.pages) {
+      if (!await unchanged()) return { state: "configuration_changed", sent };
+      const remaining = deadline - performance.now();
+      // 不在耗尽总预算时启动下一批，避免积压清理占用更长宿主时间。
+      if (remaining < 100) return { state: "pending", sent, invalid: queue.invalid };
+      const batch = page.events;
       const batchId = createHash("sha256").update(JSON.stringify(batch)).digest("hex");
-      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), Math.min(5000, Math.max(50, timeoutMs)));
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), remaining);
       try {
         const ack = await sendDiagnosticBatch({ endpoint: diagnostics.endpoint, token: diagnostics.write_token, signal: controller.signal,
           body: JSON.stringify({ schema_version: 1, batch_id: batchId, events: batch }),
         });
         if (ack.batch_id !== batchId || ack.acknowledged !== batch.length) throw new Error("UPLOAD_ACK_MISMATCH");
+        sent += batch.length;
       } catch (error) {
         if (await unchanged()) {
-          const failures = Math.min(10, (sameEpoch ? prior.failures : 0) + 1);
-          await save({ epoch: diagnostics.upload_epoch, positions: sameEpoch ? prior.positions : {}, failures,
+          failures = Math.min(10, failures + 1);
+          await save({ epoch: diagnostics.upload_epoch, positions, failures,
             next_attempt: Date.now() + Math.min(3_600_000, 30_000 * 2 ** (failures - 1)) });
         }
         const reason = error instanceof Error && (/^UPLOAD_HTTP_[1-5][0-9]{2}$/.test(error.message)
           || ["UPLOAD_ACK_MISMATCH", "UPLOAD_RESPONSE_LIMIT", "UPLOAD_RESPONSE_INVALID", "UPLOAD_PROXY_INVALID"].includes(error.message)) ? error.message
           : error instanceof Error && error.name === "AbortError" ? "UPLOAD_TIMEOUT" : "UPLOAD_NETWORK_OR_RESPONSE";
         await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason });
-        return { state: "unavailable", sent: 0 };
+        return { state: "unavailable", sent };
       } finally { clearTimeout(timer); }
+      if (!await unchanged()) return { state: "configuration_changed", sent };
+      positions = page.positions; failures = 0;
+      await save({ epoch: diagnostics.upload_epoch, positions, failures: 0, next_attempt: 0 });
     }
-    if (!await unchanged()) return { state: "configuration_changed", sent: batch.length };
+    if (!await unchanged()) return { state: "configuration_changed", sent };
     await save({ epoch: diagnostics.upload_epoch, failures: 0, next_attempt: 0,
-      positions: Object.fromEntries(names.filter(name => positions[name] !== undefined).map(name => [name, positions[name]!])) });
-    return { state: "ok", sent: batch.length, invalid };
-  } catch { return { state: "unavailable", sent: 0 }; }
+      positions: queue.positions });
+    return { state: queue.pending ? "pending" : "ok", sent, invalid: queue.invalid };
+  } catch {
+    await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
+    return { state: "unavailable", sent };
+  }
   finally { await release?.().catch(() => {}); }
 }

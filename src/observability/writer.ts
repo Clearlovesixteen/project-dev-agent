@@ -136,6 +136,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
       const spec = value.data?.spec_input as { kind?: TelemetryAttributes["input_kind"] } | undefined;
       await writer.record(eventName, { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace,
         ...(task ? { task } : {}),
+        reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK",
         outcome: value.outcome === "incomplete" ? "incomplete" : "ok", attributes: { tool, transport,
           ...(spec?.kind ? { input_kind: spec.kind } : {}),
           ...(Array.isArray(value.data?.files) ? { selected_count: value.data.files.length } : {}),

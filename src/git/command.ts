@@ -7,6 +7,8 @@ const execFileAsync = promisify(execFile);
 export interface GitReadResult {
   stdout: Buffer;
   exitCode: number;
+  /** 仅供调用方识别允许的失败类型；不得写入诊断或用户配置。 */
+  stderr?: Buffer;
 }
 
 function readEnvironment(): NodeJS.ProcessEnv {
@@ -28,9 +30,9 @@ export async function readGit(
     ], { cwd, env: readEnvironment(), encoding: "buffer", maxBuffer: 16 * 1024 * 1024 });
     return { stdout: result.stdout, exitCode: 0 };
   } catch (error) {
-    const failure = error as { code?: string | number; stdout?: Buffer };
+    const failure = error as { code?: string | number; stdout?: Buffer; stderr?: Buffer };
     if (typeof failure.code === "number" && allowedExitCodes.includes(failure.code)) {
-      return { stdout: failure.stdout ?? Buffer.alloc(0), exitCode: failure.code };
+      return { stdout: failure.stdout ?? Buffer.alloc(0), exitCode: failure.code, stderr: failure.stderr ?? Buffer.alloc(0) };
     }
     throw new AppError("GIT_COMMAND_FAILED", `在当前工作树执行 Git ${args[0] ?? "read"} 失败`);
   }

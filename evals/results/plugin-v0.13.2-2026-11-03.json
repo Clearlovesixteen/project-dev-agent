@@ -1,0 +1,126 @@
+{
+  "version": "0.13.2",
+  "verified_on": "2026-11-03",
+  "scope": "自动辅助边界、首次接入入口、有界多批上报和诊断报告的可靠性修复",
+  "regression": {
+    "command": "node --test dist/tests/diagnostic-reliability.test.js",
+    "old_implementation_failures_confirmed": 5,
+    "before_behaviors": [
+      "范围外项目误记 degraded / CONTEXT_UNAVAILABLE",
+      "auto 首次使用没有 project_prepare 入口",
+      "验收语义事件写成 incomplete / OK",
+      "一次上传只发送 50 / 121 条",
+      "报告未明示总链路与 200 条展示上限"
+    ],
+    "after": "回归通过；额外覆盖非 Git、observe、未知错误分类、并发歧义、部分 ACK、超时、关闭及续传"
+  },
+  "local_checks": [
+    {
+      "runtime": "Node 20.19.6",
+      "suite": "full check",
+      "passed": 291,
+      "failed": 0,
+      "skipped": 0,
+      "log_sha256": "97d2fc2a755f0e8077fb84131fe39c84328678c165e6f991cb7acc5473cfb65b"
+    },
+    {
+      "runtime": "Node 18.19.0",
+      "suite": "diagnostic fixes, transport, public defaults, real packaged hooks and MCP launch",
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0,
+      "log_sha256": "bacbe1cf006e5df7a5f924d8af74427dfe5148224a49a9027d62377b0d46a5ba"
+    },
+    {
+      "runtime": "Node 18.19.1",
+      "suite": "diagnostic fixes, transport, public defaults, real packaged hooks and MCP launch",
+      "passed": 38,
+      "failed": 0,
+      "skipped": 0,
+      "log_sha256": "e80a76ba6f0f80e59e3afe58ef3935c01f5d67384e9fee3554279a8210a5cbe9"
+    }
+  ],
+  "typecheck": "passed",
+  "release_hashes_match": true,
+  "native_upgrade": {
+    "result": "passed",
+    "scenario": "Published 0.13.1 to 0.13.2 using an isolated native Git marketplace",
+    "installed_runtime_versions": [
+      "0.13.1",
+      "0.13.2"
+    ],
+    "failed_refresh_preserved_installed_version": true,
+    "persistent_configuration_preserved": true,
+    "workspace_and_task_preserved": true,
+    "native_hook_discovery": {
+      "result": "passed",
+      "operation": "hooks/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "hooks": [
+        {
+          "event": "sessionStart",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "userPromptSubmit",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "stop",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": true,
+          "timeout_seconds": 8
+        }
+      ],
+      "mcp_servers": [
+        "project_dev"
+      ],
+      "warnings": [],
+      "errors": []
+    },
+    "native_mcp_connection": {
+      "result": "passed",
+      "operation": "mcpServerStatus/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "server_version": "0.13.2",
+      "tool_count": 16
+    }
+  },
+  "online_controlled_probe": {
+    "result": "passed",
+    "version": "0.13.2",
+    "runtime": "18.19.0",
+    "test_marker": "RELEASE_DIAGNOSTICS_SMOKE",
+    "original_pending_events": 121,
+    "all_original_events_persisted": true,
+    "public_ingest_rows": 122,
+    "controlled_stop": true,
+    "host_generated_stop": false,
+    "stop_duration_ms": 4285,
+    "disabled_run_added_rows": 0,
+    "private_credentials_copied": false,
+    "proxy_environment_added": false,
+    "collector_deployment_changed": false,
+    "verified_at": "2026-11-03T07:32:40.133Z"
+  },
+  "diagnostics_policy_changed": false,
+  "collector_schema_changed": false,
+  "collector_deployment_changed": false,
+  "default_auto_enabled_for_new_installs": false,
+  "limitations": [
+    "线上验收使用明确标记的隔离自测及受控 Stop，不冒充真实宿主自动触发或同事使用。",
+    "历史宽泛降级码不能还原所有原因；已核对到 70 条来自非 Git 本机会话，剩余 15 条保留未确定。",
+    "队列改进不保证网络永不超时；保留持久确认、去重、退避和既有关闭设置。",
+    "原生更新可能要求宿主重新审查钩子，未自动修改信任。",
+    "重点兼容性检查与全量回归分别记录，不能由测试数推算生码收益。"
+  ]
+}

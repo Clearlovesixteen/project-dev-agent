@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -33,7 +34,12 @@ test("诊断白名单覆盖实际注册的全部 16 个工具，纠正事件经�
   const [a, b] = InMemoryTransport.createLinkedPair(); t.after(() => second.close()); t.after(() => server.close());
   await server.connect(b); await second.connect(a);
   await second.callTool({ name: "project_feedback_record", arguments: {} });
-  const events = (await new DiagnosticWriter(home).read()).events;
+  // 诊断超过非关键预算时会在后台收尾；协议返回成功不保证磁盘已立即刷新。
+  const writer = new DiagnosticWriter(home), deadline = performance.now() + 1500;
+  let events = (await writer.read()).events;
+  while (!events.some(event => event.event_name === "feedback.recorded") && performance.now() < deadline) {
+    await delay(10); events = (await writer.read()).events;
+  }
   assert.ok(events.some(event => event.event_name === "tool.finished" && event.attributes.tool === "project_feedback_record"));
   assert.ok(events.some(event => event.event_name === "feedback.recorded"));
 });

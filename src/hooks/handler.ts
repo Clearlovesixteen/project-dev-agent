@@ -1,14 +1,13 @@
-import { realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { z } from "zod";
 import { PluginSettings } from "../plugin-settings.js";
 import { RuntimeSettings } from "../runtime/config.js";
 import { initializePublishedDiagnostics } from "../runtime/diagnostics-bootstrap.js";
 import { DiagnosticWriter } from "../observability/writer.js";
 import { uploadDiagnostics } from "../observability/uploader.js";
-import { gitLine, readGit } from "../git/command.js";
-import { ProjectFiles } from "../storage/project-files.js";
+import { ProjectFiles, hasCode } from "../storage/project-files.js";
+import { hookProject, hookFailure, type HookStage } from "./project.js";
 import { TaskStore } from "../storage/task-store.js";
 import { provideContext } from "../context/provider.js";
 import { boundedSummary } from "../context/summary.js";
@@ -36,6 +35,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
   const event = { session: input.session_id, trace, attributes: { event: input.hook_event_name, transport: "hook" as const,
     ...(input.source ? { source: input.source } : {}) } };
   await writer.record("hook.received", event);
+  let stage: HookStage = "runtime", project: string | undefined;
   try {
     guard();
     const config = await settings.current();
@@ -48,16 +48,25 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     if (config.mode === "manual") {
       await writer.record("hook.finished", { ...event, outcome: "skipped", reason: "MANUAL_MODE", duration: performance.now() - started }); return {};
     }
-    if (!isAbsolute(input.cwd)) throw new Error("INVALID_CWD");
     // 从当前真实工作树解析，再使用旧绑定器核对工作范围；不从插件缓存目录或父目录猜项目。
-    const cwd = await realpath(input.cwd), project = await realpath(gitLine((await readGit(cwd, ["rev-parse", "--show-toplevel"])).stdout));
-    const binding = await new PluginSettings(settings.home).bind(project);
+    stage = "scope";
+    project = await hookProject(input.cwd);
+    const workflow = resolve(pluginRoot, "skills/project-dev/SKILL.md");
+    const router = `Project Dev Agent 项目辅助（mode=${config.mode}）。当前项目：${project}。\n仅在本轮确属已授权的项目开发时读取 ${workflow}，按其中工作流核对已有实现、业务关系和验证；PRD、SDD 或二者都可，复用已有规格，不重复规划。已有专业 skill 继续主导任务，本插件只补项目依据和质量记录；闲聊不创建任务。范围及授权仍以用户要求和原工具校验为准。\n本轮插件调用可附 interaction=${JSON.stringify(interaction)}；新建任务额外使用本轮固定 operation_id（UUID）支持重试，不能接管其他会话任务。`;
+    try { await new PluginSettings(settings.home).bind(project); }
+    catch (error) {
+      if (!hasCode(error, "PLUGIN_NOT_CONFIGURED")) throw error;
+      const canPrepare = config.mode === "auto" && (input.hook_event_name === "SessionStart" || development.test(input.prompt ?? ""));
+      await writer.record("hook.finished", { ...event, project, outcome: canPrepare ? "ok" : "skipped", reason: "PROJECT_SETUP_REQUIRED", duration: performance.now() - started });
+      // 仅给入口，不由钩子写项目配置或扫描；已有专业流程仍主导用户授权的开发。
+      return canPrepare ? { hookSpecificOutput: { hookEventName: input.hook_event_name,
+        additionalContext: `${router}\n本机尚未设置项目范围。仅在用户已授权开发当前项目时，以当前 Git 根目录调用 project_prepare 并传 apply: true；由该工具核验并完成首次初始化。` } } : {};
+    }
     guard();
     await writer.record("scope.resolved", { ...event, project });
     const receipts = new ContextReceipts(settings.home);
-    const workflow = resolve(pluginRoot, "skills/project-dev/SKILL.md");
-    const router = `Project Dev Agent 项目辅助（mode=${config.mode}）。当前项目：${project}。\n仅在本轮确属已授权的项目开发时读取 ${workflow}，按其中工作流核对已有实现、业务关系和验证；PRD、SDD 或二者都可，复用已有规格，不重复规划。已有专业 skill 继续主导任务，本插件只补项目依据和质量记录；闲聊不创建任务。范围及授权仍以用户要求和原工具校验为准。\n本轮插件调用可附 interaction=${JSON.stringify(interaction)}；新建任务额外使用本轮固定 operation_id（UUID）支持重试，不能接管其他会话任务。`;
     if (input.hook_event_name === "SessionStart") {
+      stage = "receipt";
       await receipts.reset(project, interaction);
       await writer.record("hook.finished", { ...event, project, duration: performance.now() - started,
         ...(config.mode === "observe" ? { outcome: "skipped", reason: "OBSERVE_ONLY" } : {}) });
@@ -65,6 +74,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     }
     const prompt = input.prompt?.trim() ?? "";
     let query = prompt.slice(0, 2_000), ownedTask: { id: string; revision: number; scope_paths: string[]; requirement: string } | undefined;
+    stage = "task";
     const active = await new TaskStore(project).active(), owner = interactionOwner(interaction);
     if (active?.owner?.session_id === owner.session_id && active.owner.actor_id === owner.actor_id)
       ownedTask = { id: active.id, revision: active.revision, scope_paths: active.scope_paths ?? [], requirement: active.requirement };
@@ -79,8 +89,10 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     if (config.mode === "observe") {
       await writer.record("hook.finished", { ...event, project, outcome: "skipped", reason: "OBSERVE_ONLY", duration: performance.now() - started }); return {};
     }
+    stage = "context";
     const data = await provideContext(new ProjectFiles(project), { query, paths: ownedTask?.scope_paths ?? [], limit: 4 });
     guard();
+    stage = "receipt";
     const issued = await receipts.issue(project, interaction, data.context_id);
     const deduplicated = issued.duplicate && data.state === "indexed";
     await writer.record("context.lookup", { ...event, project, ...(ownedTask ? { task: ownedTask.id } : {}),
@@ -94,9 +106,9 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     guard();
     await writer.record("hook.finished", { ...event, project, duration: performance.now() - started });
     return { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } };
-  } catch {
+  } catch (error) {
     if (control.signal?.aborted) return {};
-    // 路径、源文档、错误文本都不写入诊断；异常仅降级当前辅助入口。
-    await writer.record("hook.finished", { ...event, outcome: "degraded", reason: "CONTEXT_UNAVAILABLE", duration: performance.now() - started }); return {};
+    // 非项目与范围外正常跳过；真正异常保留固定原因及项目摘要，不改变宿主开发结果。
+    await writer.record("hook.finished", { ...event, ...(project ? { project } : {}), ...hookFailure(error, stage), duration: performance.now() - started }); return {};
   }
 }

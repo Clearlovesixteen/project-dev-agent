@@ -38,7 +38,7 @@ test("钩子默认手动；observe 不注入，闲聊不建任务，异常范围
   const before = await plugin.status();
   assert.deepEqual(await call({ cwd: "/path/does-not-exist" }), {});
   assert.deepEqual(await plugin.status(), before);
-  assert.ok((await new DiagnosticWriter(home).read()).events.some(event => event.reason_code === "CONTEXT_UNAVAILABLE"));
+  assert.ok((await new DiagnosticWriter(home).read()).events.some(event => event.reason_code === "HOOK_CWD_UNAVAILABLE"));
 });
 
 test("自动上下文同源检索、有限输出、按会话去重，生命周期刷新，回执严格绑定项目与身份", async t => {
