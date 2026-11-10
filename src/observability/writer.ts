@@ -117,13 +117,14 @@ export class DiagnosticWriter {
 
 /** 包装仅统计本插件动作；结构化 error 和 incomplete 不能被一次正常 Promise 完成掩盖。 */
 export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable<TelemetryAttributes["tool"]>, project: string | undefined,
-  action: () => Promise<T>, transport: "mcp" | "cli" = "mcp"): Promise<T> {
+  action: () => Promise<T>, transport: "mcp" | "cli" = "mcp",
+  metadata: { task_id?: string; input_kind?: TelemetryAttributes["input_kind"] } = {}): Promise<T> {
   const started = performance.now(), interaction = currentInteraction(), trace = interaction?.turn_id ?? interaction?.operation_id ?? randomUUID();
   try {
     const result = await action(), envelope = (result && typeof result === "object" ? result : {}) as { structuredContent?: { outcome?: string; code?: string; data?: Record<string, unknown> }; outcome?: string; code?: string; data?: Record<string, unknown> };
     const value = envelope.structuredContent ?? envelope;
     const task = tool.startsWith("task_") && typeof value.data?.id === "string" ? value.data.id
-      : typeof value.data?.task_id === "string" ? value.data.task_id : undefined;
+      : typeof value.data?.task_id === "string" ? value.data.task_id : metadata.task_id;
     await bestEffort(async () => {
     await writer.record("tool.finished", { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, duration: performance.now() - started,
       ...(task ? { task } : {}),
@@ -138,7 +139,8 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
         ...(task ? { task } : {}),
         reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK",
         outcome: value.outcome === "incomplete" ? "incomplete" : "ok", attributes: { tool, transport,
-          ...(spec?.kind ? { input_kind: spec.kind } : {}),
+          ...(spec?.kind || metadata.input_kind ? { input_kind: spec?.kind ?? metadata.input_kind } : tool === "task_open" ? { input_kind: "request" as const } : {}),
+          ...(["active", "suspended", "closed", "aborted"].includes(String(value.data?.phase)) ? { phase: value.data!.phase as NonNullable<TelemetryAttributes["phase"]> } : {}),
           ...(Array.isArray(value.data?.files) ? { selected_count: value.data.files.length } : {}),
           ...(typeof value.data?.context_id === "string" ? { context_id: value.data.context_id } : {}), coverage: "partial" } });
     }
@@ -146,7 +148,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
     return result;
   } catch (error) {
     const reason = error && typeof error === "object" && "code" in error && typeof error.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code) ? error.code : "TOOL_FAILED";
-    await bestEffort(() => writer.record("tool.finished", { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, duration: performance.now() - started, outcome: "error", reason, attributes: { tool, transport } }));
+    await bestEffort(() => writer.record("tool.finished", { ...(project ? { project } : {}), ...(metadata.task_id ? { task: metadata.task_id } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, duration: performance.now() - started, outcome: "error", reason, attributes: { tool, transport } }));
     throw error;
   }
 }

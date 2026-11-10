@@ -28,7 +28,7 @@ test("自动钩子在工作范围外正常跳过，不把其他项目计作上�
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
   const prior = await readFile(join(home, "project-dev-agent/settings.json"), "utf8");
   const output = await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "outside-session", cwd: other.path, prompt: "修复这个项目" }, fixture.path, home);
-  assert.deepEqual(output, {});
+  assert.match(String(output.systemMessage), /未参与本轮/);
   assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), prior);
   const event = (await new DiagnosticWriter(home).read()).events.find(event => event.event_name === "hook.finished");
   assert.equal(event?.outcome, "skipped");

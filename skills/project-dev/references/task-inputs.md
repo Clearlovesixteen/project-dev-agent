@@ -4,7 +4,11 @@
 
 工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次插件使用会初始化当前仓库并准备本地忽略规则。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动；0.11 起 task_open 捕获接入内容基线，无需先提交。未解决合并冲突仍阻止接入。
 
-新对话或进程重启后，用仅包含 `project` 的 `task_check` 恢复唯一活跃任务；没有任务时返回 `NO_ACTIVE_TASK`。更新使用恢复记录中的最新修订号。指定任务 ID 也可读取已关闭或中止的历史记录。同一任务的所有调用必须使用同一个项目。
+新一轮继续先 `task_check` 核对当前分支任务和归属；没有任务返回 `NO_ACTIVE_TASK`。跨聊天不能自动接管。指定 ID 可查看历史或其他分支任务，但不代表原基线适用。更新使用最新修订号。`project_prepare.task_recovery` 列出保留的其他分支任务及挂起记录，截断时会标明。
+
+同一分支独立需求可由所属会话显式挂起旧任务：`task_update` 只传 `task_id`、`expected_revision`、`phase:"suspended"`、`suspend_reason`。恢复只传最新修订号与 `phase:"active"`，须在原分支且没有其他活跃任务；中止仍用 `aborted` 和原因。生命周期操作不能同时改业务内容，历史只追加，原基线不重写。
+
+需求来源为追加/按 ID 修订，不需回传全部历史。`task-request` 由服务保存；完整回传相同只读引用可接受，改变原文或类型仍拒绝。引用已保存需求/纠正时可省略 quote，服务补齐原文；提供 quote 时必须精确匹配，不能用摘要冒充原话。图片可放 `.project-dev/local/requirements/` 或兼容的 `reviews/`，保留格式、边界及版本校验。
 
 创建任务示例：
 

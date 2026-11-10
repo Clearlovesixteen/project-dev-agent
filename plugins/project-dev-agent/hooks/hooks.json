@@ -2,6 +2,8 @@
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/runtime/hooks.mjs\"", "timeout": 3, "additionalContextLimit": 2500 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/runtime/hooks.mjs\"", "timeout": 3, "additionalContextLimit": 2500 }] }],
+    "PreToolUse": [{ "matcher": "^(Bash|apply_patch|Edit|Write|mcp__project_dev__.*)$", "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/runtime/hooks.mjs\"", "timeout": 3 }] }],
+    "PostToolUse": [{ "matcher": "^(Bash|apply_patch|Edit|Write)$", "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/runtime/hooks.mjs\"", "timeout": 3 }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/runtime/hooks.mjs\"", "async": true, "timeout": 8 }] }]
   }
 }

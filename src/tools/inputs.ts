@@ -124,8 +124,9 @@ export const TaskUpdateInputSchema = z
       )
       .max(100)
       .optional(),
-    phase: z.enum(["active", "closed", "aborted"]).optional(),
+    phase: z.enum(["active", "suspended", "closed", "aborted"]).optional(),
     abort_reason: TextSchema.optional(),
+    suspend_reason: TextSchema.optional(),
   })
   .strict();
 

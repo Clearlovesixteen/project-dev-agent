@@ -41,6 +41,19 @@ test("接收端授权、白名单、批次摘要与持久确认，重复提交�
   fail(); assert.equal((await send()).status, 503);
 });
 
+test("接收端同时接受旧事件和新增修改检查及挂起阶段，仍拒绝未列入白名单的正文", async t => {
+  const { writer, send, stored } = await setup(t);
+  assert.equal(await writer.record("participation.checked", { reason: "WRITE_READY", attributes: { event: "PreToolUse", transport: "hook", coverage: "partial" } }), true);
+  assert.equal(await writer.record("task.transitioned", { reason: "TASK_SUSPENDED", attributes: { phase: "suspended", input_kind: "request", tool: "task_update" } }), true);
+  const events = (await writer.read()).events;
+  const batch = { schema_version: 1, batch_id: createHash("sha256").update(JSON.stringify(events)).digest("hex"), events };
+  const response = await send(batch);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { acknowledged: number }).acknowledged, 4);
+  assert.equal(stored.size, 4);
+  assert.equal((await send({ ...batch, events: [...events, { ...events[0], attributes: { prompt: "不可采集的正文" } }] })).status, 400);
+});
+
 test("开发者诊断用实际元数据聚类和关联，不将回执或空样本误算成开发效果", async t => {
   const { home, events } = await setup(t);
   const report = await developerInsights({ home });

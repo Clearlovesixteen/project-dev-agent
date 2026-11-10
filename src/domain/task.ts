@@ -152,7 +152,7 @@ export const TaskSchema = z
     baseline_head: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
     baseline_branch: TextSchema.nullable(),
     workspace_baseline: WorkspaceBaselineSchema.optional(),
-    phase: z.enum(["active", "closed", "aborted"]),
+    phase: z.enum(["active", "suspended", "closed", "aborted"]),
     requirement: TextSchema,
     spec_input: SpecificationInput.optional(),
     owner: z.object({ session_id: z.string().min(1).max(200), actor_id: z.string().min(1).max(200) }).strict().optional(),
@@ -184,6 +184,9 @@ export const TaskSchema = z
     validations: z.array(ValidationRecordSchema).max(100).default([]),
     corrections: z.array(CorrectionSchema).max(100).default([]),
     abort_reason: TextSchema.optional(),
+    suspend_reason: TextSchema.optional(),
+    lifecycle: z.array(z.object({ phase: z.enum(["active", "suspended", "aborted"]), reason: TextSchema,
+      recorded_at: z.string().datetime({ offset: true }) }).strict()).max(50).optional(),
     created_at: z.string().datetime({ offset: true }),
     updated_at: z.string().datetime({ offset: true }),
   })
@@ -237,6 +240,10 @@ export const TaskSchema = z
         });
       }
     }
+    if (task.phase === "suspended" && !task.suspend_reason)
+      ctx.addIssue({ code: "custom", path: ["suspend_reason"], message: "挂起任务须保存原因，恢复时保留旧基线" });
+    if (task.phase !== "suspended" && task.suspend_reason !== undefined)
+      ctx.addIssue({ code: "custom", path: ["suspend_reason"], message: "仅挂起任务保留当前挂起原因" });
     if (task.phase === "aborted" && !task.abort_reason) {
       ctx.addIssue({
         code: "custom",

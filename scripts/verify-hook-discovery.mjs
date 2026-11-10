@@ -33,13 +33,15 @@ export async function verifyHookDiscovery(codex, home, cwd, pluginId) {
     const detail = await request("plugin/read", { marketplacePath: plugins.marketplaces.find(marketplace => marketplace.name === "project-dev-team").path, pluginName: "project-dev-agent" });
     const response = await request("hooks/list", { cwds: [cwd] });
     const hooks = response.data.flatMap(entry => entry.hooks).filter(hook => hook.pluginId === pluginId);
-    assert.deepEqual(hooks.map(hook => hook.eventName).sort(), ["sessionStart", "stop", "userPromptSubmit"], JSON.stringify({ response, declared_hooks: detail.plugin.hooks, stderr }));
+    assert.deepEqual(hooks.map(hook => hook.eventName).sort(), ["postToolUse", "preToolUse", "sessionStart", "stop", "userPromptSubmit"], JSON.stringify({ response, declared_hooks: detail.plugin.hooks, stderr }));
     assert.ok(hooks.every(hook => hook.handlerType === "command" && hook.source === "plugin"
       && hook.timeoutSec === (hook.eventName === "stop" ? 8 : 3)));
     assert.equal(hooks.find(hook => hook.eventName === "stop").async, true);
     assert.ok(detail.plugin.mcpServers.includes("project_dev"), JSON.stringify(detail.plugin.mcpServers));
     return { result: "passed", operation: "hooks/list", creates_model_session: false, changes_trust: false,
       hooks: hooks.map(hook => ({ event: hook.eventName, enabled: hook.enabled, trust: hook.trustStatus, async: hook.async, timeout_seconds: hook.timeoutSec })),
+      native_write_guard_discovered: hooks.some(hook => hook.eventName === "preToolUse"),
+      execution_verified: false,
       mcp_servers: detail.plugin.mcpServers,
       warnings: response.data.flatMap(entry => entry.warnings), errors: response.data.flatMap(entry => entry.errors) };
   } finally {

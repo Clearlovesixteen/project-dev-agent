@@ -26,6 +26,6 @@ test("MCP 注入配置目录后，运行设置和诊断都跟随该目录，不�
     runtime: { expected_revision: null, mode: "observe" } });
   assert.equal(result.outcome, "ok");
   assert.equal((await new RuntimeSettings(first).current()).mode, "observe");
-  assert.equal((await new RuntimeSettings(second).current()).mode, "manual");
+  assert.equal((await new RuntimeSettings(second).current()).mode, "auto");
   await assert.rejects(readFile(join(second, "project-dev-agent/runtime.json")), { code: "ENOENT" });
 });

@@ -27,7 +27,9 @@ description: 查看 Project Dev Agent 的版本与项目配置，按用户要求
 
 ## 自动辅助与诊断设置
 
-现有安装默认 `manual`，升级不自动改写旧设置。用户要求以后免命令辅助时，先说明原生钩子需要宿主信任；初次及更新后定义发生变化时，宿主可能要求重新审查，插件不能代写信任记录。随后使用 `plugin_status.data.runtime` 读取修订号，在原 workspace 上用 `plugin_configure.runtime` 保存 `mode: auto`。`observe` 只观察钩子，不注入；`manual` 关闭自动注入。根 apply 控制预览/应用，runtime.expected_revision 使用实际读取的独立运行修订号，仅尚无运行配置时为 null。迁移工作范围与启用自动辅助分两次执行，不能假装跨配置事务。
+新安装默认 `auto`；已有设置原样保留，不能覆盖主动关闭。旧 manual 没有设置来源，状态为 `migration_required`，会话开始提示一次选择 auto 或明确保留 manual；不推断用户选择。用户要求免命令辅助时，说明宿主须信任包含 PreToolUse/PostToolUse 的五类钩子，插件不能代写信任。用 `plugin_status.data.runtime` 读取修订号，在原 workspace 上用 `plugin_configure.runtime` 保存 `mode:auto`；用户明确保留 manual 也保存 mode，记录用户选择来源。`observe` 不注入或阻断；`manual` 关闭自动参与。根 apply 控制预览/应用，runtime.expected_revision 用实际运行修订号，仅尚无配置时为 null。工作范围与运行策略分别保存，不假装跨文件事务。
+
+`runtime.activation` 只说明策略，不代表钩子已信任。当前项目调用 `project_prepare` 查看 `participation.current_turn_observed`、`guard_observed` 和任务恢复信息；缺少宿主身份或实际记录时报告未观测，不把安装成功当生效。关闭诊断不关闭必要的本地参与状态；关闭自动检查使用 manual。
 
 安装说明已告知发布者的公开默认诊断策略：新安装在插件 MCP 或已信任钩子首次运行时自动配置，默认向维护者发送版本、功能结果、错误码、耗时和去标识链路，不包含代码、需求或对话正文。无需让用户逐个填写接收地址或凭证，也不在日常重复弹窗或询问。已有运行配置、关闭状态及自定义接收端保持原样。用户询问时清楚说明接收方、范围和关闭方式；不把默认上报说成用户已经逐一确认。
 

@@ -15,6 +15,7 @@ import { AppError } from "../domain/error.js";
 import { IdSchema } from "../domain/common.js";
 import { TaskSchema, type Task } from "../domain/task.js";
 import { assertTaskOwner } from "../workflow/interaction.js";
+import { bindWorktree } from "../git/index.js";
 
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_TASK_ENTRIES = 1_000;
@@ -120,10 +121,10 @@ export class TaskStore {
             throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
           return structuredClone(existing);
         }
-        if (existing.phase === "active") {
+        if (existing.phase === "active" && existing.baseline_branch === candidate.baseline_branch) {
           throw new AppError(
             "ACTIVE_TASK_EXISTS",
-            `任务 ${existing.id} 仍是当前项目的活跃任务`,
+            `任务 ${existing.id} 仍是当前分支的活跃任务；相关需求先 task_check 恢复，不相关需求由所属会话显式挂起，或使用独立工作树。保留旧记录，不自动中止。`,
           );
         }
       }
@@ -169,7 +170,7 @@ export class TaskStore {
     return { tasks, truncated: false };
   }
 
-  async active(): Promise<Task | undefined> {
+  async active(currentBranch?: string | null): Promise<Task | undefined> {
     let paths: StatePaths;
     try {
       paths = await this.prepare(false);
@@ -178,6 +179,7 @@ export class TaskStore {
         return undefined;
       throw error;
     }
+    const branch = currentBranch === undefined ? (await bindWorktree(paths.root)).branch : currentBranch;
     const directory = await opendir(paths.tasks);
     let count = 0;
     let active: Task | undefined;
@@ -190,7 +192,7 @@ export class TaskStore {
       if (task.id !== id)
         throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
       this.assertBinding(task, paths.root);
-      if (task.phase !== "active") continue;
+      if (task.phase !== "active" || task.baseline_branch !== branch) continue;
       if (active)
         throw new AppError(
           "MULTIPLE_ACTIVE_TASKS",
@@ -216,7 +218,7 @@ export class TaskStore {
         throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
       this.assertBinding(current, paths.root);
       assertTaskOwner(current);
-      if (current.phase !== "active")
+      if (current.phase !== "active" && current.phase !== "suspended")
         throw new AppError(
           "TASK_READ_ONLY",
           `任务 ${safeId} 的状态为 ${current.phase}，不能继续修改`,
@@ -228,6 +230,19 @@ export class TaskStore {
         );
       }
       const candidate = parseTask(await mutator(structuredClone(current)));
+      const oldLifecycle = current.lifecycle ?? [], nextLifecycle = candidate.lifecycle ?? [];
+      if (nextLifecycle.length < oldLifecycle.length || oldLifecycle.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextLifecycle[index])))
+        throw new AppError("IMMUTABLE_TASK_FIELD", "挂起与恢复历史只能追加，不能覆盖或移除");
+      if (current.phase === "suspended") {
+        if (candidate.phase !== "active" && candidate.phase !== "aborted")
+          throw new AppError("TASK_RESUME_REQUIRED", "挂起任务须显式恢复为 active 或中止，不能直接关闭或修改内容");
+        if (candidate.phase === "active") {
+          const others = await this.list(MAX_TASK_ENTRIES);
+          if (others.truncated) throw new AppError("STATE_LIMIT", "无法完整检查恢复冲突，请核对任务数量");
+          if (others.tasks.some(task => task.id !== current.id && task.phase === "active" && task.baseline_branch === candidate.baseline_branch))
+            throw new AppError("ACTIVE_TASK_EXISTS", "当前分支已有另一活跃任务，先处理该任务再恢复，不能覆盖");
+        }
+      }
       for (const field of IMMUTABLE_FIELDS) {
         if (
           JSON.stringify(candidate[field]) !== JSON.stringify(current[field])

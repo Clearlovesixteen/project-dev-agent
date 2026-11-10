@@ -33,6 +33,8 @@ import { BusinessDeltaApplyInputSchema } from "./quality/business-delta-contract
 import { IdSchema } from "./domain/common.js";
 import { Interaction } from "./workflow/interaction.js";
 import { instrumentMcp } from "./observability/mcp.js";
+import { currentInteraction } from "./workflow/interaction.js";
+import { ParticipationStore } from "./workflow/participation.js";
 import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
 import { initializePublishedDiagnostics } from "./runtime/diagnostics-bootstrap.js";
 import {
@@ -154,8 +156,9 @@ export function createServer(
       },
       async () => configure(async () => {
         const result = await plugin.status();
-        try { return { ...result, data: { ...result.data as object, runtime: await runtimeSettings.status() } }; }
-        catch { return { ...result, data: { ...result.data as object, runtime: { state: "unavailable", fallback_mode: "manual" } },
+        const capabilities = { automatic_participation: true, native_write_checks: { requires_trusted_hooks: true, coverage: "supported_tool_paths", events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] } };
+        try { return { ...result, data: { ...result.data as object, capabilities, runtime: await runtimeSettings.status() } }; }
+        catch { return { ...result, data: { ...result.data as object, capabilities, runtime: { state: "unavailable", fallback_mode: "manual" } },
           diagnostics: [{ code: "RUNTIME_CONFIG_UNAVAILABLE", message: "运行设置不可用，已保留原文件；手动项目工具继续可用，请单独核对运行设置。" }] }; }
       }),
     );
@@ -201,10 +204,18 @@ export function createServer(
         openWorldHint: false,
       },
     },
-    async ({ project, ...input }) =>
-      plugin
-        ? operation(() => plugin.prepare(project, input))
-        : run(project, (binding) => prepareProject(binding, input)),
+    async ({ project, ...input }) => operation(async () => {
+      const result = plugin ? await plugin.prepare(project, input) : await prepareProject(await bindingFor(project), input);
+      const interaction = currentInteraction();
+      const root = (result.data as { project?: string })?.project;
+      let readiness: object;
+      try { readiness = { runtime: await runtimeSettings.status(),
+        participation: root && interaction ? await new ParticipationStore(plugin?.home).status(root, interaction)
+          : { state: "unobserved", guard_observed: false, reason: "HOST_INTERACTION_REQUIRED" } }; }
+      catch { readiness = { readiness: "unavailable", next_step: "项目准备结果已保留；运行设置或参与状态不可读取，请核对插件状态，不能据此宣称自动参与已生效。" }; }
+      return { ...result, data: { ...result.data as object,
+        ...readiness } };
+    }),
   );
   // 任务工具只管理需求、基线、清单和证据；代码修改与验证执行由 Codex 完成。
   server.registerTool(

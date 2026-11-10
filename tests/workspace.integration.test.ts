@@ -54,7 +54,8 @@ test("personal preparation preserves shared files and unrelated Git excludes, is
   const recovered = await restarted.check({});
   assert.equal(TaskSchema.parse((recovered.data as { recorded_task: unknown }).recorded_task).id, task.id);
   git(fixture.path, ["switch", "-c", "changed-branch"]);
-  const changed = await restarted.check({});
+  assert.equal((await restarted.check({})).code, "NO_ACTIVE_TASK");
+  const changed = await restarted.check({ task_id: task.id });
   assert.equal(changed.code, "BASELINE_BRANCH_CHANGED");
   assert.equal(TaskSchema.parse((changed.data as { recorded_task: unknown }).recorded_task).id, task.id);
   assert.equal((await restarted.update({ task_id: task.id, expected_revision: 0, phase: "aborted", abort_reason: "Connection verification ended" })).outcome, "ok");
