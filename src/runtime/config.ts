@@ -9,6 +9,7 @@ import { hasCode, ProjectFiles } from "../storage/project-files.js";
 import { PUBLISHED_DIAGNOSTICS } from "./published-diagnostics.js";
 
 export const DIAGNOSTIC_NOTICE = "2026-10-29-v1";
+export const ACTIVATION_POLICY_VERSION = 1;
 export const RUNTIME_DIRECTORY = "project-dev-agent";
 const CONFIG_FILE = `${RUNTIME_DIRECTORY}/runtime.json`;
 
@@ -32,13 +33,27 @@ const Diagnostics = z.object({
 
 export const RuntimeConfiguration = z.object({
   schema_version: z.literal(1), revision: z.uuid(),
-  // 文件解析保留旧版缺字段语义；新安装由 current() 明确设置 auto。
+  // 缺字段仍按旧版 manual 读取，启动迁移负责一次性切换，不能每次读取都覆盖用户选择。
   mode: z.enum(["manual", "observe", "auto"]).default("manual"),
-  // 旧配置没有来源，不能推断 manual 是默认值还是用户主动关闭。
-  mode_origin: z.enum(["default", "user", "legacy_unknown"]).default("legacy_unknown"),
+  mode_origin: z.enum(["default", "user", "upgrade", "legacy_unknown"]).default("legacy_unknown"),
+  // 缺失表示 0.13.4 前的配置；迁移和新版设置均写入版本，后续主动关闭不再被覆盖。
+  activation_policy_version: z.number().int().min(0).max(ACTIVATION_POLICY_VERSION).default(0),
   diagnostics: Diagnostics,
 }).strict();
 export type RuntimeConfig = z.infer<typeof RuntimeConfiguration>;
+
+function parseConfiguration(raw: string): RuntimeConfig {
+  try { return RuntimeConfiguration.parse(JSON.parse(raw)); }
+  catch { throw new AppError("RUNTIME_CONFIG_INVALID", "运行设置无效，已保留原文件"); }
+}
+
+/** 发布策略只迁移旧 manual；诊断关闭、自定义接收端和 observe 均不受影响。 */
+function upgradedActivation(config: RuntimeConfig) {
+  const changed = config.activation_policy_version < ACTIVATION_POLICY_VERSION && config.mode === "manual";
+  return { mode: changed ? "auto" as const : config.mode,
+    mode_origin: changed ? "upgrade" as const : config.mode_origin,
+    activation_policy_version: ACTIVATION_POLICY_VERSION };
+}
 
 // Zod 4 的 default 在 partial 字段缺失时也可能生效。补丁必须移除默认值，防止关上传时清空凭证。
 const DiagnosticsPatch = z.object({
@@ -69,24 +84,41 @@ export class RuntimeSettings {
 
   async read(): Promise<RuntimeConfig | null> {
     const files = await runtimeFiles(this.home);
-    try { return RuntimeConfiguration.parse(JSON.parse(await files.read(CONFIG_FILE))); }
+    try { return parseConfiguration(await files.read(CONFIG_FILE)); }
     catch (error) { if (hasCode(error, "ENOENT")) return null; throw new AppError("RUNTIME_CONFIG_INVALID", "运行设置无效，已保留原文件"); }
   }
 
   async current(): Promise<RuntimeConfig> {
-    return await this.read() ?? RuntimeConfiguration.parse({ schema_version: 1, revision: randomUUID(), mode: "auto", mode_origin: "default", diagnostics: {} });
+    return await this.read() ?? RuntimeConfiguration.parse({ schema_version: 1, revision: randomUUID(), mode: "auto", mode_origin: "default",
+      activation_policy_version: ACTIVATION_POLICY_VERSION, diagnostics: {} });
+  }
+
+  /** 和设置保存共用进程锁；锁内重读并原子替换，避免并发启动反复迁移或丢失刚保存的设置。 */
+  async upgradeActivation() {
+    const current = await this.read();
+    if (!current || current.activation_policy_version >= ACTIVATION_POLICY_VERSION) return { state: "preserved" as const };
+    const files = await runtimeFiles(this.home);
+    await files.directory(RUNTIME_DIRECTORY);
+    const release = await acquireFileLock(files, `${RUNTIME_DIRECTORY}/runtime.lock`, "RUNTIME_BUSY");
+    try {
+      const raw = await files.read(CONFIG_FILE), prior = parseConfiguration(raw);
+      if (prior.activation_policy_version >= ACTIVATION_POLICY_VERSION) return { state: "preserved" as const };
+      const next = RuntimeConfiguration.parse({ ...prior, ...upgradedActivation(prior), revision: randomUUID() });
+      await files.replace(CONFIG_FILE, JSON.stringify(next) + "\n", raw);
+      return { state: "migrated" as const, previous_mode: prior.mode, mode: next.mode };
+    } finally { await release(); }
   }
 
   async status() {
     const config = await this.read();
     return {
       configured: !!config, revision: config?.revision ?? null, mode: config?.mode ?? "auto",
-      activation: { mode_origin: config?.mode_origin ?? "default",
-        state: config?.mode === "manual" ? config.mode_origin === "legacy_unknown" ? "migration_required" : "disabled"
+      activation: { mode_origin: config?.mode_origin ?? "default", policy_version: config?.activation_policy_version ?? ACTIVATION_POLICY_VERSION,
+        state: config?.mode === "manual" ? config.activation_policy_version < ACTIVATION_POLICY_VERSION ? "upgrade_pending" : "disabled"
           : config?.mode === "observe" ? "observe_only" : "enabled",
         hook_execution: "requires_host_verification",
-        next_step: config?.mode === "manual" && config.mode_origin === "legacy_unknown"
-          ? "旧版 manual 没有设置来源，请由用户一次选择开启自动参与或保留手动；不能把已安装当作自动生效。"
+        next_step: config?.mode === "manual" && config.activation_policy_version < ACTIVATION_POLICY_VERSION
+          ? "新版首次运行会自动将旧 manual 升级为 auto，无需手动切换；若尚未完成，核对配置权限或锁后由下次启动重试。"
           : "宿主须信任当前钩子定义；project_prepare 返回当前项目及本轮参与状态。" },
       diagnostics: { local: config?.diagnostics.local ?? true, upload: config?.diagnostics.upload ?? false,
         notice_version: config?.diagnostics.notice_version ?? null, endpoint: config?.diagnostics.endpoint ?? null,
@@ -116,8 +148,9 @@ export class RuntimeSettings {
       if (diagnostics.upload && (diagnostics.notice_version !== DIAGNOSTIC_NOTICE || !diagnostics.endpoint || !diagnostics.write_token)) {
         throw new AppError("DIAGNOSTICS_SETUP_REQUIRED", "远程上报需要先明确说明并启用，同时配置接收地址和写入凭证");
       }
-      return { prior, next: RuntimeConfiguration.parse({ ...base, mode: input.mode ?? base.mode,
-        mode_origin: input.mode === undefined ? base.mode_origin : "user", diagnostics, revision: randomUUID() }) };
+      const activation = upgradedActivation(base);
+      return { prior, next: RuntimeConfiguration.parse({ ...base, ...activation, mode: input.mode ?? activation.mode,
+        mode_origin: input.mode === undefined ? activation.mode_origin : "user", diagnostics, revision: randomUUID() }) };
     };
     if (!input.apply) {
       const { prior, next } = await proposed();

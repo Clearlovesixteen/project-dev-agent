@@ -174,6 +174,7 @@ async function main(): Promise<void> {
   }
   if (positionals.length === 2 && positionals[0] === "runtime") {
     const settings = new RuntimeSettings();
+    await settings.upgradeActivation();
     if (positionals[1] === "status") print(await settings.status());
     else if (positionals[1] === "configure" && values.file) print(await settings.configure(JSON.parse(await readContractFile(values.file))));
     else throw new Error("runtime 支持 status，或 configure --file <设置JSON>");

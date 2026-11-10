@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>旧版手动模式自动升级方案</title>
+<style>body{max-width:920px;margin:48px auto;padding:0 24px;font:16px/1.8 system-ui;color:#203331;background:#faf9f5}h1,h2{line-height:1.3}code{background:#e8eee8;padding:2px 5px}table{border-collapse:collapse;width:100%}td,th{padding:10px;border-bottom:1px solid #ccd5cf;text-align:left}</style>
+<h1>旧版 manual 自动升级为 auto</h1>
+<p>目标：更新到 0.13.4 后，首次运行插件即完成旧配置迁移，不再要求使用者手动开启。保留已有工作范围、项目记录和诊断设置。</p>
+<h2>迁移规则</h2><table><tr><th>当前状态</th><th>首次启动后的状态</th></tr><tr><td>旧版 manual，含旧版主动设置的 manual</td><td>auto，来源记录为 upgrade</td></tr><tr><td>旧版 auto / observe</td><td>保持模式，记录已应用此次策略</td></tr><tr><td>全新安装</td><td>默认 auto，标记新策略已应用</td></tr><tr><td>迁移后主动设置 manual</td><td>后续启动保留 manual</td></tr></table>
+<h2>架构与实施步骤</h2><ol><li>先编写并运行失败回归：旧配置经真实钩子启动，必须自动输出项目开发入口。</li><li>在 <code>src/runtime/config.ts</code> 增加一次性策略版本，沿用 runtime.lock、修订号和原子替换完成迁移；无效或不可写文件保留，后续启动重试。</li><li>增加统一启动初始化入口，供 MCP 和原生钩子使用；CLI 设置入口同样应用迁移。迁移仅更改运行模式和策略元数据，不能重置诊断上传周期或项目范围。</li><li>将旧迁移选择提示改为自动迁移结果，保留原生钩子信任要求。记录无内容的维护者诊断事件，区分迁移成功和未完成。</li><li>验证并发、幂等、用户后续停用、损坏文件、锁冲突、MCP 与独立打包钩子，并更新 README 和演讲说明。</li><li>发布补丁版本，经 Node 18.19.0 / 18.19.1 / 20.19.6 检查后更新本机，核对原生宿主版本与信任状态。</li></ol>
+<p>技术手段：TypeScript、Zod、既有 ProjectFiles 原子文件操作与进程文件锁；不新增服务、安装器或业务扫描流程。</p>
+<h2>验证边界</h2><p>配置自动迁移不等于钩子已获信任；新版首次运行可由 MCP 加载触发。新建会话或重启后加载新代码。未知脚本和不支持的写入通道不宣称获得完整防护。</p>
+</html>

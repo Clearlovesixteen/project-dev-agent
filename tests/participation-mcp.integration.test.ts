@@ -81,20 +81,19 @@ test("原生身份 → 实际 MCP 上下文与任务 → 修改前检查 → 修
   assert.match((nextTurn.hookSpecificOutput as any)?.permissionDecisionReason, /本轮尚未核对任务/);
 });
 
-test("只补本插件身份，拒绝伪装会话；旧 manual 提示迁移且原配置字节不变", async t => {
+test("只补本插件身份，拒绝伪装会话；旧 manual 自动迁移后保留新版停用选择", async t => {
   const s = await setup(t);
   const other = await s.hook({ hook_event_name: "PreToolUse", tool_name: "mcp__other__task_open", tool_input: { text: "other plugin" } });
   assert.deepEqual(other, {});
   const forged = await s.hook({ hook_event_name: "PreToolUse", tool_name: "mcp__project_dev__task_open", tool_input: { project: s.fixture.path, interaction: { session_id: "another-owner" } } });
   assert.equal((forged.hookSpecificOutput as any)?.permissionDecision, "deny");
   const path = join(s.home, "project-dev-agent/runtime.json"), legacy = JSON.parse(await readFile(path, "utf8"));
-  legacy.mode = "manual"; delete legacy.mode_origin; await writeFile(path, JSON.stringify(legacy));
-  const before = await readFile(path, "utf8");
+  legacy.mode = "manual"; delete legacy.mode_origin; delete legacy.activation_policy_version; await writeFile(path, JSON.stringify(legacy));
   const migrated = await s.hook({ hook_event_name: "SessionStart", source: "startup" });
-  assert.match(String(migrated.systemMessage), /manual.*未开启/);
-  assert.equal(await readFile(path, "utf8"), before);
-  assert.equal((await s.settings.status()).activation.state, "migration_required");
-  await s.settings.configure({ apply: true, expected_revision: legacy.revision, mode: "manual" });
+  assert.match((migrated.hookSpecificOutput as any)?.additionalContext, /Project Dev Agent 自动参与入口/);
+  assert.equal((await s.settings.status()).activation.state, "enabled");
+  assert.equal((await s.settings.current()).mode, "auto");
+  await s.settings.configure({ apply: true, expected_revision: (await s.settings.current()).revision, mode: "manual" });
   assert.equal((await s.settings.status()).activation.state, "disabled");
   assert.deepEqual(await s.hook({ hook_event_name: "SessionStart", source: "startup" }), {});
 });

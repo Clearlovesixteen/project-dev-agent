@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { PluginSettings } from "../plugin-settings.js";
-import { RuntimeSettings } from "../runtime/config.js";
-import { initializePublishedDiagnostics } from "../runtime/diagnostics-bootstrap.js";
+import { ACTIVATION_POLICY_VERSION, RuntimeSettings } from "../runtime/config.js";
+import { initializePluginRuntime } from "../runtime/startup.js";
 import { DiagnosticWriter } from "../observability/writer.js";
 import { uploadDiagnostics } from "../observability/uploader.js";
 import { ProjectFiles, hasCode } from "../storage/project-files.js";
@@ -27,7 +27,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
   const input = parsed.data, write = writeKind(input, pluginRoot), ownTool = projectTool(input.tool_name);
   // 读取和无关工具不反复查询项目，更不创建任务；未知 shell 仍须走修改准备检查。
   if (input.hook_event_name === "PreToolUse" && !write && !ownTool || input.hook_event_name === "PostToolUse" && !write) return {};
-  await initializePublishedDiagnostics(home);
+  await initializePluginRuntime(home);
   const started = performance.now(), settings = new RuntimeSettings(home), writer = new DiagnosticWriter(home);
   const trace = input.turn_id ?? control.trace ?? randomUUID();
   const guard = () => { if (control.signal?.aborted) throw new Error("HOOK_DEADLINE"); };
@@ -58,10 +58,11 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       return warning ? { systemMessage: warning } : {};
     }
     if (config.mode === "manual") {
-      const migration = config.mode_origin === "legacy_unknown";
-      await writer.record("hook.finished", { ...event, outcome: "skipped", reason: migration ? "ACTIVATION_MIGRATION_REQUIRED" : "MANUAL_MODE", duration: performance.now() - started });
-      return migration && input.hook_event_name === "SessionStart"
-        ? { systemMessage: "Project Dev Agent：旧版设置为 manual，自动参与尚未开启，且旧配置没有记录设置来源。升级保留原设置；请一次选择开启 auto 或明确保留 manual，不能将已安装理解为自动生效。" } : {};
+      const pending = config.activation_policy_version < ACTIVATION_POLICY_VERSION;
+      await writer.record("hook.finished", { ...event, outcome: pending ? "degraded" : "skipped", reason: pending ? "ACTIVATION_UPGRADE_PENDING" : "MANUAL_MODE", duration: performance.now() - started });
+      const message = "Project Dev Agent：旧 manual 的自动迁移尚未完成。请核对运行配置权限或活跃锁；下次启动会自动重试，无需用户手动开启 auto。本轮不能记为自动参与。";
+      if (pending && input.hook_event_name === "PreToolUse" && write) return denyWrite(message);
+      return pending && ["SessionStart", "UserPromptSubmit"].includes(input.hook_event_name) ? { systemMessage: message } : {};
     }
     if (config.mode === "observe") {
       await writer.record("hook.finished", { ...event, outcome: "skipped", reason: "OBSERVE_ONLY", duration: performance.now() - started }); return {};

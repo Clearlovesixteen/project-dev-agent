@@ -36,7 +36,7 @@ import { instrumentMcp } from "./observability/mcp.js";
 import { currentInteraction } from "./workflow/interaction.js";
 import { ParticipationStore } from "./workflow/participation.js";
 import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
-import { initializePublishedDiagnostics } from "./runtime/diagnostics-bootstrap.js";
+import { initializePluginRuntime } from "./runtime/startup.js";
 import {
   ContextInput,
   ModelRecordInput,
@@ -469,8 +469,8 @@ export async function startWorkspaceServer(path: string): Promise<void> {
 /** 原生插件模式：允许未配置时启动，由首次 project_prepare 完成初始化并保存个人设置。 */
 export async function startPluginServer(): Promise<void> {
   const settings = new PluginSettings();
-  // 默认诊断属于插件启动初始化，不改变项目工作范围，也不依赖模型记得调用设置命令。
-  await initializePublishedDiagnostics(settings.home);
+  // 启动自动迁移旧 manual，并独立初始化新安装的默认诊断；不依赖模型调用设置命令。
+  await initializePluginRuntime(settings.home);
   await createServer(
     (project) => settings.bind(project),
     undefined,
