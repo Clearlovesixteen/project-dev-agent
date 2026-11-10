@@ -1,5 +1,5 @@
 {
-  "version": "0.13.3",
+  "version": "0.13.4",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -87,7 +87,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "60e595baa337445587ace0770bb4960fa8bb0f7e3176011596ddaa63d45b2edf"
+      "sha256": "18656459fbae8f7bc2c8a2a2b3025a20a7014630b4638d275ef921ad763ccf6e"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -162,22 +162,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "73763de69a1012d7cdcf2a87da9554787da3fcb1e08eb3c3b79ab7991fc9002e"
+      "sha256": "eae8e2c28fb2bfa4e3431598ca4fe05fc165726f7a39eff4b45550f7895d1909"
     },
     {
       "path": "README.md",
-      "bytes": 1260,
-      "sha256": "3320364804dd062ac1496ec57c920c399cb2a613b6d1e5a68998c5169a1cdcc3"
+      "bytes": 1372,
+      "sha256": "a676da598b7e567da67614dfc8b1f0d82dda48d7e5787bf0a2a609092e97e6f1"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1216650,
-      "sha256": "8ab29f9cdc237271b9a17ce4dbd91910d2558c292ff6973aabad21a40941a754"
+      "bytes": 1218253,
+      "sha256": "0c9d3788fb3601047e35f8e9adc296239d1c5cb4e926b537d637d82db3fcaeef"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1185205,
-      "sha256": "5d94293107ffe028fca0dfb129ba471fca3a2ad9be581bd21b8e1da1c35a7f66"
+      "bytes": 1186604,
+      "sha256": "b2023d469b4a7b552737d58439d19d0f14aaa555098fb9a17b9ffe6241e4decb"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -226,8 +226,8 @@
     },
     {
       "path": "skills/project-dev-setup/SKILL.md",
-      "bytes": 6482,
-      "sha256": "cea00e163a13cef929639384a9cba912f71945bcab55ebb5335b84b1e9c2b14b"
+      "bytes": 6770,
+      "sha256": "a62be86929ed7e1aa1307558a2094756e2e2dcfcb434963a8c4c8e807445fa5d"
     },
     {
       "path": "skills/project-dev-update/agents/openai.yaml",
@@ -236,8 +236,8 @@
     },
     {
       "path": "skills/project-dev-update/SKILL.md",
-      "bytes": 4306,
-      "sha256": "c5fec2b8259a6ab8d0d8eed1db9cd67134ff74fc7bb2eb7738561f329b13026d"
+      "bytes": 4618,
+      "sha256": "4f3d98aea1887d9f1ab9fc118e3db71484a21b7db99f467a5919e4bd45f3ae3c"
     },
     {
       "path": "templates/knowledge.md",

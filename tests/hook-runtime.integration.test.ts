@@ -67,6 +67,25 @@ test("真实运行包的修改前钩子会拒绝未查询上下文的补丁，�
   assert.equal((await new RuntimeSettings(home).current()).diagnostics.upload, false);
 });
 
+test("更新后的独立钩子自动迁移旧 manual，保留诊断关闭且重启幂等", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "upgrade-hook-home"); await mkdir(home);
+  await new PluginSettings(home).prepare(fixture.path, { apply: true });
+  const settings = new RuntimeSettings(home);
+  await settings.configure({ apply: true, expected_revision: null, mode: "manual", diagnostics: { upload: false } });
+  const path = join(home, "project-dev-agent/runtime.json"), legacy = JSON.parse(await readFile(path, "utf8"));
+  delete legacy.activation_policy_version;
+  await writeFile(path, JSON.stringify(legacy));
+  const input = JSON.stringify({ hook_event_name: "SessionStart", session_id: "upgrade-packaged-hook", cwd: fixture.path, source: "startup" });
+  const first = await run(home, input); assert.equal(first.code, 0); assert.equal(first.stderr, "");
+  assert.match(JSON.parse(first.stdout).hookSpecificOutput?.additionalContext, /Project Dev Agent 自动参与入口/);
+  assert.equal((await settings.current()).mode, "auto"); assert.equal((await settings.current()).mode_origin, "upgrade");
+  assert.deepEqual((await settings.current()).diagnostics, legacy.diagnostics);
+  const migrated = await readFile(path, "utf8");
+  const second = await run(home, input); assert.equal(second.code, 0);
+  assert.equal(await readFile(path, "utf8"), migrated);
+});
+
 test("auto 的 Git 发现超时仍保留轻量入口，不将未准备摘要当成依据", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "slow-hook-home"), bin = join(fixture.root, "slow-bin"); await mkdir(home); await mkdir(bin);

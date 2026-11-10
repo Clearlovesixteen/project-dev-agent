@@ -1,0 +1,40 @@
+{
+  "version": "0.13.4",
+  "verified_at": "2026-11-10T07:05:06.735464+00:00",
+  "scope": "旧版 manual 首次运行自动迁移为 auto；保持工作范围、项目记录与诊断设置",
+  "activation_policy": {
+    "version": 1,
+    "old_manual": "auto",
+    "old_user_manual": "auto",
+    "old_auto": "preserved",
+    "old_observe": "preserved",
+    "subsequent_user_manual": "preserved",
+    "trigger": [
+      "plugin MCP startup",
+      "trusted native hooks",
+      "runtime CLI"
+    ]
+  },
+  "checks": {
+    "typecheck": "passed",
+    "targeted_before_release": {
+      "passed": 16,
+      "failed": 0,
+      "note": "Migration and participation integration run before final version stamp; final packaged execution and remote CI remain release gates.",
+      "sha256": "d30da99e174e90f87c433a3248117e01b5f342b3c0c095d0ff05b3a151ad1ec1"
+    },
+    "packaged_mcp_and_cli_startup": "passed_in_local_full_run",
+    "remote_ci": "required_before_merge",
+    "installed_hook_package_migration": {
+      "passed": 1,
+      "failed": 0,
+      "sha256": "3073b031785034fb48f6f99acc6fcad4745aab1f298c2fb4afc53033d578de46"
+    }
+  },
+  "limits": [
+    "自动迁移在新版代码首次运行时完成；只下载缓存但未重新加载不会运行迁移。",
+    "钩子信任仍由 Codex 宿主管理，插件不写入信任记录。",
+    "本次不更改观察模式、工作范围或诊断开关。",
+    "损坏或不可写配置保留原文件；活跃锁冲突由后续启动重试。"
+  ]
+}
