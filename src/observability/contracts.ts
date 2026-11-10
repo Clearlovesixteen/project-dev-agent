@@ -3,7 +3,7 @@ import { z } from "zod";
 const Opaque = z.string().regex(/^[a-f0-9]{64}$/);
 export const EventName = z.enum(["hook.received", "hook.finished", "scope.resolved", "context.lookup", "context.prepared", "context.emitted",
   "context.acknowledged", "workflow.bound", "tool.finished", "decision.recorded", "quality.checked", "validation.finished",
-  "model.changed", "feedback.recorded", "task.transitioned", "health.checked", "telemetry.gap", "report.generated"]);
+  "model.changed", "feedback.recorded", "task.transitioned", "participation.checked", "health.checked", "telemetry.gap", "report.generated"]);
 /** 字段白名单：不允许自由文本、路径、查询、命令或协议输入混进遥测。 */
 export const EventAttributes = z.object({
   tool: z.enum(["plugin_status", "plugin_configure", "project_prepare", "project_scan", "project_context", "knowledge_search",
@@ -18,8 +18,8 @@ export const EventAttributes = z.object({
   attempt: z.number().int().min(1).max(10).optional(),
   cache: z.enum(["hit", "miss", "invalidated", "deduplicated"]).optional(),
   transport: z.enum(["hook", "mcp", "cli", "runner"]).optional(),
-  phase: z.enum(["active", "closed", "aborted"]).optional(),
-  event: z.enum(["SessionStart", "UserPromptSubmit", "Stop"]).optional(),
+  phase: z.enum(["active", "suspended", "closed", "aborted"]).optional(),
+  event: z.enum(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]).optional(),
   source: z.enum(["startup", "resume", "clear", "compact", "fork", "unknown"]).optional(),
   coverage: z.enum(["observed", "partial", "unknown"]).optional(),
   truncated: z.boolean().optional(),

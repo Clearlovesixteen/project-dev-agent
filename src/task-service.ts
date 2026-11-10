@@ -2,6 +2,7 @@ import { prepareRequirementUpdate } from "./quality/requirement-update.js";
 import { validateFeedbackUpdate } from "./feedback/task-update.js";
 import {
   recordRequirementSources,
+  referenceSources,
   stampRequirementSources,
   requirementReview,
   businessAssessmentReview,
@@ -174,15 +175,7 @@ export class TaskService {
         request.requirement,
         request.scope_paths ?? [],
       );
-      if (
-        request.requirement_sources?.some(
-          (source) => source.id === "task-request",
-        )
-      )
-        throw new AppError(
-          "REQUIREMENT_SOURCE_RESERVED",
-          "task-request由服务保留原始要求，新增参考使用独立ID",
-        );
+      const references = referenceSources(request.requirement, request.requirement_sources ?? []);
       if (
         request.feedback_review &&
         (request.feedback_review.version !== feedback.version ||
@@ -228,7 +221,7 @@ export class TaskService {
           [],
           [
             { id: "task-request", kind: "request", quote: request.requirement },
-            ...(request.requirement_sources ?? []),
+            ...references,
           ],
         ),
         ...(request.business_assessment
@@ -285,8 +278,23 @@ export class TaskService {
       const prior = await this.store.load(request.task_id);
       assertTaskOwner(prior);
       // 基线失效仍允许显式中止并留下原因，但不能继续把普通更新或关闭记为有效。
-      if (request.phase !== "aborted")
+      if (request.phase !== "aborted" && request.phase !== "suspended")
         await assertBaseline(this.binding, prior);
+      if (prior.phase === "suspended" || request.phase === "suspended") {
+        if (Object.keys(request).some(key => !["task_id", "expected_revision", "phase", "suspend_reason", "abort_reason"].includes(key)))
+          throw new AppError("TASK_LIFECYCLE_SEPARATE_REQUIRED", "挂起或恢复须单独保存，不同时改需求、依据和验收");
+        if (prior.phase === "suspended" && request.phase !== "active" && request.phase !== "aborted")
+          throw new AppError("TASK_RESUME_REQUIRED", "显式指定 phase:active 恢复，或 aborted 中止；原基线保持不变");
+        const saved = await this.store.update(request.task_id, request.expected_revision, current => TaskSchema.parse({
+          ...current, phase: request.phase,
+          suspend_reason: request.phase === "suspended" ? request.suspend_reason : undefined,
+          abort_reason: request.phase === "aborted" ? request.abort_reason : undefined,
+          lifecycle: [...current.lifecycle ?? [], { phase: request.phase,
+            reason: request.suspend_reason ?? request.abort_reason ?? `恢复挂起任务，原挂起原因：${current.suspend_reason}`,
+            recorded_at: new Date().toISOString() }],
+        }));
+        return { outcome: "ok", code: saved.phase === "suspended" ? "TASK_SUSPENDED" : saved.phase === "active" ? "TASK_RESUMED" : "TASK_UPDATED", data: saved, diagnostics: [] };
+      }
       if (request.knowledge_versions?.length) {
         const files = new ProjectFiles(this.binding.root);
         const loaded = await loadKnowledge(files);

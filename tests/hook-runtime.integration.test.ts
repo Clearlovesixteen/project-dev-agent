@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -14,9 +15,9 @@ import { DiagnosticWriter } from "../src/observability/writer.js";
 import { PUBLISHED_DIAGNOSTICS } from "../src/runtime/published-diagnostics.js";
 
 const entry = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/hooks.mjs", import.meta.url));
-async function run(home: string, input: string, end = true) {
+async function run(home: string, input: string, end = true, extraEnv: NodeJS.ProcessEnv = {}) {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(process.execPath, [entry], { env: { ...process.env, CODEX_HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [entry], { env: { ...process.env, CODEX_HOME: home, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("独立钩子未在外部测试预算内结束")); }, 9000);
     child.stdout.on("data", part => { stdout += part; }); child.stderr.on("data", part => { stderr += part; });
@@ -49,6 +50,37 @@ test("真实打包入口在 auto 下输出路由，只有写出 stdout 才计 em
   const events = (await new DiagnosticWriter(home).read()).events;
   assert.equal(events.filter(event => event.event_name === "context.emitted").length, 1);
   assert.equal((await new RuntimeSettings(home).current()).diagnostics.upload, false);
+});
+
+test("真实运行包的修改前钩子会拒绝未查询上下文的补丁，标准输出保留宿主拒绝格式", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "guard-codex-home"); await mkdir(home);
+  await new PluginSettings(home).prepare(fixture.path, { apply: true });
+  await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto", diagnostics: { upload: false } });
+  const result = await run(home, JSON.stringify({ hook_event_name: "PreToolUse", session_id: "packaged-guard", turn_id: "guard-turn",
+    cwd: fixture.path, tool_name: "apply_patch", tool_use_id: "patch-one",
+    tool_input: { command: "*** Begin Patch\n*** Update File: src/auth.js\n@@\n+// 未准备的修改\n*** End Patch" } }));
+  assert.equal(result.code, 0); assert.equal(result.stderr, "");
+  const output = JSON.parse(result.stdout).hookSpecificOutput;
+  assert.equal(output.hookEventName, "PreToolUse"); assert.equal(output.permissionDecision, "deny");
+  assert.match(output.permissionDecisionReason, /project_context/);
+  assert.equal((await new RuntimeSettings(home).current()).diagnostics.upload, false);
+});
+
+test("auto 的 Git 发现超时仍保留轻量入口，不将未准备摘要当成依据", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "slow-hook-home"), bin = join(fixture.root, "slow-bin"); await mkdir(home); await mkdir(bin);
+  await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto", diagnostics: { upload: false } });
+  const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const wrapper = join(bin, "git");
+  await writeFile(wrapper, `#!/bin/sh\nsleep 2\nexec '${git.replace(/'/g, "'\\''")}' "$@"\n`); await chmod(wrapper, 0o755);
+  const result = await run(home, JSON.stringify({ hook_event_name: "SessionStart", session_id: "slow-discovery", cwd: fixture.path }), true,
+    { PATH: `${bin}:${process.env.PATH ?? ""}` });
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.hookSpecificOutput?.hookEventName, "SessionStart");
+  assert.match(output.hookSpecificOutput?.additionalContext, /project_prepare/);
+  assert.match(output.hookSpecificOutput?.additionalContext, /摘要尚未就绪/);
+  assert.match(output.systemMessage, /HOOK_DEADLINE/);
 });
 
 test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子的期限不受影响", async t => {

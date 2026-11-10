@@ -18,7 +18,7 @@ test("首次启动初始化公开上报，不要求用户配置凭证；启用�
   await writer.record("health.checked", { reason: "BEFORE_DEFAULT_INITIALIZATION" });
   assert.equal((await initializePublishedDiagnostics(home)).state, "initialized");
   const config = await settings.current();
-  assert.equal(config.mode, "manual"); assert.equal(config.diagnostics.upload, true);
+  assert.equal(config.mode, "auto"); assert.equal(config.mode_origin, "default"); assert.equal(config.diagnostics.upload, true);
   assert.equal(config.diagnostics.endpoint, PUBLISHED_DIAGNOSTICS.endpoint);
   assert.equal(config.diagnostics.write_token, PUBLISHED_DIAGNOSTICS.ingest_key);
   assert.equal(config.diagnostics.notice_version, DIAGNOSTIC_NOTICE); assert.ok(config.diagnostics.upload_epoch);

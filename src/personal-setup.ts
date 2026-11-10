@@ -15,6 +15,7 @@ import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { TaskStore } from "./storage/task-store.js";
 import { historyStatus } from "./history/store.js";
 import { understandingStatus } from "./understanding/store.js";
+import { currentInteraction, interactionOwner } from "./workflow/interaction.js";
 
 export const ProjectPrepareInputSchema = z
   .object({ apply: z.boolean().default(false) })
@@ -122,7 +123,9 @@ export async function prepareProject(
       throw error;
     clean = false;
   }
-  const active = await new TaskStore(binding.root).active();
+  const store = new TaskStore(binding.root), active = await store.active(binding.branch);
+  const taskList = await store.list(100), interaction = currentInteraction(), owner = interaction ? interactionOwner(interaction) : undefined;
+  const owned = !active?.owner || !!owner && owner.session_id === active.owner.session_id && owner.actor_id === active.owner.actor_id;
   const unmerged =
     (await readGit(binding.root, ["ls-files", "--unmerged", "-z"])).stdout
       .length > 0;
@@ -175,8 +178,14 @@ export async function prepareProject(
             id: active.id,
             revision: active.revision,
             requirement: active.requirement,
+            ownership: owned ? "available" : "another_session",
+            baseline_branch: active.baseline_branch,
           }
         : null,
+      task_recovery: { branch: binding.branch, truncated: taskList.truncated,
+        preserved: taskList.tasks.filter(task => task.phase === "suspended" || task.phase === "active" && task.baseline_branch !== binding.branch)
+          .map(task => ({ id: task.id, revision: task.revision, phase: task.phase, branch: task.baseline_branch,
+            next_step: task.phase === "suspended" ? "切回原分支后由所属会话显式恢复；已有活跃任务时先处理冲突。" : "原分支任务保留，切回原分支后恢复；不会阻塞当前分支建立新任务。" })) },
       local_ignore_change: changeNeeded
         ? {
             file: `${binding.repo_identity}/info/exclude`,
@@ -184,7 +193,8 @@ export async function prepareProject(
           }
         : null,
       next_step: active
-        ? "继续前请调用不带 task_id 的 task_check，恢复当前活跃任务。"
+        ? owned ? "继续相关需求前调用 task_check 恢复当前分支任务；新需求可显式挂起原任务后建立新任务，不自动中止。"
+          : "当前分支活跃任务属于另一会话。保留原任务，使用独立工作树，或由原会话显式挂起；不能自动接管。"
         : unmerged
         ? "先解决当前Git合并冲突，已有普通改动会保留。"
         : !clean && ignored

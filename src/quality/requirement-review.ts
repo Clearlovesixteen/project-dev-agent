@@ -20,8 +20,19 @@ export function latestSources(records: Record[]) {
   return [...new Map(records.map((item) => [item.input.id, item])).values()];
 }
 
+/** 完整回传允许原始来源的相同只读引用；不能借兼容逻辑改写原文或来源类型。 */
+export function referenceSources(requirement: string, values: Input[]) {
+  for (const input of values.filter(value => value.id === "task-request")) {
+    if (input.kind !== "request" || input.path || input.correction_id || input.locator || input.reason
+      || input.quote !== undefined && input.quote !== requirement)
+      throw new AppError("REQUIREMENT_SOURCE_RESERVED", "task-request 由服务保留原文；完整回传须与原值相同，修订使用新纠正来源");
+    if (input.sha256 && input.sha256 !== digest(requirement)) throw new AppError("REQUIREMENT_SOURCE_STALE", "原始要求版本不匹配，请重新读取任务");
+  }
+  return values.filter(value => value.id !== "task-request");
+}
+
 async function captureSource(
-  binding: WorktreeBinding,
+  binding: Pick<WorktreeBinding, "root">,
   task: Pick<Task, "requirement" | "corrections">,
   value: Input,
 ): Promise<Input> {
@@ -41,12 +52,14 @@ async function captureSource(
         ? task.requirement
         : task.corrections.find((item) => item.id === input.correction_id)
             ?.description;
-    if (!original || !input.quote || !original.includes(input.quote))
+    if (!original || input.quote !== undefined && !original.includes(input.quote))
       throw new AppError(
         "REQUIREMENT_SOURCE_INVALID",
         "需求依据须匹配本任务已保存的原话或纠正",
       );
-    return RequirementSourceInput.parse({ ...input, sha256: digest(original) });
+    if (input.sha256 && input.sha256 !== digest(original)) throw new AppError("REQUIREMENT_SOURCE_STALE", "需求或纠正来源与指定版本不一致");
+    // 已保存原文可直接引用；省略 quote 时由服务补齐，不能由模型猜写摘要。
+    return RequirementSourceInput.parse({ ...input, quote: input.quote ?? original, sha256: digest(original) });
   }
   if (!input.path)
     throw new AppError(
@@ -66,10 +79,10 @@ async function captureSource(
       );
     sha = digest(text);
   } else {
-    if (!input.path.startsWith(".project-dev/local/requirements/"))
+    if (!input.path.startsWith(".project-dev/local/requirements/") && !input.path.startsWith(".project-dev/local/reviews/"))
       throw new AppError(
         "REQUIREMENT_SOURCE_INVALID",
-        "原型图片使用本项目独立资料目录，不读取任意外部路径",
+        "原型图片使用本项目 requirements 或 reviews 资料目录，不读取任意外部路径",
       );
     const { entry, content } = await workspaceContent(files, input.path, true);
     if (entry.kind !== "file")
@@ -126,7 +139,7 @@ export async function recordRequirementSources(
     );
   return history;
 }
-async function available(binding: WorktreeBinding, task: Task, source: Record) {
+async function available(binding: Pick<WorktreeBinding, "root">, task: Task, source: Record) {
   if (source.input.kind === "unavailable") return false;
   try {
     return (
@@ -138,6 +151,7 @@ async function available(binding: WorktreeBinding, task: Task, source: Record) {
     return false;
   }
 }
+
 /** 服务为本次实际复核的验收绑定当前来源版本，完整回传不会刷新其他项目的旧来源。 */
 export async function stampRequirementSources(
   binding: WorktreeBinding,

@@ -32,7 +32,10 @@ const Diagnostics = z.object({
 
 export const RuntimeConfiguration = z.object({
   schema_version: z.literal(1), revision: z.uuid(),
+  // 文件解析保留旧版缺字段语义；新安装由 current() 明确设置 auto。
   mode: z.enum(["manual", "observe", "auto"]).default("manual"),
+  // 旧配置没有来源，不能推断 manual 是默认值还是用户主动关闭。
+  mode_origin: z.enum(["default", "user", "legacy_unknown"]).default("legacy_unknown"),
   diagnostics: Diagnostics,
 }).strict();
 export type RuntimeConfig = z.infer<typeof RuntimeConfiguration>;
@@ -71,13 +74,20 @@ export class RuntimeSettings {
   }
 
   async current(): Promise<RuntimeConfig> {
-    return await this.read() ?? RuntimeConfiguration.parse({ schema_version: 1, revision: randomUUID(), mode: "manual", diagnostics: {} });
+    return await this.read() ?? RuntimeConfiguration.parse({ schema_version: 1, revision: randomUUID(), mode: "auto", mode_origin: "default", diagnostics: {} });
   }
 
   async status() {
     const config = await this.read();
     return {
-      configured: !!config, revision: config?.revision ?? null, mode: config?.mode ?? "manual",
+      configured: !!config, revision: config?.revision ?? null, mode: config?.mode ?? "auto",
+      activation: { mode_origin: config?.mode_origin ?? "default",
+        state: config?.mode === "manual" ? config.mode_origin === "legacy_unknown" ? "migration_required" : "disabled"
+          : config?.mode === "observe" ? "observe_only" : "enabled",
+        hook_execution: "requires_host_verification",
+        next_step: config?.mode === "manual" && config.mode_origin === "legacy_unknown"
+          ? "旧版 manual 没有设置来源，请由用户一次选择开启自动参与或保留手动；不能把已安装当作自动生效。"
+          : "宿主须信任当前钩子定义；project_prepare 返回当前项目及本轮参与状态。" },
       diagnostics: { local: config?.diagnostics.local ?? true, upload: config?.diagnostics.upload ?? false,
         notice_version: config?.diagnostics.notice_version ?? null, endpoint: config?.diagnostics.endpoint ?? null,
         credential_configured: !!config?.diagnostics.write_token,
@@ -106,7 +116,8 @@ export class RuntimeSettings {
       if (diagnostics.upload && (diagnostics.notice_version !== DIAGNOSTIC_NOTICE || !diagnostics.endpoint || !diagnostics.write_token)) {
         throw new AppError("DIAGNOSTICS_SETUP_REQUIRED", "远程上报需要先明确说明并启用，同时配置接收地址和写入凭证");
       }
-      return { prior, next: RuntimeConfiguration.parse({ ...base, mode: input.mode ?? base.mode, diagnostics, revision: randomUUID() }) };
+      return { prior, next: RuntimeConfiguration.parse({ ...base, mode: input.mode ?? base.mode,
+        mode_origin: input.mode === undefined ? base.mode_origin : "user", diagnostics, revision: randomUUID() }) };
     };
     if (!input.apply) {
       const { prior, next } = await proposed();

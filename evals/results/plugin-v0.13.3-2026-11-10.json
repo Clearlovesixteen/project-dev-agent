@@ -1,0 +1,146 @@
+{
+  "version": "0.13.3",
+  "verified_at": "2026-11-10T05:56:51.132824+00:00",
+  "base_version": "0.13.2",
+  "scope": "Automatic participation and reliability fixes; excludes business-model preview changes",
+  "checks": {
+    "typecheck": "passed",
+    "node18_19_0": {
+      "unique_cases_passed": 306,
+      "execution": "recorded full groups plus final targeted reruns",
+      "runs": [
+        {
+          "suite": "node18.19.0-participation-core.log",
+          "passed": 275,
+          "sha256": "ebd22241983ca6c8a20a18fcda4069f5db076faeb616d0c2959b689e7b97d55c"
+        },
+        {
+          "suite": "node18.19.0-participation-loopback.log",
+          "passed": 27,
+          "sha256": "f6e182baea7312a011be37e85e21436160bcddd736dd8ed25e9012accefb74db"
+        },
+        {
+          "suite": "participation-collector-compatibility.log",
+          "passed": 3,
+          "sha256": "db02a17c6831d6ba295f677a276c00837838b06ca2c2853fa3df595be145dc6b"
+        },
+        {
+          "suite": "participation-final-targeted-node18.log",
+          "passed": 24,
+          "sha256": "daf3221f20267e7aabce1a3ca011faeb145eb7e49c77fbe684f9b684222b101a"
+        },
+        {
+          "suite": "packaged-write-guard-final.log",
+          "passed": 1,
+          "sha256": "902b8b9c1408ecfd1f95c3c630c5a16db66f62b0c2859e079d50736032771e9d"
+        },
+        {
+          "suite": "packaged-hooks-final-node18.log",
+          "passed": 6,
+          "sha256": "d0357344ac902a5a91ec608c0ed7ee4ed7071f8c231c249d557fabebec3b3b01"
+        }
+      ]
+    },
+    "skill_frontmatter_and_references": {
+      "result": "passed",
+      "parser": "bundled yaml",
+      "skills": 3
+    },
+    "native_hook_discovery": {
+      "result": "passed",
+      "operation": "hooks/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "hooks": [
+        {
+          "event": "preToolUse",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "postToolUse",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "sessionStart",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "userPromptSubmit",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": false,
+          "timeout_seconds": 3
+        },
+        {
+          "event": "stop",
+          "enabled": true,
+          "trust": "untrusted",
+          "async": true,
+          "timeout_seconds": 8
+        }
+      ],
+      "native_write_guard_discovered": true,
+      "execution_verified": false,
+      "mcp_servers": [
+        "project_dev"
+      ],
+      "warnings": [],
+      "errors": []
+    },
+    "native_mcp_connection": {
+      "result": "passed",
+      "operation": "mcpServerStatus/list",
+      "creates_model_session": false,
+      "changes_trust": false,
+      "server_version": "0.13.3",
+      "tool_count": 16
+    },
+    "collector": {
+      "deployment_version": "f5b9f5b0-d2c8-41c9-b8ab-df0fac7df26e",
+      "backwards_compatible_schema": true,
+      "smoke_events_acknowledged": 2,
+      "smoke_events_verified_in_d1": 2,
+      "user_content_uploaded": false,
+      "smoke_reason": "RELEASE_DIAGNOSTICS_SMOKE"
+    },
+    "node20_19_6": {
+      "typecheck": "passed",
+      "packaged_hooks": {
+        "passed": 6,
+        "failed": 0
+      },
+      "isolated_workspace_routing": "passed",
+      "initial_parallel_full_run": {
+        "passed": 302,
+        "failed": 1,
+        "cancelled": 1,
+        "note": "Startup summary exceeded budget under concurrent load; fixed by retaining an explicitly unprepared lightweight entry. A 30-second multi-project test timeout passed when rerun alone. Remote CI matrix is the release gate."
+      }
+    },
+    "standalone_package_final": {
+      "passed": 2,
+      "failed": 0
+    }
+  },
+  "runtime": {
+    "node_minimum": ">=18.19.0",
+    "cache_configuration_overwritten": false,
+    "project_records_removed": false
+  },
+  "limits": [
+    "Native discovery and standalone packaged execution are verified; trusted hook execution in the user session still requires host review.",
+    "Hooks cover supported local tool paths and are not a complete write enforcement boundary.",
+    "Historical manual settings are preserved and flagged for an explicit migration choice; existing opt-out is not overwritten.",
+    "A running old MCP process must be reloaded after installation; install version is distinct from running version.",
+    "Test groups and final targeted reruns are listed separately; they are not represented as one completed local Node 20 run."
+  ]
+}

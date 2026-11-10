@@ -13,10 +13,10 @@ export async function recordValidationPlan(binding: WorktreeBinding, input: Vali
   if (previous?.plan.checks.some(item => !ids.has(item.id))) throw new AppError("VALIDATION_PLAN_REMOVAL", "已有必需检查不能通过删除计划规避；调整命令后须重新运行");
   if (input.checks.some(item => item.acceptance_ids.some(id => !acceptanceIds.includes(id)))) throw new AppError("VALIDATION_ACCEPTANCE_UNKNOWN", "检查计划只能关联本任务现有验收项");
   const files = new ProjectFiles(binding.root), { config } = await loadConfig(files);
-  const paths = new Set<string>();
+  const paths = new Set<string>(), checksForPath = new Map<string, string[]>();
   for (const check of input.checks) {
     if (check.cwd !== ".") await files.path(check.cwd);
-    for (const path of check.source_paths) paths.add(path);
+    for (const path of check.source_paths) { paths.add(path); checksForPath.set(path, [...checksForPath.get(path) ?? [], check.id]); }
     // 最近的包声明决定 npm/pnpm/yarn 脚本实际含义，直接 node 检查也保留项目执行声明。
     let directory = check.cwd;
     for (;;) {
@@ -29,7 +29,14 @@ export async function recordValidationPlan(binding: WorktreeBinding, input: Vali
   }
   if (paths.size > 40) throw new AppError("VALIDATION_PLAN_LIMIT", "检查配置超过40个来源，请缩小任务范围");
   const source_versions = [];
-  for (const path of [...paths].sort()) source_versions.push({ path, sha256: digest(await safeSource(files, path, config)) });
+  for (const path of [...paths].sort()) {
+    try { source_versions.push({ path, sha256: digest(await safeSource(files, path, config)) }); }
+    catch (error) {
+      if (hasCode(error, "ENOENT")) throw new AppError("VALIDATION_SOURCE_MISSING",
+        `检查 ${checksForPath.get(path)?.join("、") ?? "package"} 的配置来源不存在：${path}；请读取项目实际脚本与配置后修订计划。`);
+      throw error;
+    }
+  }
   const version = digest(JSON.stringify(["validation-plan-v1", input, source_versions]));
   return ValidationPlanRecordSchema.parse({ plan: input, source_versions, version, recorded_at: new Date().toISOString() });
 }

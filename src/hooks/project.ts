@@ -19,18 +19,18 @@ export async function hookProject(cwd: string) {
   return realpath(gitLine(result.stdout));
 }
 
-export type HookStage = "runtime" | "scope" | "task" | "context" | "receipt";
+export type HookStage = "runtime" | "scope" | "task" | "context" | "receipt" | "guard";
 const SAFE_REASONS = new Set(["INVALID_CWD", "HOOK_CWD_UNAVAILABLE", "NOT_GIT_WORKTREE", "PROJECT_OUTSIDE_WORKSPACE",
   "PROJECT_PATH_UNSAFE", "PLUGIN_NOT_CONFIGURED", "PLUGIN_SETTINGS_INVALID", "WORKSPACE_CHANGED", "WORKSPACE_PATH_INVALID",
   "GIT_COMMAND_FAILED", "GIT_OUTPUT_INVALID", "RUNTIME_CONFIG_INVALID", "CONTEXT_RECEIPT_BUSY", "STATE_CORRUPT",
-  "INVALID_TASK", "MULTIPLE_ACTIVE_TASKS", "STATE_LIMIT"]);
+  "INVALID_TASK", "MULTIPLE_ACTIVE_TASKS", "STATE_LIMIT", "PARTICIPATION_BUSY"]);
 
 /** 固定白名单及阶段兜底；绝不把错误 message、路径或任意外部 code 当作遥测内容。 */
 export function hookFailure(error: unknown, stage: HookStage) {
   const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
   const reason = typeof code === "string" && SAFE_REASONS.has(code) ? code : {
     runtime: "HOOK_RUNTIME_FAILED", scope: "HOOK_SCOPE_FAILED", task: "HOOK_TASK_LOOKUP_FAILED",
-    context: "HOOK_CONTEXT_LOOKUP_FAILED", receipt: "HOOK_RECEIPT_FAILED",
+    context: "HOOK_CONTEXT_LOOKUP_FAILED", receipt: "HOOK_RECEIPT_FAILED", guard: "HOOK_WRITE_CHECK_FAILED",
   }[stage];
   return { outcome: reason === "NOT_GIT_WORKTREE" || reason === "PROJECT_OUTSIDE_WORKSPACE" ? "skipped" as const : "degraded" as const, reason };
 }

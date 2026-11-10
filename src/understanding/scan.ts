@@ -119,10 +119,14 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   const configBefore = await mapConfigHash(files, config);
   const before = gitLine((await readGit(binding.root, ["rev-parse", "HEAD"])).stdout);
   const paths = [...new Set(decodeGitOutput((await readGit(binding.root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).stdout).split("\0").filter(Boolean))].sort();
+  // ls-files --cached 包含未暂存的删除。只排除 Git 在扫描开始时确认的删除，
+  // 扫描期间消失的文件、权限问题及不安全路径仍报告为不完整，不能一律吞掉 ENOENT。
+  const deleted = new Set(decodeGitOutput((await readGit(binding.root, ["ls-files", "--deleted", "-z"])).stdout).split("\0").filter(Boolean));
   const previous = new Map((await mapFiles(files)).map((file) => [file.path, file]));
   const records: MapFile[] = [], diagnostics: ProjectMap["diagnostics"] = [];
   const coverage = { discovered: paths.length, indexed: 0, excluded: 0, unreadable: 0, unsupported: 0, reused: 0, complete: true, content_reused: 0, read_files: 0, read_bytes: 0 };
   const eligible = paths.filter((path) => {
+    if (deleted.has(path)) { coverage.excluded++; return false; }
     if (excluded(path, config)) { coverage.excluded++; return false; }
     if (!EXTENSIONS.has(posix.extname(path)) && !/^(?:Dockerfile|Makefile|\.eslintrc|\.prettierrc)$/.test(posix.basename(path))) { coverage.unsupported++; return false; }
     return true;

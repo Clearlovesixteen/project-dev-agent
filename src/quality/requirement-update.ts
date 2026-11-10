@@ -6,6 +6,7 @@ import {
   recordRequirementSources,
   latestSources,
   sourceCheck,
+  referenceSources,
 } from "./requirement-review.js";
 import { acceptanceRevisions } from "./acceptance-revisions.js";
 /** 来源与验收定义分别追加历史；重开后再核验，不在关闭时补造准备。 */
@@ -16,18 +17,7 @@ export async function prepareRequirementUpdate(
 ) {
   let requirementSources = current.requirement_sources;
   if (request.requirement_sources) {
-    if (
-      request.requirement_sources.some((source) => source.id === "task-request")
-    )
-      throw new AppError(
-        "REQUIREMENT_SOURCE_RESERVED",
-        "原始要求来源不可覆盖，修订要求使用新的纠正来源",
-      );
-    if (request.phase === "closed")
-      throw new AppError(
-        "REQUIREMENT_REVIEW_REQUIRED",
-        "先保存来源修订，再核验受影响的验收",
-      );
+    const values = referenceSources(current.requirement, request.requirement_sources);
     requirementSources = await recordRequirementSources(
       binding,
       {
@@ -35,7 +25,7 @@ export async function prepareRequirementUpdate(
         corrections: request.corrections ?? current.corrections,
       },
       requirementSources ?? [],
-      request.requirement_sources,
+      values,
     );
     const old = latestSources(current.requirement_sources ?? []),
       latest = latestSources(requirementSources),
@@ -46,6 +36,7 @@ export async function prepareRequirementUpdate(
               ?.fingerprint !== source.fingerprint,
         )
         .map((source) => source.input.id);
+    if (changed.length && request.phase === "closed") throw new AppError("REQUIREMENT_REVIEW_REQUIRED", "先保存来源修订，再核验受影响的验收");
     if (
       (request.acceptance_criteria ?? current.acceptance_criteria).some(
         (item) =>

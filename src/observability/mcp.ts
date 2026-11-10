@@ -4,6 +4,8 @@ import { DiagnosticWriter, observeTool } from "./writer.js";
 import { currentInteraction, Interaction, interactionStorage, type InteractionContext } from "../workflow/interaction.js";
 import { ContextReceipts } from "../context/receipts.js";
 import { bestEffort } from "../runtime/best-effort.js";
+import { ParticipationStore } from "../workflow/participation.js";
+import { bindWorktree } from "../git/index.js";
 
 type Registration = (name: string, config: Record<string, unknown>, handler: (...input: unknown[]) => unknown) => unknown;
 
@@ -28,7 +30,25 @@ export function instrumentMcp(server: McpServer, home?: string) {
       const invoke = async () => handler(...received);
       return interactionStorage.run(interaction, async () => {
         const result = tool.success ? await observeTool(writer, tool.data,
-          raw && typeof raw === "object" && "project" in raw && typeof raw.project === "string" ? raw.project : undefined, invoke) : await invoke();
+          raw && typeof raw === "object" && "project" in raw && typeof raw.project === "string" ? raw.project : undefined, invoke, "mcp", {
+            ...(raw && typeof raw === "object" && "task_id" in raw && typeof raw.task_id === "string" ? { task_id: raw.task_id } : {}),
+          }) : await invoke();
+        // 修改前检查的本地状态不属于遥测。关闭诊断仍维护它；更新失败须明确说明，
+        // 但不能把已成功的业务写入改成 error，诱使调用方重复执行已完成的动作。
+        if (raw && typeof raw === "object" && "project" in raw && typeof raw.project === "string" && interaction
+          && ["project_context", "task_open", "task_update", "task_check"].includes(name)) {
+          const envelope = result as { structuredContent?: { outcome?: string; data?: Record<string, unknown>; diagnostics?: { code: string; message: string }[] }; content?: { type: string; text?: string }[] };
+          if (envelope.structuredContent && envelope.structuredContent.outcome !== "error") {
+            try {
+              const binding = await bindWorktree(raw.project);
+              await new ParticipationStore(home).observedTool(binding.root, interaction, binding.branch, name, envelope.structuredContent);
+            } catch {
+              envelope.structuredContent.diagnostics?.push({ code: "PARTICIPATION_STATE_UNAVAILABLE", message: "业务调用结果已保留，但本轮参与状态未能保存；后续修改前须核对插件运行目录，不能重复执行已完成写入。" });
+              const text = envelope.content?.find(item => item.type === "text");
+              if (text) text.text = JSON.stringify(envelope.structuredContent);
+            }
+          }
+        }
         // 诊断适配失败不能改变已经完成的业务调用；回执匹配也不等于模型真的采用了内容。
         await bestEffort(async () => {
         try {

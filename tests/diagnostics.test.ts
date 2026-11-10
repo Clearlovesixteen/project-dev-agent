@@ -13,7 +13,7 @@ async function home(t: test.TestContext) { const path = await mkdtemp(join(tmpdi
 
 test("诊断设置单独保存，缺少告知或接收端时拒绝远程上报，状态不返回凭证", async (t) => {
   const root = await home(t), settings = new RuntimeSettings(root);
-  assert.equal((await settings.status()).mode, "manual");
+  assert.equal((await settings.status()).mode, "auto");
   await assert.rejects(settings.configure({ apply: true, expected_revision: null, diagnostics: { upload: true } }), { code: "DIAGNOSTICS_SETUP_REQUIRED" });
   await settings.configure({ apply: true, expected_revision: null, mode: "auto", diagnostics: {
     upload: true, notice_version: DIAGNOSTIC_NOTICE, endpoint: "https://example.test/events", write_token: "a-private-write-token" } });
@@ -42,7 +42,7 @@ test("结构化工具错误被记录，采集文件不可写时仍保留原工�
   await settings.configure({ apply: true, expected_revision: null, diagnostics: { local: false } });
   assert.equal(await writer.record("hook.received"), false);
   assert.equal((await observeTool(writer, "project_context", undefined, async () => ({ outcome: "ok", code: "PRESERVED" }))).code, "PRESERVED");
-  assert.equal(config.mode, "manual");
+  assert.equal(config.mode, "auto");
 });
 
 test("符号链接与损坏的运行配置不触发越界写入或覆盖", async (t) => {

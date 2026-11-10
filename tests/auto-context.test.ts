@@ -30,13 +30,13 @@ async function setup(t: test.TestContext) {
 }
 const context = (result: Record<string, unknown>) => (result.hookSpecificOutput as { additionalContext: string } | undefined)?.additionalContext ?? "";
 
-test("钩子默认手动；observe 不注入，闲聊不建任务，异常范围不扩大配置", async t => {
+test("钩子默认自动；observe 不注入，闲聊只提供入口不建任务，异常范围不扩大配置", async t => {
   const { call, mode, home, plugin } = await setup(t);
-  assert.deepEqual(await call(), {});
+  assert.ok(context(await call()).includes("Project Dev Agent"));
   await mode("observe"); assert.deepEqual(await call(), {});
-  await mode("auto"); assert.deepEqual(await call({ prompt: "你好" }), {});
+  await mode("auto"); assert.ok(context(await call({ prompt: "你好" })).includes("闲聊"));
   const before = await plugin.status();
-  assert.deepEqual(await call({ cwd: "/path/does-not-exist" }), {});
+  assert.match(String((await call({ cwd: "/path/does-not-exist" })).systemMessage), /未就绪/);
   assert.deepEqual(await plugin.status(), before);
   assert.ok((await new DiagnosticWriter(home).read()).events.some(event => event.reason_code === "HOOK_CWD_UNAVAILABLE"));
 });
@@ -82,7 +82,7 @@ test("PRD/SDD 来源核对、任务幂等重试及归属保护共同生效，旧
   assert.equal((await interactionStorage.run({ session_id: "another" }, () => tasks.check({}))).code, "TASK_SESSION_MISMATCH");
   const status = await new TaskStore(fixture.path).load(saved.id); assert.equal(status.revision, 0); assert.equal(status.phase, "active");
   await mode("auto"); assert.ok(context(await call({ prompt: "继续" })).includes(saved.id));
-  assert.deepEqual(await call({ session_id: "another", prompt: "继续" }), {});
+  assert.ok(!context(await call({ session_id: "another", prompt: "继续" })).includes(saved.id));
   assert.equal((await run(() => tasks.update({ task_id: saved.id, expected_revision: 0, phase: "aborted", abort_reason: "测试完成" }))).outcome, "ok");
   const legacy = await tasks.open({ requirement: "兼容普通明确调用", acceptance_criteria: input.acceptance_criteria });
   assert.equal(legacy.outcome, "ok"); assert.equal((legacy.data as { owner?: unknown }).owner, undefined);
