@@ -30,7 +30,17 @@
     "source_typecheck": "passed",
     "skill_manifests": 3,
     "remote_node_matrix": "required_before_merge",
-    "windows_powershell_ci": "required_before_merge"
+    "windows_powershell_ci": "required_before_merge",
+    "first_windows_ci": {
+      "result": "failed",
+      "reason": "Windows Git rejects Node devNull in sample initialization",
+      "action": "Use temporary empty Git config and hook directory; no assertion skipped or weakened."
+    },
+    "windows_fix_targeted": {
+      "passed": 74,
+      "failed": 0,
+      "sha256": "a44652258eea4f60b182b10bbd9ba7316ebb84877a413593008ab11f09249a09"
+    }
   },
   "limits": [
     "静态规则覆盖已知命令与支持的包装，不推导任意解释器脚本。",

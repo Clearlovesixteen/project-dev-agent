@@ -171,8 +171,8 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1218651,
-      "sha256": "c88bdbe9437b2438943d7bc43768534748fee5ea3ea7613a5e4bcc4875867961"
+      "bytes": 1218940,
+      "sha256": "6c364a6738d60de12e6b8ef485e5d2807a5430eab6fcc8ff38ca30908636b3b7"
     },
     {
       "path": "runtime/hooks.mjs",

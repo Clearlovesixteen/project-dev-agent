@@ -53,4 +53,4 @@ jobs:
       - run: npm run build
       - run: npm run build:plugin
       - name: 原生 PowerShell 读取及真实打包 MCP、钩子回归
-        run: node --test --test-concurrency=2 dist/tests/shell-readonly.test.js dist/tests/readonly-hooks.integration.test.js
+        run: node --test --test-concurrency=2 dist/tests/shell-readonly.test.js dist/tests/readonly-hooks.integration.test.js dist/tests/sample.test.js
