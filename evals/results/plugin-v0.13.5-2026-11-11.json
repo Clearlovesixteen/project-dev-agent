@@ -1,0 +1,51 @@
+{
+  "version": "0.13.5",
+  "verified_at": "2026-11-11T08:42:55.644385+00:00",
+  "scope": "只读 shell 分类与跨会话任务误拦截修复；不更改任务归属保护或旧配置迁移策略",
+  "checks": {
+    "red_regression": {
+      "passed": 27,
+      "failed": 30,
+      "sha256": "e83f155a5396ae169edcbeeaa246a65eb0a4a743a14fca243555d3a3fc59984f"
+    },
+    "initial_targeted": {
+      "passed": 63,
+      "failed": 0,
+      "sha256": "cd889dee287a0c0068f244402de60d7cd9cc45a5c3486f409c41887f6e9f356a"
+    },
+    "local_full_initial": {
+      "passed": 386,
+      "failed": 2,
+      "cancelled": 2,
+      "note": "Specific write-denial reasons replaced by HOOK_DEADLINE under load, plus package relocation and workspace test timeouts; assertions were not relaxed.",
+      "sha256": "356290a3d320f26f6910fc40394908e4efb3d193c7f8a5839e96ef186f2495f2"
+    },
+    "isolated_retest": {
+      "passed": 82,
+      "failed": 0,
+      "cancelled": 0,
+      "note": "All failed groups rerun sequentially with independent temporary directory; packaged MCP/hooks and cross-session regression included.",
+      "sha256": "0de48eba9f0af7abd1480778a6913c5a75939c03c86b0c51a6e052d8b41c60ec"
+    },
+    "source_typecheck": "passed",
+    "skill_manifests": 3,
+    "remote_node_matrix": "required_before_merge",
+    "windows_powershell_ci": "required_before_merge",
+    "first_windows_ci": {
+      "result": "failed",
+      "reason": "Windows Git rejects Node devNull in sample initialization",
+      "action": "Use temporary empty Git config and hook directory; no assertion skipped or weakened."
+    },
+    "windows_fix_targeted": {
+      "passed": 74,
+      "failed": 0,
+      "sha256": "a44652258eea4f60b182b10bbd9ba7316ebb84877a413593008ab11f09249a09"
+    }
+  },
+  "limits": [
+    "静态规则覆盖已知命令与支持的包装，不推导任意解释器脚本。",
+    "Windows CI 运行原生 PowerShell 和真实打包 MCP/钩子；不等同在同事设备上实际安装或完整 Codex UI 验收。",
+    "只记录固定分类原因码，不含命令、参数、业务正文或路径。",
+    "原生宿主更新后仍需审查变更钩子并加载新会话。"
+  ]
+}

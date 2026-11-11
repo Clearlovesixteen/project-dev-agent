@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -101,6 +101,20 @@ test("sample creation refuses a destination inside the tool source", async () =>
   const toolRoot = resolve(moduleDirectory, "../..");
   await assert.rejects(createSample(join(toolRoot, "sample-must-not-be-created")), /工具包之外/);
   await assert.rejects(access(join(toolRoot, "sample-must-not-be-created")));
+});
+
+test("样例创建隔离无效全局 Git 配置，结束后不遗留控制目录或改变调用者设置", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const badConfig = join(fixture.root, "invalid-global-config"); await writeFile(badConfig, "[invalid\n");
+  const destination = join(fixture.root, "isolated-sample");
+  const moduleUrl = new URL("../src/sample/create.js", import.meta.url).href;
+  const script = `import { createSample } from ${JSON.stringify(moduleUrl)}; await createSample(process.argv[1]);`;
+  await execFileAsync(process.execPath, ["--input-type=module", "--eval", script, destination], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: badConfig },
+  });
+  assert.equal(await readFile(badConfig, "utf8"), "[invalid\n");
+  assert.ok((await readdir(fixture.root)).every(name => !name.startsWith(".project-dev-sample-git-")));
+  assert.match((await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: destination })).stdout.trim(), /^[a-f0-9]{40}$/);
 });
 
 test("a failed Git initialization removes only the newly created destination", async (t) => {

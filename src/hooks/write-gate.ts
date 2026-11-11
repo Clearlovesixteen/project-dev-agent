@@ -7,7 +7,7 @@ import { ParticipationStore } from "../workflow/participation.js";
 import { Interaction, interactionOwner, type InteractionContext } from "../workflow/interaction.js";
 import { implementationBasisReview } from "../quality/implementation-basis.js";
 import { denyWrite, type NativeHookInput } from "./contracts.js";
-import { patchPaths, projectTool, toolArguments, writeKind } from "./tool-policy.js";
+import { patchPaths, projectTool, toolArguments, toolCommandDecision, writeKind } from "./tool-policy.js";
 import { ProjectFiles } from "../storage/project-files.js";
 
 async function inputStaging(input: NativeHookInput, project: string) {
@@ -44,7 +44,9 @@ export function nativeToolIdentity(input: NativeHookInput, project: string, inte
 export async function checkProjectWrite(input: NativeHookInput, binding: WorktreeBinding, interaction: InteractionContext, home?: string): Promise<{ output: Record<string, unknown>; reason: string; ready: boolean; task?: string; coverage?: "observed" | "partial" }> {
   const kind = writeKind(input);
   if (!kind) return { output: {}, reason: "READ_ONLY_OR_UNSUPPORTED", ready: false };
-  const stop = (reason: string, instruction: string) => ({ output: denyWrite(`Project Dev Agent：${instruction}\nproject=${binding.root}；使用宿主当前 interaction，不向用户追加表单。补齐后重试。若实际调用成功后仍连续出现相同原因，先 plugin_status 核对当前进程版本并重新加载插件，不能反复建任务或换工具绕过。`), reason, ready: false });
+  const uncertain = toolCommandDecision(input)?.classification === "unknown"
+    ? "当前复杂命令尚不能可靠确认是否只读。仅需阅读时，保持原意拆分为可判定的读取步骤；实际修改仍须完成准备。" : "";
+  const stop = (reason: string, instruction: string) => ({ output: denyWrite(`Project Dev Agent：${uncertain}${instruction}\nproject=${binding.root}；使用宿主当前 interaction，不向用户追加表单。补齐后重试。若实际调用成功后仍连续出现相同原因，先 plugin_status 核对当前进程版本并重新加载插件，不能反复建任务或换工具绕过。`), reason, ready: false });
   try { await assertStateIgnored(binding); }
   catch { return stop("PROJECT_SETUP_REQUIRED", "当前项目未就绪。先调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open。"); }
   // 正式 CLI 的工具输入文件是受控中转，不是任务存储。仅允许 inputs/*.json，
