@@ -35,3 +35,22 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: 用目标 Node 运行完整测试及独立插件 MCP 流程
         run: npm run test:runtime
+
+  windows-readonly:
+    name: Windows PowerShell 与跨会话读取
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.6"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run build:plugin
+      - name: 原生 PowerShell 读取及真实打包 MCP、钩子回归
+        run: node --test --test-concurrency=2 dist/tests/shell-readonly.test.js dist/tests/readonly-hooks.integration.test.js

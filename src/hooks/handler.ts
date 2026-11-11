@@ -14,8 +14,9 @@ import { ContextReceipts } from "../context/receipts.js";
 import { interactionOwner, type InteractionContext } from "../workflow/interaction.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { HookInput, denyWrite } from "./contracts.js";
-import { projectTool, toolArguments, toolWorkingDirectory, writeKind } from "./tool-policy.js";
+import { projectTool, toolArguments, toolWorkingDirectory, toolCommandDecision, writeKind } from "./tool-policy.js";
 import { checkProjectWrite, nativeToolIdentity, observeWriteResult } from "./write-gate.js";
+import { observeCommandDecision } from "./command-observation.js";
 
 const continuation = /^(?:继续|接着|开始吧|改吧|修复掉|continue|go ahead)[。！!\s]*$/i;
 
@@ -26,7 +27,10 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
   if (!parsed.success) return {};
   const input = parsed.data, write = writeKind(input, pluginRoot), ownTool = projectTool(input.tool_name);
   // 读取和无关工具不反复查询项目，更不创建任务；未知 shell 仍须走修改准备检查。
-  if (input.hook_event_name === "PreToolUse" && !write && !ownTool || input.hook_event_name === "PostToolUse" && !write) return {};
+  if (input.hook_event_name === "PreToolUse" && !write && !ownTool || input.hook_event_name === "PostToolUse" && !write) {
+    await observeCommandDecision(input, toolCommandDecision(input, pluginRoot), home);
+    return {};
+  }
   await initializePluginRuntime(home);
   const started = performance.now(), settings = new RuntimeSettings(home), writer = new DiagnosticWriter(home);
   const trace = input.turn_id ?? control.trace ?? randomUUID();
@@ -40,6 +44,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     guard();
     const config = await settings.current(); automatic = config.mode === "auto"; control.onMode?.(config.mode);
     await writer.record("hook.received", event);
+    if (automatic) await observeCommandDecision(input, toolCommandDecision(input, pluginRoot), home);
     if (input.hook_event_name === "Stop") {
       let warning: string | undefined;
       if (automatic) {

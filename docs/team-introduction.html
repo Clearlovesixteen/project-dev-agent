@@ -91,7 +91,7 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </div>
 <div>
 <dt>当前阶段</dt>
-<dd>v0.13.4 · 小范围团队验证</dd>
+<dd>v0.13.5 · 小范围团队验证</dd>
 </div>
 </dl>
 </aside>
@@ -662,7 +662,7 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </div>
 <p class="intro-note">维护者从自己的 D1 查询导出元数据，可用现有 <code>insights</code> 命令生成私用报告。例如上下文失败集中时查查询链路；验收被拒绝也可能是保护正确生效，需要复核，不能把所有结果码都当作插件缺陷。</p>
 <aside class="policy-note">
-<b>当前默认策略 · v0.13.4</b>
+<b>当前默认策略 · v0.13.5</b>
 <p>新安装首次运行 MCP 或已信任钩子时，默认开启本地和远程诊断；安装说明告知采集范围，可随时关闭。旧配置中的关闭或自定义接收端保留，更新不会重新开启已关闭的上传。</p>
 <code>$project-dev-setup 关闭远程诊断上报</code>
 </aside>
@@ -680,7 +680,7 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 <b>首次：</b>安装插件 → 在业务仓库提供 PRD / SDD → 调用项目开发 → 自动初始化、建立索引，并围绕需求建模。</p>
 <p>
 <b>后续：</b>描述需求或纠正 → 查已有实现与相关规则 → Codex 开发 → 关联检查与真实验证 → 留下本次经验。</p>
-<p class="small">新安装默认 auto，按 Codex 要求信任 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、Stop 五类钩子后直接提需求。修改前核对本轮任务、上下文与目标范围；闲聊和阅读不建任务。旧 manual 在新版首次运行时自动切换 auto，无需额外开启命令；后续主动停用会保留。安装不等于钩子已信任或本轮已参与。</p>
+<p class="small">新安装默认 auto，按 Codex 要求信任 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、Stop 五类钩子后直接提需求。确认只读的正则搜索、Windows 文件读取和静态读取管道不受其他聊天任务阻挡；实际修改核对本轮任务、上下文与目标范围，动态脚本保守检查。闲聊和阅读不建任务。旧 manual 在新版首次运行时自动切换 auto，无需额外开启命令；后续主动停用会保留。安装不等于钩子已信任或本轮已参与。</p>
 <code>$project-dev-setup 为当前配置启用自动项目辅助</code>
 <p class="small">首次及更新后定义变化时，宿主可能要求重新审查信任。钩子不全量重扫、不运行项目脚本；同步辅助超时降级，用户已选择的开发工作流继续主导任务。</p>
 </div></div>
@@ -943,8 +943,8 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 <a class="repo" href="https://github.com/Clearlovesixteen/project-dev-agent" target="_blank" rel="noopener noreferrer">GitHub · Project Dev Agent ↗</a>
 </div>
 <footer class="footer">
-<span>团队介绍 · 基于 v0.13.4 能力整理 · 2026.11.10</span>
-<span>版本、默认策略与证据随发布同步核对；能力与边界以<a href="https://github.com/Clearlovesixteen/project-dev-agent/tree/v0.13.4" target="_blank" rel="noopener noreferrer">版本说明</a>为准，后续规划不代表已实现。</span>
+<span>团队介绍 · 基于 v0.13.5 能力整理 · 2026.11.10</span>
+<span>版本、默认策略与证据随发布同步核对；能力与边界以<a href="https://github.com/Clearlovesixteen/project-dev-agent/tree/v0.13.5" target="_blank" rel="noopener noreferrer">版本说明</a>为准，后续规划不代表已实现。</span>
 </footer>
 </main>
 
