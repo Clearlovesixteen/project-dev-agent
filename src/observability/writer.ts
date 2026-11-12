@@ -7,6 +7,9 @@ import { RuntimeSettings, runtimeFiles } from "../runtime/config.js";
 import { hasCode, type ProjectFiles } from "../storage/project-files.js";
 import { VERSION } from "../version.js";
 import { DiagnosticEvent, type TelemetryAttributes, type TelemetryEvent } from "./contracts.js";
+import { DiagnosticContext } from "./diagnostic-context.js";
+import { toolDiagnosticContext } from "./tool-context.js";
+import { pruneUploadReceipts } from "./upload-receipts.js";
 import { currentInteraction } from "../workflow/interaction.js";
 import { bestEffort } from "../runtime/best-effort.js";
 
@@ -44,6 +47,7 @@ export class DiagnosticWriter {
   }
   async record(name: TelemetryEvent["event_name"], input: {
     project?: string; session?: string; task?: string; trace?: string;
+    call?: string; operation?: string; workdir?: string; context?: DiagnosticContext;
     outcome?: TelemetryEvent["outcome"]; reason?: string; duration?: number;
     evidence?: TelemetryEvent["evidence_level"]; attributes?: TelemetryAttributes;
   } = {}): Promise<boolean> {
@@ -53,6 +57,9 @@ export class DiagnosticWriter {
       if (!config.diagnostics.local) return false;
       const files = await runtimeFiles(this.home), identity = await this.identity(files);
       const hash = (value: string) => createHmac("sha256", identity.secret).update(value).digest("hex");
+      // 调用事实使用单次身份读取去标识；无原文、路径或任意工具参数进入上下文。
+      const context = input.context ? DiagnosticContext.safeParse({ ...input.context,
+        node_version: process.versions.node, platform: process.platform, arch: process.arch }) : undefined;
       const event = DiagnosticEvent.parse({
         schema_version: 1, event_id: randomUUID(), occurred_at: new Date().toISOString(), event_name: name,
         upload_epoch: config.diagnostics.upload ? config.diagnostics.upload_epoch : null,
@@ -61,6 +68,9 @@ export class DiagnosticWriter {
         task_id: input.task ? hash(input.task) : null, runtime_version: VERSION, policy_version: 1, mode: config.mode,
         outcome: input.outcome ?? "ok", reason_code: input.reason ?? "OK", duration_ms: input.duration ?? 0,
         evidence_level: input.evidence ?? "observed", attributes: input.attributes ?? {},
+        ...(input.call ? { call_id: hash(input.call) } : {}), ...(input.operation ? { operation_id: hash(input.operation) } : {}),
+        ...(input.workdir ? { workdir_id: hash(input.workdir) } : {}),
+        ...(context?.success ? { context: context.data } : {}),
       });
       const line = JSON.stringify(event) + "\n";
       if (Buffer.byteLength(line) > 4096) return false;
@@ -112,21 +122,25 @@ export class DiagnosticWriter {
         }
       }
     } catch { /* 清理失败不影响开发；诊断读取会显示保留范围。 */ }
+    await pruneUploadReceipts(files).catch(() => {});
   }
 }
 
 /** 包装仅统计本插件动作；结构化 error 和 incomplete 不能被一次正常 Promise 完成掩盖。 */
 export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable<TelemetryAttributes["tool"]>, project: string | undefined,
   action: () => Promise<T>, transport: "mcp" | "cli" = "mcp",
-  metadata: { task_id?: string; input_kind?: TelemetryAttributes["input_kind"] } = {}): Promise<T> {
-  const started = performance.now(), interaction = currentInteraction(), trace = interaction?.turn_id ?? interaction?.operation_id ?? randomUUID();
+  metadata: { task_id?: string; input_kind?: TelemetryAttributes["input_kind"]; context?: DiagnosticContext } = {}): Promise<T> {
+  const call = randomUUID(), started = performance.now(), interaction = currentInteraction(), trace = interaction?.turn_id ?? interaction?.operation_id ?? randomUUID();
   try {
-    const result = await action(), envelope = (result && typeof result === "object" ? result : {}) as { structuredContent?: { outcome?: string; code?: string; data?: Record<string, unknown> }; outcome?: string; code?: string; data?: Record<string, unknown> };
+    const result = await action();
+    // 诊断提取与写入一起降级，不能让遥测异常把业务成功改成失败。
+    await bestEffort(async () => {
+    const envelope = (result && typeof result === "object" ? result : {}) as { structuredContent?: { outcome?: string; code?: string; data?: Record<string, unknown> }; outcome?: string; code?: string; data?: Record<string, unknown> };
     const value = envelope.structuredContent ?? envelope;
     const task = tool.startsWith("task_") && typeof value.data?.id === "string" ? value.data.id
       : typeof value.data?.task_id === "string" ? value.data.task_id : metadata.task_id;
-    await bestEffort(async () => {
-    await writer.record("tool.finished", { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, duration: performance.now() - started,
+    const context = toolDiagnosticContext(tool, metadata.context, value, interaction);
+    await writer.record("tool.finished", { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, call, ...(interaction?.operation_id ? { operation: interaction.operation_id } : {}), context, duration: performance.now() - started,
       ...(task ? { task } : {}),
       outcome: value.outcome === "error" ? "error" : value.outcome === "incomplete" ? "incomplete" : "ok",
       reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK", attributes: { tool, transport } });
@@ -135,7 +149,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
       : tool === "project_feedback_record" || tool === "feedback_record" ? "feedback.recorded" : tool === "project_context" ? "context.lookup" : undefined;
     if (eventName && value.outcome !== "error") {
       const spec = value.data?.spec_input as { kind?: TelemetryAttributes["input_kind"] } | undefined;
-      await writer.record(eventName, { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace,
+      await writer.record(eventName, { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, call, context,
         ...(task ? { task } : {}),
         reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK",
         outcome: value.outcome === "incomplete" ? "incomplete" : "ok", attributes: { tool, transport,
@@ -148,7 +162,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
     return result;
   } catch (error) {
     const reason = error && typeof error === "object" && "code" in error && typeof error.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.code) ? error.code : "TOOL_FAILED";
-    await bestEffort(() => writer.record("tool.finished", { ...(project ? { project } : {}), ...(metadata.task_id ? { task: metadata.task_id } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, duration: performance.now() - started, outcome: "error", reason, attributes: { tool, transport } }));
+    await bestEffort(() => writer.record("tool.finished", { ...(project ? { project } : {}), ...(metadata.task_id ? { task: metadata.task_id } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, call, context: toolDiagnosticContext(tool, metadata.context, { outcome: "error", code: reason }, interaction), duration: performance.now() - started, outcome: "error", reason, attributes: { tool, transport } }));
     throw error;
   }
 }

@@ -34,6 +34,8 @@ import {
 export const TaskOpenInputSchema = z
   .object({
     requirement: TextSchema,
+    task_kind: z.enum(["development", "merge_recovery"]).optional().describe("默认普通开发；用户明确要求解决当前 merge 冲突时使用 merge_recovery，服务限定原冲突文件"),
+    resolution_source: z.string().min(1).max(500).optional().describe("仅当用户选择用某Git引用整文件替换冲突文件时填写；服务固定提交并核对整文件结果。手工结合双方修改时省略，不将优先参考一方理解为整文件覆盖"),
     spec_input: SpecificationInput.optional(),
     scope_paths: z.array(RelativePathSchema).max(30).optional(),
     feedback_review: FeedbackReviewSchema.optional(),

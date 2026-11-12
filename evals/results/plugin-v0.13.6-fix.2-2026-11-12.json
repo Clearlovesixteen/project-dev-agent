@@ -1,0 +1,52 @@
+{
+  "version": "0.13.6-fix.2",
+  "verified_at": "2026-11-12T13:15:20.829531+00:00",
+  "client_status": "locally_verified_not_published_or_installed",
+  "collector_status": "deployed_and_d1_verified",
+  "full_regressions": [
+    {
+      "node": "20.19.6",
+      "concurrency": 4,
+      "tests": 467,
+      "pass": 467,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "concurrency": 2,
+      "tests": 467,
+      "pass": 467,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "typecheck": "passed",
+  "native_upgrade": {
+    "from": "0.13.5",
+    "to": "0.13.6-fix.2",
+    "mcp_tools": 16,
+    "settings_and_tasks_preserved": true,
+    "hook_discovery": "passed",
+    "host_hook_execution_verified": false,
+    "scope": "isolated_profile_and_local_marketplace"
+  },
+  "controlled_online_verification": {
+    "data": "synthetic_only",
+    "old_v1_compatible": true,
+    "packaged_stop_v2_acknowledged": true,
+    "persisted_rows": 3,
+    "context_persisted": true,
+    "duplicates_not_inserted": true,
+    "invalid_probe_not_inserted": true,
+    "disabled_stop_no_new_rows": true,
+    "real_host_automatic_execution": false
+  },
+  "limitations": [
+    "Node18 concurrency4 full run had one HOOK_DEADLINE in packaged merge recovery (466/467); concurrency2 final full run passed (467/467), with packaged recovery 808ms. Existing 1500/1800ms guard deadlines were not changed.",
+    "Structured observations do not prove business correctness. Missing fields and legacy data remain unknown.",
+    "Raw command, error, code and conversation attachment collection is not implemented; any such material requires separate user authorization."
+  ]
+}

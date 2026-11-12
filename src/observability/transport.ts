@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fetch as proxyFetch, ProxyAgent, type Response as ProxyResponse } from "undici";
 import { z } from "zod";
+import { BatchAcknowledgementV2 } from "./batch.js";
 
 const execute = promisify(execFile);
 type ProxyOptions = { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; readSystem?: (signal: AbortSignal) => Promise<string> };
@@ -58,10 +59,14 @@ export async function diagnosticProxy(endpoint: string, signal: AbortSignal, opt
   return proxyUrl(`http://${address}:${port}`);
 }
 
-async function acknowledgement(response: Response | ProxyResponse) {
+export class DiagnosticHttpError extends Error {
+  constructor(readonly status: number) { super(`UPLOAD_HTTP_${status}`); }
+}
+
+async function acknowledgement(response: Response | ProxyResponse, profile: 1 | 2) {
   if (!response.ok) {
     await response.body?.getReader().cancel().catch(() => {});
-    throw new Error(`UPLOAD_HTTP_${response.status}`);
+    throw new DiagnosticHttpError(response.status);
   }
   if (!response.body) throw new Error("UPLOAD_RESPONSE_INVALID");
   const reader = response.body.getReader(), chunks: Uint8Array[] = []; let bytes = 0;
@@ -73,18 +78,19 @@ async function acknowledgement(response: Response | ProxyResponse) {
       if (bytes > 4096) throw new Error("UPLOAD_RESPONSE_LIMIT");
       chunks.push(part.value);
     }
-    return z.object({ batch_id: z.string(), acknowledged: z.number().int().nonnegative() }).strict()
-      .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const raw: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return profile === 2 ? BatchAcknowledgementV2.parse(raw)
+      : z.object({ batch_id: z.string(), acknowledged: z.number().int().nonnegative() }).strict().parse(raw);
   } finally { await reader.cancel().catch(() => {}); }
 }
 
 /** 每次发送独立的代理连接，不重定向、不降低 TLS 校验、不把代理地址或凭证写进诊断。 */
-export async function sendDiagnosticBatch(input: { endpoint: string; token: string; body: string; signal: AbortSignal }, options: ProxyOptions = {}) {
+export async function sendDiagnosticBatch(input: { endpoint: string; token: string; body: string; signal: AbortSignal; profile?: 1 | 2 }, options: ProxyOptions = {}) {
   const proxy = await diagnosticProxy(input.endpoint, input.signal, options), agent = proxy ? new ProxyAgent(proxy) : undefined;
   const request = { method: "POST", redirect: "error" as const, signal: input.signal,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.token}` }, body: input.body };
   try {
     const response = agent ? await proxyFetch(input.endpoint, { ...request, dispatcher: agent }) : await fetch(input.endpoint, request);
-    return await acknowledgement(response);
+    return await acknowledgement(response, input.profile ?? 1);
   } finally { await agent?.destroy().catch(() => {}); }
 }

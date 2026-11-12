@@ -24,7 +24,7 @@ test("自动钩子在工作范围外正常跳过，不把其他项目计作上�
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const other = await createGitFixture(); t.after(other.cleanup);
   const home = await temporaryHome(t);
-  await new PluginSettings(home).prepare(fixture.path, { apply: true });
+  await new PluginSettings(home).configure({ workspace: fixture.path, apply: true, expected_revision: null });
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
   const prior = await readFile(join(home, "project-dev-agent/settings.json"), "utf8");
   const output = await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "outside-session", cwd: other.path, prompt: "修复这个项目" }, fixture.path, home);
@@ -127,4 +127,18 @@ test("诊断 HTML 说明链路明细的展示上限，不能用事件未截断�
   const report = summarizeEvents(events, { invalid: 0, truncated: false });
   assert.equal(report.traces_truncated, true);
   assert.ok(/201.*200|200.*201/s.test(renderInsights(report)), "报告必须同时写明 201 条总链路和 200 条展示上限");
+});
+
+
+test("恢复错误保留固定诊断原因，不上传仓库路径或指定分支正文", async t => {
+  const home = await temporaryHome(t), writer = new DiagnosticWriter(home);
+  for (const code of ["MERGE_RECOVERY_CHANGED", "MERGE_RECOVERY_NOT_STAGED", "MERGE_RECOVERY_SOURCE_MISMATCH", "MERGE_MARKERS_REMAIN", "UNMERGED_CHANGES"]) {
+    assert.equal(hookFailure({ code, message: "/private/team-app secret-branch" }, "guard").reason, code);
+    await observeTool(writer, "task_check", "/private/team-app", async () => ({ outcome: "incomplete", code,
+      data: { resolution_source: "secret-branch" }, diagnostics: [{ code, message: "/private/team-app secret-branch" }] }));
+  }
+  const events = (await writer.read()).events;
+  assert.equal(events.filter(event => event.event_name === "tool.finished").length, 5);
+  assert.ok(!JSON.stringify(events).includes("secret-branch"));
+  assert.ok(!JSON.stringify(events).includes("/private/team-app"));
 });

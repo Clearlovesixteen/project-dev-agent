@@ -2,6 +2,8 @@ import { RelativePathSchema } from "../domain/common.js";
 import { AppError } from "../domain/error.js";
 import type { WorktreeBinding } from "./baseline.js";
 import { assertObjectId, decodeGitOutput, readGit } from "./command.js";
+import type { MergeRecovery } from "../domain/merge-recovery.js";
+import { assertMergeRecovery } from "./merge-recovery.js";
 
 function nulFields(output: Buffer): string[] {
   if (output.length === 0) return [];
@@ -18,12 +20,13 @@ function addPath(paths: Set<string>, candidate: string | undefined): void {
 }
 
 /** Effective changes from the starting commit to the current worktree, plus untracked files. */
-export async function changedPaths(binding: WorktreeBinding, baselineHead: string): Promise<string[]> {
+export async function changedPaths(binding: WorktreeBinding, baselineHead: string, recovery?: MergeRecovery): Promise<string[]> {
   assertObjectId(baselineHead);
   const unmerged = await readGit(binding.root, ["ls-files", "--unmerged", "-z"]);
-  if (unmerged.stdout.length !== 0) {
-    throw new AppError("UNMERGED_CHANGES", "完成任务审查前，请先解决 Git 合并冲突");
+  if (unmerged.stdout.length !== 0 && !recovery) {
+    throw new AppError("UNMERGED_CHANGES", "普通任务不能在合并冲突中建立或验收；若当前需求就是修复冲突，请 task_open(task_kind:merge_recovery)，并保留用户指定的 resolution_source、原冲突范围和实现依据");
   }
+  if (recovery) await assertMergeRecovery(binding, recovery);
   const diff = await readGit(binding.root, [
     "diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "--find-renames",
     baselineHead, "--",

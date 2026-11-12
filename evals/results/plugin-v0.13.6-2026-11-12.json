@@ -1,0 +1,61 @@
+{
+  "version": "0.13.6",
+  "verified_at": "2026-11-12T13:28:35.462000+00:00",
+  "typecheck": "passed",
+  "full_regressions": [
+    {
+      "node": "20.19.6",
+      "concurrency": 2,
+      "tests": 467,
+      "pass": 467,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    {
+      "node": "18.19.0",
+      "concurrency": 2,
+      "tests": 467,
+      "pass": 467,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    }
+  ],
+  "native_upgrade": {
+    "from": "0.13.5",
+    "to": "0.13.6",
+    "result": "passed",
+    "mcp_tools": 16,
+    "settings_and_tasks_preserved": true,
+    "failed_refresh_keeps_old_install": true,
+    "legacy_scope_migration_verified": true,
+    "cross_project_prepare_preserves_original_task": true,
+    "hook_discovery": "passed",
+    "host_hook_execution_verified": false,
+    "scope": "isolated Codex profile and local Git marketplace"
+  },
+  "controlled_online_verification": {
+    "runtime_version": "0.13.6",
+    "data": "synthetic only",
+    "legacy_v1": "passed",
+    "packaged_stop_v2": "passed",
+    "rows": 3,
+    "rejected_probe_rows": 0,
+    "structured_context_persisted": true,
+    "duplicate_not_inserted": true,
+    "disabled_stop_no_new_rows": true,
+    "host_automatic_execution": false
+  },
+  "ci": {
+    "candidate_branch": "release/v0.13.6",
+    "workflow": ".github/workflows/runtime-compatibility.yml",
+    "runs": "https://github.com/Clearlovesixteen/project-dev-agent/actions?query=branch%3Arelease%2Fv0.13.6",
+    "release_gate": "candidate CI must pass before advancing main and creating the version tag"
+  },
+  "limitations": [
+    "Earlier fix.2 full tests at concurrency4 on Node18 hit one packaged merge hook deadline. Final 0.13.6 full tests use concurrency2, preserving all assertions and existing hook deadlines; packaged Node18 merge check was approximately845ms.",
+    "Host hook discovery does not imply user trust or real host automatic execution.",
+    "Default diagnostics exclude code, command/error text, PRD/SDD and conversations. Raw attachment upload is not implemented."
+  ]
+}

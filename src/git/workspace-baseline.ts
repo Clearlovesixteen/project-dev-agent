@@ -9,14 +9,17 @@ import type { WorktreeBinding } from "./baseline.js";
 import { reviewSnapshot } from "./review-snapshot.js";
 import { workspaceContent } from "./workspace-content.js";
 import { readGit } from "./command.js";
+import type { MergeRecovery } from "../domain/merge-recovery.js";
 const blobPath = (hash: string) =>
   `.project-dev/local/baselines/blobs/${hash}.json`;
 
 /** 初始改动内容按哈希分块保存；不 stash、提交、改 index 或重写业务文件。 */
 export async function captureWorkspaceBaseline(
   binding: WorktreeBinding,
+  recovery?: MergeRecovery,
 ): Promise<WorkspaceBaseline> {
-  const before = await reviewSnapshot(binding, binding.head),
+  const options = recovery ? { recovery, allow_unmerged: true } : {};
+  const before = await reviewSnapshot(binding, binding.head, undefined, options),
     files = new ProjectFiles(binding.root),
     entries = [];
   let total = 0;
@@ -53,7 +56,7 @@ export async function captureWorkspaceBaseline(
       entries.push({ ...entry, chunks });
     } else entries.push(entry);
   }
-  if ((await reviewSnapshot(binding, binding.head)).hash !== before.hash)
+  if ((await reviewSnapshot(binding, binding.head, undefined, options)).hash !== before.hash)
     throw new AppError(
       "REVIEW_SNAPSHOT_CHANGED",
       "建立接入基线时内容变化，请重新接入",
@@ -62,6 +65,7 @@ export async function captureWorkspaceBaseline(
     version: 1,
     snapshot: before.hash,
     entries,
+    ...(recovery ? { merge_recovery: recovery } : {}),
   });
 }
 /** 读取保存的接入内容供原文依据和复用比较使用；没有覆盖项时才读取固定 Git 提交。 */

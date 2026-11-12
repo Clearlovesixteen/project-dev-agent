@@ -4,8 +4,11 @@ import { DIAGNOSTIC_NOTICE, RuntimeSettings, runtimeFiles } from "../runtime/con
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
 import { DiagnosticWriter } from "./writer.js";
-import { sendDiagnosticBatch } from "./transport.js";
+import { DiagnosticHttpError, sendDiagnosticBatch } from "./transport.js";
 import { uploadQueue } from "./upload-queue.js";
+import { assertAcknowledgementV2, hasDiagnosticDetail, legacyDiagnosticProjection, type BatchAcknowledgementV2 } from "./batch.js";
+import { saveUploadReceipt } from "./upload-receipts.js";
+import { bestEffort } from "../runtime/best-effort.js";
 
 const CURSOR = "project-dev-agent/telemetry/upload.json";
 const Cursor = z.object({ epoch: z.uuid(), positions: z.record(z.string(), z.number().int().nonnegative()),
@@ -15,7 +18,7 @@ const Cursor = z.object({ epoch: z.uuid(), positions: z.record(z.string(), z.num
 export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
   let release: (() => Promise<void>) | undefined;
   const deadline = performance.now() + (Number.isFinite(timeoutMs) ? Math.min(5000, Math.max(50, timeoutMs)) : 4000);
-  let sent = 0;
+  let sent = 0, rejected = 0, omitted = 0, legacyOnly = false;
   const settings = new RuntimeSettings(home);
   try {
     const diagnostics = (await settings.current()).diagnostics;
@@ -51,13 +54,43 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
       const batchId = createHash("sha256").update(JSON.stringify(batch)).digest("hex");
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), remaining);
       try {
-        const ack = await sendDiagnosticBatch({ endpoint: diagnostics.endpoint, token: diagnostics.write_token, signal: controller.signal,
-          body: JSON.stringify({ schema_version: 1, batch_id: batchId, events: batch }),
-        });
-        if (ack.batch_id !== batchId || ack.acknowledged !== batch.length) throw new Error("UPLOAD_ACK_MISMATCH");
-        sent += batch.length;
+        let accepted = 0, pageOmitted = 0, pageRejected: BatchAcknowledgementV2["rejected"] = [];
+        const detailed = batch.filter(hasDiagnosticDetail).length;
+        const sendLegacy = async () => {
+          controller.signal.throwIfAborted();
+          if (!await unchanged()) throw new Error("UPLOAD_CONFIGURATION_CHANGED");
+          const events = batch.map(legacyDiagnosticProjection), projectedId = createHash("sha256").update(JSON.stringify(events)).digest("hex");
+          const ack = await sendDiagnosticBatch({ endpoint: diagnostics.endpoint!, token: diagnostics.write_token!, signal: controller.signal,
+            body: JSON.stringify({ schema_version: 1, batch_id: projectedId, events }) });
+          if (!("acknowledged" in ack) || ack.batch_id !== projectedId || ack.acknowledged !== events.length) throw new Error("UPLOAD_ACK_MISMATCH");
+          accepted = events.length; pageOmitted = detailed;
+        };
+        if (batch.length && detailed && !legacyOnly) {
+          const endpoint = new URL(diagnostics.endpoint); endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/v2";
+          try {
+            const ack = await sendDiagnosticBatch({ endpoint: endpoint.href, token: diagnostics.write_token, signal: controller.signal, profile: 2,
+              body: JSON.stringify({ schema_version: 2, batch_id: batchId, install_id: batch[0]!.install_id, events: batch }) });
+            if (!("schema_version" in ack)) throw new Error("UPLOAD_ACK_MISMATCH");
+            assertAcknowledgementV2(ack, batchId, batch.length);
+            accepted = ack.accepted_indexes.length; pageRejected = ack.rejected;
+          } catch (error) {
+            // 仅独立v2路径明确不存在时降级一次；400/认证/限流/数据库失败绝不能被当成坏数据跳过。
+            if (!(error instanceof DiagnosticHttpError) || ![404, 405].includes(error.status)) throw error;
+            legacyOnly = true; await sendLegacy();
+          }
+        } else if (batch.length) await sendLegacy();
+        sent += accepted;
+        if (!await unchanged()) return { state: "configuration_changed", sent };
+        if (pageRejected.length || page.discarded.length || pageOmitted) {
+          // 无事件的本地坏行页用位置摘要区分；任何拒绝/降级证据写盘失败均保留旧游标，可幂等重试。
+          const receiptId = batch.length ? batchId : createHash("sha256").update(JSON.stringify(page.positions)).digest("hex");
+          await saveUploadReceipt(files, { batch_id: receiptId, epoch: diagnostics.upload_epoch, at: new Date().toISOString(),
+            accepted_count: accepted, omitted_detail_count: pageOmitted, rejected: pageRejected, local_rejections: page.discarded });
+          rejected += pageRejected.length; omitted += pageOmitted;
+        }
       } catch (error) {
-        if (await unchanged()) {
+        if (!await unchanged()) return { state: "configuration_changed", sent };
+        {
           failures = Math.min(10, failures + 1);
           await save({ epoch: diagnostics.upload_epoch, positions, failures,
             next_attempt: Date.now() + Math.min(3_600_000, 30_000 * 2 ** (failures - 1)) });
@@ -75,7 +108,10 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     if (!await unchanged()) return { state: "configuration_changed", sent };
     await save({ epoch: diagnostics.upload_epoch, failures: 0, next_attempt: 0,
       positions: queue.positions });
-    return { state: queue.pending ? "pending" : "ok", sent, invalid: queue.invalid };
+    if (rejected || queue.invalid || omitted) await bestEffort(() => new DiagnosticWriter(settings.home).record("telemetry.gap", {
+      outcome: "degraded", reason: omitted ? "UPLOAD_V1_CONTEXT_OMITTED" : "UPLOAD_EVENTS_REJECTED",
+      attributes: { selected_count: rejected + queue.invalid, candidate_count: omitted, transport: "cli" } }), 50);
+    return { state: queue.pending ? "pending" : rejected || queue.invalid || omitted ? "partial" : "ok", sent, invalid: queue.invalid, rejected, omitted };
   } catch {
     await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
     return { state: "unavailable", sent };

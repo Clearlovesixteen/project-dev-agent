@@ -5,7 +5,7 @@ export type CommandClass = "read_only" | "write" | "unknown" | "management";
 /** 规范化跨平台程序名；只处理 exe，不把任意 bat/cmd 脚本伪装成同名系统程序。 */
 export function programName(value: string) { return posix.basename(win32.basename(value)).replace(/\.exe$/i, "").toLowerCase(); }
 
-const READ = new Set(["pwd", "ls", "cat", "head", "tail", "wc", "stat", "file", "readlink", "realpath", "rg", "grep",
+const READ = new Set(["pwd", "ls", "cat", "nl", "head", "tail", "wc", "stat", "file", "readlink", "realpath", "rg", "grep",
   "shasum", "sha256sum", "md5", "md5sum", "cd", "echo", "printf"]);
 const POWERSHELL_READ = new Set(["get-content", "get-childitem", "get-item", "get-location", "select-string", "select-object",
   "measure-object", "format-list", "format-table", "get-command", "get-filehash", "resolve-path", "test-path", "set-location", "write-output", "write-host"]);
@@ -54,7 +54,9 @@ export function commandCapability(words: string[], dialect: ShellDialect): Comma
   if (name === "sed") {
     if (options.some(arg => /^-.*i|^--in-place(?:=|$)/.test(arg))) return "write";
     const rest = args[0] === "-n" ? args.slice(1) : args;
-    return /^\d+(?:,\d+)?p$/.test(rest[0] ?? "") && rest.length > 1 && rest.slice(1).every(arg => !arg.startsWith("-")) ? "read_only" : "unknown";
+    // 数字范围的 p 只输出文本；无文件参数时读取 stdin，覆盖 nl | sed 的常见阅读方式。
+    // 不放开其他脚本、执行/写文件指令或后续选项。
+    return /^\d+(?:,\d+)?p$/.test(rest[0] ?? "") && rest.slice(1).every(arg => !arg.startsWith("-")) ? "read_only" : "unknown";
   }
   return "unknown";
 }

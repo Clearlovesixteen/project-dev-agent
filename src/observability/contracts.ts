@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DiagnosticContext } from "./diagnostic-context.js";
 
 const Opaque = z.string().regex(/^[a-f0-9]{64}$/);
 export const EventName = z.enum(["hook.received", "hook.finished", "scope.resolved", "context.lookup", "context.prepared", "context.emitted",
@@ -24,7 +25,7 @@ export const EventAttributes = z.object({
   coverage: z.enum(["observed", "partial", "unknown"]).optional(),
   truncated: z.boolean().optional(),
 }).strict();
-export const DiagnosticEvent = z.object({
+export const LegacyDiagnosticEvent = z.object({
   schema_version: z.literal(1), event_id: z.uuid(), occurred_at: z.string().datetime(),
   upload_epoch: z.uuid().nullable().default(null),
   event_name: EventName, install_id: z.uuid(), trace_id: Opaque,
@@ -37,5 +38,10 @@ export const DiagnosticEvent = z.object({
   evidence_level: z.enum(["observed", "agent_reported", "human_reviewed"]),
   attributes: EventAttributes,
 }).strict();
+/** 新增上下文仅由 v2 传输入口接收；旧白名单冻结，兼容投影不能混入新增字段。 */
+export const DiagnosticEvent = LegacyDiagnosticEvent.extend({
+  call_id: Opaque.optional(), operation_id: Opaque.optional(), workdir_id: Opaque.optional(),
+  context: DiagnosticContext.optional(),
+});
 export type TelemetryEvent = z.infer<typeof DiagnosticEvent>;
 export type TelemetryAttributes = z.infer<typeof EventAttributes>;

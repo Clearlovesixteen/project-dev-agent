@@ -42,7 +42,8 @@ export async function recordImplementationBasis(
       "实现决策必须关联本任务实际存在的验收项",
     );
   }
-  const before = await reviewSnapshot(binding, head, initial),
+  const options = initial?.merge_recovery ? { allow_unmerged: true } : {};
+  const before = await reviewSnapshot(binding, head, initial, options),
     files = new ProjectFiles(binding.root),
     { config } = await loadConfig(files);
   for (const reference of basis.references) {
@@ -62,7 +63,7 @@ export async function recordImplementationBasis(
     }
   }
   // 避免引用读取期间代码变化，使记录的时机和快照与引用不属于同一工作树状态。
-  if ((await reviewSnapshot(binding, head, initial)).hash !== before.hash)
+  if ((await reviewSnapshot(binding, head, initial, options)).hash !== before.hash)
     throw new AppError(
       "REVIEW_SNAPSHOT_CHANGED",
       "记录实现依据期间代码变化，请重新核对",

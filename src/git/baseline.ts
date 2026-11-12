@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { AppError } from "../domain/error.js";
 import type { Task } from "../domain/task.js";
 import { assertObjectId, gitLine, readGit } from "./command.js";
+import { assertMergeRecovery } from "./merge-recovery.js";
 
 export interface WorktreeBinding {
   root: string;
@@ -96,4 +97,5 @@ export async function assertBaseline(binding: WorktreeBinding, task: Task): Prom
   if (result.exitCode !== 0) {
     throw new AppError("BASELINE_NOT_REACHABLE", "任务开始时的提交已不在当前提交的祖先链中");
   }
+  if (task.workspace_baseline?.merge_recovery) await assertMergeRecovery(current, task.workspace_baseline.merge_recovery);
 }

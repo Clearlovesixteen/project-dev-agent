@@ -104,11 +104,15 @@ test("auto 的 Git 发现超时仍保留轻量入口，不将未准备摘要当�
 
 test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子的期限不受影响", async t => {
   const home = await mkdtemp(join(tmpdir(), "pda-stop-ack-")); t.after(() => rm(home, { recursive: true, force: true }));
-  let received = 0;
+  let received = 0; const profiles: number[] = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const batch = JSON.parse(Buffer.concat(chunks).toString()); received += batch.events.length;
-    setTimeout(() => response.end(JSON.stringify({ batch_id: batch.batch_id, acknowledged: batch.events.length })), 1800);
+    const batch = JSON.parse(Buffer.concat(chunks).toString()); received += batch.events.length; profiles.push(batch.schema_version);
+    // 新版Stop含结构化诊断，接收端必须按v2逐项持久确认，不能在新入口伪装成旧ACK。
+    const ack = batch.schema_version === 2
+      ? { schema_version: 2, batch_id: batch.batch_id, accepted_indexes: batch.events.map((_event: unknown, index: number) => index), rejected: [] }
+      : { batch_id: batch.batch_id, acknowledged: batch.events.length };
+    setTimeout(() => response.end(JSON.stringify(ack)), 1800);
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -122,6 +126,7 @@ test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子�
   assert.equal(cursor.failures, 0, "持久确认已收到时不能仍保留失败游标");
   assert.ok(Object.values(cursor.positions).some(value => Number(value) >= 2));
   assert.equal(received, 2);
+  assert.deepEqual(profiles, [2]);
   const events = (await new DiagnosticWriter(home).read()).events;
   assert.ok(events.some(event => event.event_name === "hook.finished"));
   assert.ok(!events.some(event => event.reason_code === "HOOK_DEADLINE"));

@@ -93,14 +93,14 @@ test("first project use previews without writes, then initializes only that repo
   assert.equal(applied.state_ignored, true);
   assert.equal(applied.worktree_clean, false);
   const saved = await readFile(config, "utf8"), excluded = await readFile(exclude, "utf8");
-  assert.equal(JSON.parse(saved).workspace, await realpath(fixture.path));
+  assert.deepEqual(JSON.parse(saved).projects.map((item: { root: string }) => item.root), [await realpath(fixture.path)]);
   assert.match(excluded, /\/\.project-dev\/local\//);
   await new PluginSettings(home).prepare(fixture.path, { apply: true });
   assert.equal(await readFile(config, "utf8"), saved);
   assert.equal(await readFile(exclude, "utf8"), excluded);
   assert.equal(await readFile(ignore, "utf8"), "node_modules/\n");
   assert.deepEqual(await readFile(join(fixture.path, "AGENTS.md")), instructions);
-  await assert.rejects(settings.prepare(fixture.root, { apply: true }), { code: "PROJECT_OUTSIDE_WORKSPACE" });
+  await assert.rejects(settings.prepare(fixture.root, { apply: true }), { code: "NOT_GIT_WORKTREE" });
   assert.equal(await readFile(config, "utf8"), saved);
 });
 
@@ -122,6 +122,7 @@ test("invalid roots and unsafe local state cannot initialize the plugin", async 
   const settings = new PluginSettings(home);
   await assert.rejects(settings.prepare(undefined, { apply: true }), { code: "PROJECT_REQUIRED" });
   await assert.rejects(settings.prepare("relative", { apply: true }), { code: "PROJECT_REQUIRED" });
+  await assert.rejects(settings.prepare(join(fixture.root, "does-not-exist"), { apply: true }), { code: "PROJECT_PATH_INVALID" });
   await assert.rejects(settings.prepare(fixture.root, { apply: true }), { code: "NOT_GIT_WORKTREE" });
   await assert.rejects(settings.prepare(join(fixture.path, "src"), { apply: true }), { code: "WORKTREE_ROOT_REQUIRED" });
   await symlink(home, join(fixture.path, ".project-dev"));
@@ -143,7 +144,7 @@ test("automatic initialization preserves malformed settings and another writer's
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
-test("concurrent first use in different projects cannot replace the winning workspace", async (t) => {
+test("concurrent first use enrolls both exact projects without allowing their parent", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const second = await createSample(join(fixture.root, "second project"));
   const home = join(fixture.root, "codex"); await mkdir(home);
@@ -151,12 +152,11 @@ test("concurrent first use in different projects cannot replace the winning work
     new PluginSettings(home).prepare(fixture.path, { apply: true }),
     new PluginSettings(home).prepare(second.path, { apply: true }),
   ]);
-  assert.equal(attempts.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(attempts.filter((result) => result.status === "fulfilled").length, 2, JSON.stringify(attempts));
   const saved = JSON.parse(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"));
-  const winner = attempts[0]!.status === "fulfilled" ? fixture.path : second.path;
-  assert.equal(saved.workspace, await realpath(winner));
-  const failed = attempts.find((result) => result.status === "rejected") as PromiseRejectedResult;
-  assert.ok(["PLUGIN_SETTINGS_CHANGED", "PLUGIN_SETTINGS_BUSY", "PROJECT_OUTSIDE_WORKSPACE"].includes(failed.reason.code));
+  assert.equal(saved.mode, "projects");
+  assert.deepEqual(saved.projects.map((item: { root: string }) => item.root).sort(), [await realpath(fixture.path), await realpath(second.path)].sort());
+  await assert.rejects(new PluginSettings(home).bind(fixture.root), { code: "PROJECT_NOT_ENROLLED" });
 });
 test("配置遗留锁自动恢复，仍存活或无法识别的锁继续保留", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);

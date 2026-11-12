@@ -9,6 +9,9 @@ import { implementationBasisReview } from "../quality/implementation-basis.js";
 import { denyWrite, type NativeHookInput } from "./contracts.js";
 import { patchPaths, projectTool, toolArguments, toolCommandDecision, writeKind } from "./tool-policy.js";
 import { ProjectFiles } from "../storage/project-files.js";
+import { mergeRecoveryWrite } from "./merge-recovery-gate.js";
+import type { DiagnosticContext } from "../observability/diagnostic-context.js";
+import { diagnosticAction, diagnosticCause } from "./diagnostic-context.js";
 
 async function inputStaging(input: NativeHookInput, project: string) {
   if (writeKind(input) !== "patch") return false;
@@ -41,51 +44,81 @@ export function nativeToolIdentity(input: NativeHookInput, project: string, inte
 }
 
 /** 原生工具检查只读项目状态；不替用户运行脚本、修改代码、终止任务或扩大工作范围。 */
-export async function checkProjectWrite(input: NativeHookInput, binding: WorktreeBinding, interaction: InteractionContext, home?: string): Promise<{ output: Record<string, unknown>; reason: string; ready: boolean; task?: string; coverage?: "observed" | "partial" }> {
+export async function checkProjectWrite(input: NativeHookInput, binding: WorktreeBinding, interaction: InteractionContext, home?: string, pluginRoot?: string, diagnostic: DiagnosticContext = { version: 1 }): Promise<{ output: Record<string, unknown>; reason: string; ready: boolean; task?: string; coverage?: "observed" | "partial" }> {
   const kind = writeKind(input);
   if (!kind) return { output: {}, reason: "READ_ONLY_OR_UNSUPPORTED", ready: false };
   const uncertain = toolCommandDecision(input)?.classification === "unknown"
     ? "当前复杂命令尚不能可靠确认是否只读。仅需阅读时，保持原意拆分为可判定的读取步骤；实际修改仍须完成准备。" : "";
-  const stop = (reason: string, instruction: string) => ({ output: denyWrite(`Project Dev Agent：${uncertain}${instruction}\nproject=${binding.root}；使用宿主当前 interaction，不向用户追加表单。补齐后重试。若实际调用成功后仍连续出现相同原因，先 plugin_status 核对当前进程版本并重新加载插件，不能反复建任务或换工具绕过。`), reason, ready: false });
+  let observedTask: string | undefined;
+  const stop = (reason: string, instruction: string) => {
+    diagnostic.decision = "deny"; diagnostic.required_action = reason === "TASK_BINDING_REQUIRED" && diagnostic.task_state === "not_bound" ? "check_task" : diagnosticAction(reason);
+    return { output: denyWrite(`Project Dev Agent：${uncertain}${instruction}\nproject=${binding.root}；使用宿主当前 interaction，不向用户追加表单。补齐后重试。若实际调用成功后仍连续出现相同原因，先 plugin_status 核对当前进程版本并重新加载插件，不能反复建任务或换工具绕过。`), reason, ready: false, ...(observedTask ? { task: observedTask } : {}) };
+  };
+  diagnostic.stage = "state";
   try { await assertStateIgnored(binding); }
   catch { return stop("PROJECT_SETUP_REQUIRED", "当前项目未就绪。先调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open。"); }
   // 正式 CLI 的工具输入文件是受控中转，不是任务存储。仅允许 inputs/*.json，
   // 不放行对 tasks、模型、检查结果或任意业务路径的直接写入。
-  if (await inputStaging(input, binding.root)) return { output: {}, reason: "PLUGIN_INPUT_STAGING", ready: true, coverage: "partial" };
+  if (await inputStaging(input, binding.root)) { diagnostic.decision = "allow"; diagnostic.required_action = "none"; return { output: {}, reason: "PLUGIN_INPUT_STAGING", ready: true, coverage: "partial" }; }
+  diagnostic.stage = "context";
   const store = new ParticipationStore(home), state = await store.read(binding.root, interaction, binding.branch);
+  diagnostic.context_state = !state || !state.context_at ? "missing" : Date.now() - state.context_at > 30 * 60_000 ? "expired" : !state.context_ready || state.branch !== binding.branch ? "not_ready" : "ready";
   if (!state || state.branch !== binding.branch || !state.context_at || Date.now() - state.context_at > 30 * 60_000 || !state.context_ready)
     return stop("CONTEXT_QUERY_REQUIRED", "修改前须查询本项目 project_context 的 implementation_context，并读取相关规范和同类实现；没有结构索引时先 project_scan，然后建立或恢复 task_open/task_check。");
+  diagnostic.stage = "task";
   const task = await new TaskStore(binding.root).active(binding.branch);
+  if (!task) diagnostic.task_state = "missing";
   if (!task) return stop("TASK_BINDING_REQUIRED", "本分支没有活跃任务。先 task_open 保存本次需求、验收和项目实现依据，再记录关联修改清单。");
+  observedTask = task.id; diagnostic.task_phase = task.phase; diagnostic.task_kind = task.workspace_baseline?.merge_recovery ? "merge_recovery" : "development";
+  diagnostic.stage = "owner";
   const owner = interactionOwner(interaction);
+  diagnostic.task_state = !task.owner ? "unowned" : task.owner.session_id !== owner.session_id || task.owner.actor_id !== owner.actor_id ? "other_owner" : "owned";
   if (task.owner && (task.owner.session_id !== owner.session_id || task.owner.actor_id !== owner.actor_id))
     return stop("TASK_SESSION_MISMATCH", "本分支任务属于另一聊天。保留原任务；使用独立工作树，或由原会话显式挂起任务后再开始，不能自动中止或接管。");
-  if (state.task_id !== task.id) return stop("TASK_BINDING_REQUIRED", "本会话尚未核对当前任务。相关任务用 task_check 恢复；新需求不得直接沿用不相关任务。");
-  if (!interaction.turn_id || state.last_turn !== interaction.turn_id)
+  if (state.task_id !== task.id) { diagnostic.task_state = "not_bound"; return stop("TASK_BINDING_REQUIRED", "本会话尚未核对当前任务。相关任务用 task_check 恢复；新需求不得直接沿用不相关任务。"); }
+  diagnostic.stage = "turn";
+  if (!interaction.turn_id || state.last_turn !== interaction.turn_id) {
+    diagnostic.task_state = "not_confirmed_this_turn";
     return stop("TASK_TURN_REVIEW_REQUIRED", "本轮尚未核对任务。继续同一需求先 task_check；范围变化重新查询 project_context 并更新影响清单，独立需求另建任务。");
-  try { await assertBaseline(binding, task); }
-  catch { return stop("TASK_BASELINE_REVIEW_REQUIRED", "当前任务基线不适用。调用 task_check 查看恢复信息，切回原分支继续，或显式挂起旧任务后建立本分支任务。"); }
+  }
+  diagnostic.stage = "baseline";
+  try { await assertBaseline(binding, task); diagnostic.baseline_state = "valid"; }
+  catch (error) { diagnostic.baseline_state = "invalid"; diagnostic.cause_code = diagnosticCause(error); return stop("TASK_BASELINE_REVIEW_REQUIRED", "当前任务基线不适用。调用 task_check 查看恢复信息，切回原分支继续，或显式挂起旧任务后建立本分支任务。"); }
+  diagnostic.stage = "basis";
   const basis = task.implementation_bases?.at(-1);
+  if (!basis) diagnostic.basis_state = "missing";
   if (!basis) return stop("IMPLEMENTATION_BASIS_REQUIRED", "先读取现有能力，使用 task_update.implementation_basis 保存复用、模块化和本次实现选择及原文依据；不要另起已有封装。");
   const review = await implementationBasisReview(binding, task, basis.review_snapshot);
+  diagnostic.basis_state = review.references.some(reference => reference.state === "stale") ? "stale" : "ready";
   if (review.references.some(reference => reference.state === "stale"))
     return stop("IMPLEMENTATION_REFERENCE_STALE", "实现依据来源已失效。重新读取当前源码并追加 implementation_basis，保留原记录。");
+  const recoveryGate = await mergeRecoveryWrite(input, binding, task, pluginRoot, diagnostic);
+  if (recoveryGate) return stop(recoveryGate.reason, recoveryGate.instruction);
   const planned = task.change_items.filter(item => item.action === "modify").map(item => item.target_path);
+  diagnostic.stage = "target"; diagnostic.planned_count = Math.min(planned.length, 500);
+  if (!planned.length) diagnostic.target_scope = "unplanned";
   if (!planned.length) return stop("WRITE_SCOPE_REQUIRED", "先用 task_update.change_items 记录本次修改位置、原因和相关验收，保留已有 ID。");
   if (kind === "patch") {
     const paths = patchPaths(input);
+    if (!paths.length && task.workspace_baseline?.merge_recovery && ["Edit", "Write"].includes(input.tool_name ?? "") && typeof toolArguments(input)?.file_path === "string")
+      paths.push(toolArguments(input)!.file_path as string);
+    diagnostic.target_count = Math.min(paths.length, 500); diagnostic.target_scope = "unknown";
     if (!paths.length) return stop("WRITE_TARGET_UNKNOWN", "无法识别补丁目标。使用标准 apply_patch 文件头，先记录目标位置后重试。");
     for (const path of paths) {
       const target = relative(binding.root, isAbsolute(path) ? path : resolve(input.cwd, path)).split(sep).join("/");
-      if (target === ".." || target.startsWith("../") || isAbsolute(target))
+      if (target === ".." || target.startsWith("../") || isAbsolute(target)) {
+        diagnostic.target_scope = "outside";
         return stop("WRITE_PROJECT_MISMATCH", "补丁包含当前项目之外的位置。拆分修改并核对对应项目范围，不能自动扩大配置。");
-      if (!planned.includes(target)) return stop("WRITE_SCOPE_REQUIRED", `补丁目标 ${target} 尚未记录在本任务修改清单。核对关联范围后追加清单，再重试。`);
+      }
+      if (!planned.includes(target)) { diagnostic.target_scope = "unplanned"; return stop("WRITE_SCOPE_REQUIRED", `补丁目标 ${target} 尚未记录在本任务修改清单。核对关联范围后追加清单，再重试。`); }
     }
+    diagnostic.target_scope = "within";
   }
   await store.change(binding.root, interaction, binding.branch, next => {
     next.guard_seen = true;
     if (input.tool_use_id && !next.pending_tools.includes(input.tool_use_id)) next.pending_tools.push(input.tool_use_id);
   });
+  diagnostic.stage = "ready"; diagnostic.decision = "allow"; diagnostic.required_action = "none";
   return { output: {}, reason: "WRITE_READY", ready: true, task: task.id, coverage: kind === "patch" ? "observed" as const : "partial" as const };
 }
 

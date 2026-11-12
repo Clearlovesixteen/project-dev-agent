@@ -63,6 +63,7 @@ import {
 import { ProjectFiles } from "./storage/project-files.js";
 import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
 import { reviewSnapshot } from "./git/review-snapshot.js";
+import { captureMergeRecovery, assertMergeResolved, assertMergeRecovery } from "./git/merge-recovery.js";
 
 /** 完整集合的回传不是全量复核；已有完成项只有被显式选中后才能刷新指纹。 */
 function stampReviews<
@@ -169,7 +170,13 @@ export class TaskService {
       if (current.repo_identity !== this.binding.repo_identity)
         throw new AppError("REPOSITORY_CHANGED", "当前绑定的仓库标识已变化");
       await assertStateIgnored(current);
-      const workspaceBaseline = await captureWorkspaceBaseline(current);
+      if (request.resolution_source && request.task_kind !== "merge_recovery")
+        throw new AppError("MERGE_RECOVERY_INTENT_REQUIRED", "resolution_source 仅用于明确的 task_kind:merge_recovery 任务");
+      const recovery = request.task_kind === "merge_recovery" ? await captureMergeRecovery(current, request.resolution_source) : undefined;
+      if (recovery && request.scope_paths?.some(path => !recovery.conflicts.some(item => item.path === path)))
+        throw new AppError("MERGE_RECOVERY_SCOPE", "恢复任务范围只能包含当前 merge 的原冲突文件，不接管其他改动");
+      if (recovery && recovery.conflicts.length > 30) throw new AppError("MERGE_RECOVERY_LIMIT", "当前冲突超过30个文件，需先拆分并人工核对合并范围");
+      const workspaceBaseline = await captureWorkspaceBaseline(current, recovery);
       const feedback = await feedbackContext(
         new ProjectFiles(current.root),
         request.requirement,
@@ -227,7 +234,7 @@ export class TaskService {
         ...(request.business_assessment
           ? { business_assessment: request.business_assessment }
           : {}),
-        scope_paths: request.scope_paths ?? [],
+        scope_paths: recovery ? recovery.conflicts.map(item => item.path) : request.scope_paths ?? [],
         feedback_policy: 1,
         ...(request.feedback_review
           ? { feedback_review: request.feedback_review }
@@ -257,7 +264,9 @@ export class TaskService {
             ]
           : [],
         acceptance_criteria: request.acceptance_criteria,
-        change_items: [],
+        change_items: recovery ? recovery.conflicts.map((item, index) => ({ id: `merge-${index + 1}`, target_path: item.path, action: "modify",
+          requirement: request.requirement, rationale: recovery.source ? `按用户指定来源 ${recovery.source.reference} 解决当前合并冲突` : "核对原合并双方后，仅修复当前冲突文件",
+          sources: [{ kind: "code", reference: item.path }] })) : [],
         created_at: now,
         updated_at: now,
       });
@@ -280,6 +289,16 @@ export class TaskService {
       // 基线失效仍允许显式中止并留下原因，但不能继续把普通更新或关闭记为有效。
       if (request.phase !== "aborted" && request.phase !== "suspended")
         await assertBaseline(this.binding, prior);
+      const recovery = prior.workspace_baseline?.merge_recovery;
+      if (recovery && request.phase !== "aborted" && request.phase !== "suspended") {
+        if (request.change_items?.some(item => !recovery.conflicts.some(conflict => conflict.path === item.target_path)))
+          throw new AppError("MERGE_RECOVERY_SCOPE", "恢复任务只能登记原冲突文件；额外业务修改必须另建任务");
+        const state = await assertMergeRecovery(this.binding, recovery);
+        if (state.conflicts.length && (request.review_snapshot || request.change_items?.some(item => item.status !== "pending")
+          || request.acceptance_criteria?.some(item => item.status !== "pending") || request.validations?.some(item => item.outcome !== "not_run")))
+          throw new AppError("UNMERGED_CHANGES", "未合并文件仍存在；可以准备恢复清单和依据，但不能登记已通过的审查或验证");
+        if (request.phase === "closed") await assertMergeResolved(this.binding, recovery);
+      }
       if (prior.phase === "suspended" || request.phase === "suspended") {
         if (Object.keys(request).some(key => !["task_id", "expected_revision", "phase", "suspend_reason", "abort_reason"].includes(key)))
           throw new AppError("TASK_LIFECYCLE_SEPARATE_REQUIRED", "挂起或恢复须单独保存，不同时改需求、依据和验收");
@@ -383,6 +402,7 @@ export class TaskService {
                   this.binding,
                   current.baseline_head,
                   current.workspace_baseline,
+                  { allow_unmerged: request.phase !== "closed" && !!current.workspace_baseline?.merge_recovery },
                 );
           if (
             request.review_snapshot &&
@@ -720,6 +740,7 @@ export class TaskService {
       let snapshot: string;
       try {
         await assertBaseline(this.binding, task);
+        if (task.workspace_baseline?.merge_recovery) await assertMergeResolved(this.binding, task.workspace_baseline.merge_recovery);
         const current = await reviewSnapshot(
           this.binding,
           task.baseline_head,
@@ -859,6 +880,10 @@ export class TaskService {
           revision: task.revision,
           phase: task.phase,
           baseline_head: task.baseline_head,
+          ...(task.workspace_baseline?.merge_recovery ? { merge_recovery: {
+            state: (await assertMergeRecovery(this.binding, task.workspace_baseline.merge_recovery)).completed ? "committed" : "resolved_uncommitted",
+            limitation: "恢复检查只核对冲突解决与任务验收；未提交状态不代表已经提交或完成上线。",
+          } } : {}),
           preexisting_paths:
             task.workspace_baseline?.entries.map((entry) => entry.path) ?? [],
           recorded_task: task,

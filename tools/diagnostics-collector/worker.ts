@@ -1,4 +1,5 @@
-import { DiagnosticBatch } from "../../src/observability/batch.js";
+import { DiagnosticBatch, DiagnosticBatchV2, inspectRemoteEvent, type BatchAcknowledgementV2 } from "../../src/observability/batch.js";
+import type { TelemetryEvent } from "../../src/observability/contracts.js";
 import { PUBLISHED_DIAGNOSTICS } from "../../src/runtime/published-diagnostics.js";
 import { publicInstallAllowed, publicRequestAllowed, type PublicLimits } from "./public-ingest.js";
 
@@ -24,10 +25,19 @@ async function body(request: Request) {
   } finally { await reader.cancel().catch(() => {}); }
 }
 
+/** 空的有效集合无需D1写入；非空集合原子持久后才允许回执确认。 */
+async function storeEvents(events: TelemetryEvent[], env: Environment, now: number, publicIngest: boolean) {
+  if (!events.length) return;
+  await env.DIAGNOSTICS_DB.batch(events.map(event => env.DIAGNOSTICS_DB.prepare(
+    "INSERT OR IGNORE INTO events (install_id,event_id,occurred_at,runtime_version,event_name,reason_code,trace_id,payload,received_at,ingest_source) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .bind(event.install_id, event.event_id, event.occurred_at, event.runtime_version, event.event_name, event.reason_code,
+      event.trace_id, JSON.stringify(event), new Date(now).toISOString(), publicIngest ? "public" : "private")));
+}
+
 export default {
   async fetch(request: Request, env: Environment): Promise<Response> {
-    const path = new URL(request.url).pathname, publicIngest = path === "/public/events";
-    if ((!publicIngest && path !== "/events") || request.method !== "POST") return json({ code: "NOT_FOUND" }, 404);
+    const path = new URL(request.url).pathname, publicIngest = path === "/public/events" || path === "/public/events/v2", v2 = path.endsWith("/v2");
+    if (!["/events", "/public/events", "/events/v2", "/public/events/v2"].includes(path) || request.method !== "POST") return json({ code: "NOT_FOUND" }, 404);
     const token = publicIngest ? PUBLISHED_DIAGNOSTICS.ingest_key : env.WRITE_TOKEN;
     if (!token || token.length < 16) return json({ code: "NOT_CONFIGURED" }, 503);
     // 比较固定长度摘要，不回显凭证或请求正文；写入令牌没有读取数据库的接口。
@@ -35,19 +45,31 @@ export default {
     if (!request.headers.get("Content-Type")?.startsWith("application/json")) return json({ code: "CONTENT_TYPE" }, 415);
     try {
       if (publicIngest && !await publicRequestAllowed(request, env)) return json({ code: "RATE_LIMITED" }, 429);
-      const raw = await body(request), parsed = DiagnosticBatch.safeParse(raw);
+      const raw = await body(request), now = Date.now();
+      if (v2) {
+        const envelope = DiagnosticBatchV2.safeParse(raw);
+        if (!envelope.success) return json({ code: "INVALID_BATCH" }, 400);
+        const batch = envelope.data;
+        if (await hash(JSON.stringify(raw.events)) !== batch.batch_id) return json({ code: "BATCH_HASH_MISMATCH" }, 400);
+        if (publicIngest && !await publicInstallAllowed(batch.install_id, env)) return json({ code: "RATE_LIMITED" }, 429);
+        const ack: BatchAcknowledgementV2 = { schema_version: 2, batch_id: batch.batch_id, accepted_indexes: [], rejected: [] }, accepted: TelemetryEvent[] = [];
+        batch.events.forEach((rawEvent, index) => {
+          const checked = inspectRemoteEvent(rawEvent, now, batch.install_id);
+          if ("reason" in checked) ack.rejected.push({ index, reason: checked.reason });
+          else { accepted.push(checked.event); ack.accepted_indexes.push(index); }
+        });
+        await storeEvents(accepted, env, now, publicIngest);
+        return json(ack);
+      }
+      const parsed = DiagnosticBatch.safeParse(raw);
       if (!parsed.success) return json({ code: "INVALID_BATCH" }, 400);
       const batch = parsed.data;
       // 校验发送方原 JSON 的摘要，Zod 默认值不能改变校验后的确认标识。
       if (await hash(JSON.stringify(raw.events)) !== batch.batch_id) return json({ code: "BATCH_HASH_MISMATCH" }, 400);
-      const now = Date.now();
       if (batch.events.some(event => Date.parse(event.occurred_at) > now + 86_400_000 || Date.parse(event.occurred_at) < now - 31 * 86_400_000)) return json({ code: "EVENT_TIME_RANGE" }, 400);
       if (publicIngest && !await publicInstallAllowed(batch.events[0]!.install_id, env)) return json({ code: "RATE_LIMITED" }, 429);
       // D1 batch 原子提交；(install_id,event_id) 去重处理确认丢失后的重试。
-      await env.DIAGNOSTICS_DB.batch(batch.events.map(event => env.DIAGNOSTICS_DB.prepare(
-        "INSERT OR IGNORE INTO events (install_id,event_id,occurred_at,runtime_version,event_name,reason_code,trace_id,payload,received_at,ingest_source) VALUES (?,?,?,?,?,?,?,?,?,?)")
-        .bind(event.install_id, event.event_id, event.occurred_at, event.runtime_version, event.event_name, event.reason_code,
-          event.trace_id, JSON.stringify(event), new Date(now).toISOString(), publicIngest ? "public" : "private")));
+      await storeEvents(batch.events, env, now, publicIngest);
       return json({ batch_id: batch.batch_id, acknowledged: batch.events.length });
     } catch { return json({ code: "COLLECTOR_UNAVAILABLE" }, 503); }
   },

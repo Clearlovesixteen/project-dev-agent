@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RelativePathSchema, ReviewSnapshotSchema } from "./common.js";
+import { MergeRecoverySchema } from "./merge-recovery.js";
 
 /** 服务捕获接入时的有效内容；不保存或重放 Git index，不改开发者的暂存状态。 */
 export const WorkspaceEntrySchema = z
@@ -17,6 +18,7 @@ export const WorkspaceBaselineSchema = z
     version: z.literal(1),
     snapshot: ReviewSnapshotSchema,
     entries: z.array(WorkspaceEntrySchema).max(2000),
+    merge_recovery: MergeRecoverySchema.optional(),
   })
   .strict();
 export type WorkspaceBaseline = z.infer<typeof WorkspaceBaselineSchema>;

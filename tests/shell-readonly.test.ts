@@ -36,6 +36,9 @@ test("只读命令链、宿主 shell 包装和 Git 工作目录参数不会进�
     '/bin/zsh -lc pwd',
     'bash -c "cat src/index.js | head -n 5"',
     'sed -n \'1,20p\' src/index.js | head -n 3',
+    'nl -ba src/index.js', 'cat src/index.js | sed -n \'1,20p\'',
+    'nl -ba src/index.js | sed -n \'1,20p\'', 'git status --short && nl -ba src/index.js',
+    'bash -lc \'nl -ba src/index.js | head -n 20\'',
   ]) await t.test(command, () => assert.equal(kind(command), undefined));
 });
 
@@ -48,6 +51,11 @@ test("管道中含写入、重定向和执行扩展时仍进入修改检查", as
     'git diff --output=result.txt', 'git branch -D other',
     'file -C -m custom.magic',
     'sh -c \'cat src/index.js; touch result.txt\'',
+    'nl -ba src/index.js > result.txt', 'nl -ba src/index.js | tee result.txt',
+    'nl -ba src/index.js; touch result.txt', 'nl -ba "$(touch result.txt)"',
+    'cat src/index.js | sed -n \'1,20w result.txt\'',
+    'cat src/index.js | sed -n \'1,20p; e touch result.txt\'',
+    'cat src/index.js | sed -n \'1,20p\' --file script.sed',
   ]) await t.test(command, () => assert.equal(kind(command), "shell"));
   for (const command of [
     'Get-Content src/main.js | Set-Content other.js', 'Get-Content src/main.js > other.js',

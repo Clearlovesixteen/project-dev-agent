@@ -2,7 +2,7 @@
 
 工具包括 `project_prepare`、`task_open`、`task_update`、`task_check`、`knowledge_search` 和 `experience_propose`，具体参数以工具声明为准。以下示例展示数据形状，应按真实项目填写，不能当作业务需求清单。自然语言字段默认使用中文，标识和引用原文保持不变。
 
-工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次插件使用会初始化当前仓库并准备本地忽略规则。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动；0.11 起 task_open 捕获接入内容基线，无需先提交。未解决合并冲突仍阻止接入。
+工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次及切换项目时会精确登记当前仓库并准备本地忽略规则，新版主动配置的 workspace 限制除外。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动；0.11 起 task_open 捕获接入内容基线，无需先提交。未解决合并冲突阻止普通任务；用户明确要求修复当前 merge 冲突时使用下述恢复任务。
 
 新一轮继续先 `task_check` 核对当前分支任务和归属；没有任务返回 `NO_ACTIVE_TASK`。跨聊天不能自动接管。指定 ID 可查看历史或其他分支任务，但不代表原基线适用。更新使用最新修订号。`project_prepare.task_recovery` 列出保留的其他分支任务及挂起记录，截断时会标明。
 
@@ -181,3 +181,15 @@ Agent 在原终端执行当前插件 `validation run --project <绝对仓库> --
 `knowledge_search.feedback` 返回 version/items。使用相同 scope_paths 查询，`feedback_review:{version,decisions:[{id,disposition:"apply"|"not_applicable",reason,acceptance_ids}]}` 保存适用选择；apply 必须关联实际验收，修订先重开为 pending。暂无相关纠正时服务保存空版本，新纠正出现后旧版本失效。最多返回20条，截断不能当成完整复核。
 
 正式终端工具通道：`node <当前运行文件> tools preflight` 与 `tools call --tool <工具> --project <仓库> --file <JSON>`，默认沿用原生插件配置。preflight 只证明独立STDIO可连接，host_tool_visibility 为 not_checked；不能据此宣称当前会话已加载工具。只有原本明确使用手动范围的源码模式可附 --workspace。二者复用同一 MCP 工具校验，不执行任意业务脚本。不得用临时桥或切换单仓库模式绕开个人范围。
+
+## 合并冲突恢复
+
+当需求本身就是解决当前 Git merge 冲突时，仍先 prepare、scan/context 和实际阅读依据，然后调用 `task_open`，添加 `task_kind: "merge_recovery"`。沿用真实 `requirement`、`acceptance_criteria`、`implementation_basis`、验证计划及宿主 `interaction`，不让用户额外填表。服务读取 HEAD、MERGE_HEAD、原冲突文件及 index stages，并保存接入内容基线；调用者不能自己声明冲突身份或扩大原冲突范围。
+
+- 手工合并双方修改：不填写 `resolution_source`，使用原冲突文件补丁，随后 `git add -- <原冲突路径>`。
+- 用户明确选择用某个提交完整替换冲突文件：填写 `resolution_source` 为实际存在的引用/提交，服务固定其 commit。允许单条 `git restore --source=<该引用或固定提交> --staged --worktree -- <原冲突路径>`。不要把“以某分支业务逻辑为主”擅自解释为整文件替换；需要组合双方内容时使用手工合并模式。来源引用移动时核对并使用保存的提交 ID，不自动切换来源。
+- 不允许目录、通配符、混合 shell、reset、checkout 或任意脚本借恢复任务修改。新冲突、分支或 merge 身份改变时停止沿用旧恢复记录。恢复任务不是 merge/commit/push 的授权。
+- `task_check` 在冲突未清除时会保留任务及未完成状态；可以更新 pending 清单、依据和验证计划，不能登记已通过的证据。原冲突解决并暂存后，通过当前插件的 `validation run` 执行已保存检查，实际复核后更新证据和关闭。未提交合并只报告 `resolved_uncommitted`，不说已经合并提交。
+- 当前分支自己的旧任务需要保留时，可显式挂起后建立恢复任务；其他聊天任务不能自动挂起或接管。其他分支记录不变。
+
+当前恢复入口支持普通文件的 Git merge，最多 30 个冲突文件。rebase/cherry-pick、链接或子模块冲突、超限需说明限制，不能降级为无保护的任意写入。仍要核对业务结果、锁文件与依赖清单一致性；消除冲突标记不等于验证通过。

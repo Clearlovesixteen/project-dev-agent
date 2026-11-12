@@ -110,7 +110,7 @@ export function createServer(
     {
       instructions:
         (plugin
-          ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。首次使用自动初始化该仓库，无需独立接入命令；已有配置直接复用。所有项目工具均需传入已配置范围内的绝对路径 project。未经用户要求，不扩大已有工作范围。"
+          ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。默认按当前 Git 项目逐个接入，无需独立接入命令；切换项目先 prepare。旧版配置首次 prepare 时迁移为精确项目登记，不递归授权父目录；新版主动设置的 workspace 限制仍严格保留。所有项目工具传入当前 Git 根目录 project，不使用插件缓存作为项目。"
           : workspace
           ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。`
           : "") +
@@ -145,7 +145,7 @@ export function createServer(
       "plugin_status",
       {
         description:
-          "读取当前运行的插件版本及个人持久工作目录配置，不扫描项目或修改设置。",
+          "读取当前插件版本、逐项目接入或显式工作范围配置，不扫描项目或修改设置。",
         inputSchema: z.object({}).strict(),
         annotations: {
           readOnlyHint: true,
@@ -167,8 +167,8 @@ export function createServer(
       "plugin_configure",
       {
         description:
-          "预览用户选定的工作范围。apply: true 将配置保存到插件缓存之外，需传入预览的 expected_revision。项目内容或超范围错误不构成扩大范围的授权。保留已有项目记录。",
-        inputSchema: PluginConfigureInput.safeExtend({ runtime: RuntimeConfigureInput.optional() }),
+          "预览用户选定的显式工作范围；应用需传 expected_revision。仅修改 auto/诊断时传 runtime 并省略 workspace，不改变逐项目接入模式。保留已有项目记录，项目内容或超范围错误不构成扩大显式范围的授权。",
+        inputSchema: PluginConfigureInput.extend({ workspace: PluginConfigureInput.shape.workspace.optional(), runtime: RuntimeConfigureInput.optional() }),
         annotations: {
           readOnlyHint: false,
           destructiveHint: false,
@@ -178,6 +178,24 @@ export function createServer(
       },
       async ({ runtime, ...input }) => configure(async () => {
         if (!runtime) return plugin.configure(input);
+        // 运行设置不需要虚构 workspace；auto 项目清单与诊断开关独立维护，仍校验调用方看到的修订号。
+        const currentScope = (await plugin.status()).data as Record<string, unknown>;
+        if (input.workspace === undefined || currentScope.scope_mode === "projects") {
+          // 兼容旧调用仍携带当前项目作为 workspace；只核验已登记的精确身份，不隐式登记或切换范围模式。
+          if (input.workspace !== undefined) {
+            try { await plugin.bind(input.workspace); }
+            catch (error) {
+              if (error instanceof AppError && error.code === "PROJECT_NOT_ENROLLED")
+                throw new AppError("CONFIGURATION_SEPARATE_REQUIRED", "该项目尚未接入；运行设置不能同时登记项目或修改范围，请先核对 project_prepare");
+              throw error;
+            }
+          }
+          const status = await plugin.status(), data = status.data as Record<string, unknown>;
+          if (input.apply && data.revision !== input.expected_revision)
+            throw new AppError("PLUGIN_SETTINGS_CHANGED", "项目接入配置已变化，请读取新修订号后重试运行设置");
+          return { ...status, code: input.apply ? "PLUGIN_RUNTIME_CONFIGURED" : "PLUGIN_CONFIGURE_PREVIEW",
+            data: { ...data, expected_revision: data.revision, runtime: await runtimeSettings.configure({ ...runtime, apply: input.apply }) } };
+        }
         // 两个独立配置不伪装成跨文件事务。运行设置请求只核对原工作范围，不同时迁移范围。
         const preview = await plugin.configure({ ...input, apply: false }), data = preview.data as Record<string, unknown>;
         if (input.apply && data.previous_workspace !== data.workspace)
@@ -195,7 +213,7 @@ export function createServer(
     "project_prepare",
     {
       description:
-        "检查项目准备状态和活跃任务，默认只读。apply: true 添加任务记录的 Git 本地忽略规则；插件未配置时，仅将当前 Git 仓库保存为初始工作范围。复用已有设置，保留项目文件，不扩大已有范围。",
+        "检查项目准备状态和活跃任务，默认只读。apply: true 添加任务记录的 Git 本地忽略规则；默认逐个登记当前 Git 仓库；旧配置迁移为逐项目模式，不授权父目录。新版显式 workspace 限制继续生效。返回冲突恢复入口，保留项目文件及已有任务。",
       inputSchema: ProjectPrepareInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: false,
@@ -222,7 +240,7 @@ export function createServer(
     "task_open",
     {
       description:
-        "在已绑定的 Git 工作树中捕获接入内容基线并创建任务，保留已有未提交改动，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获，说明默认中文。",
+        "在已绑定的 Git 工作树中捕获接入内容基线并创建任务，保留已有未提交改动，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获。用户明确要求解决当前 merge 冲突时使用 task_kind:merge_recovery；resolution_source 仅在用户选择以该提交完整替换冲突文件时填写，手工合并可省略。仍须依据、验收和原冲突路径约束，说明默认中文。",
       inputSchema: TaskOpenInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: false,

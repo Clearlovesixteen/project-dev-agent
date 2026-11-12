@@ -169,6 +169,7 @@ export async function prepareProject(
       state_ignored: ignored,
       worktree_clean: clean,
       ready_to_open: ignored && !active && !unmerged,
+      merge_recovery_ready: ignored && !active && unmerged,
       unmerged,
       history,
       history_freshness,
@@ -196,7 +197,7 @@ export async function prepareProject(
         ? owned ? "继续相关需求前调用 task_check 恢复当前分支任务；新需求可显式挂起原任务后建立新任务，不自动中止。"
           : "当前分支活跃任务属于另一会话。保留原任务，使用独立工作树，或由原会话显式挂起；不能自动接管。"
         : unmerged
-        ? "先解决当前Git合并冲突，已有普通改动会保留。"
+        ? "读取冲突文件及双方修改后，以 task_open(task_kind:'merge_recovery') 建立仅覆盖当前冲突文件的恢复任务。仅用户明确要求用某来源整文件替换时传 resolution_source；手工结合双方修改时省略，不能把“以某分支为主”当成整文件覆盖授权。保留已有普通改动，不自动选择 ours/theirs。"
         : !clean && ignored
         ? "当前已有改动，task_open 会保存接入内容基线；继续开发时保留现有工作，不自动 stash、reset 或 commit。"
         : !ignored

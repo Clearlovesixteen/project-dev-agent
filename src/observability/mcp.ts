@@ -1,3 +1,4 @@
+import { inputDiagnosticContext } from "./tool-context.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { EventAttributes } from "./contracts.js";
 import { DiagnosticWriter, observeTool } from "./writer.js";
@@ -31,6 +32,7 @@ export function instrumentMcp(server: McpServer, home?: string) {
       return interactionStorage.run(interaction, async () => {
         const result = tool.success ? await observeTool(writer, tool.data,
           raw && typeof raw === "object" && "project" in raw && typeof raw.project === "string" ? raw.project : undefined, invoke, "mcp", {
+            context: inputDiagnosticContext(name, raw),
             ...(raw && typeof raw === "object" && "task_id" in raw && typeof raw.task_id === "string" ? { task_id: raw.task_id } : {}),
           }) : await invoke();
         // 修改前检查的本地状态不属于遥测。关闭诊断仍维护它；更新失败须明确说明，

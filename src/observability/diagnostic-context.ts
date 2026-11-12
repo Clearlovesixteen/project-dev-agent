@@ -1,0 +1,36 @@
+import { z } from "zod";
+
+/** 默认诊断仅接受受控事实；尚未执行的检查省略，不用 false 冒充已观测结果。 */
+export const DiagnosticContext = z.object({
+  version: z.literal(1),
+  stage: z.enum(["runtime", "classify", "scope", "state", "context", "task", "owner", "turn", "baseline", "basis", "merge", "target", "ready", "validation", "upload"]).optional(),
+  decision: z.enum(["allow", "deny", "skip", "degraded", "incomplete", "error"]).optional(),
+  native_tool: z.enum(["patch", "edit", "write", "shell", "project_mcp", "other"]).optional(),
+  command_class: z.enum(["read_only", "write", "unknown", "management"]).optional(),
+  command_family: z.enum(["git_restore", "git_add", "git_read", "git_write", "text_read", "number_lines", "search", "validation", "script", "other", "unknown"]).optional(),
+  command_shape: z.enum(["single", "chain", "pipeline", "redirection", "dynamic", "unknown"]).optional(),
+  shell_dialect: z.enum(["posix", "powershell", "cmd"]).optional(),
+  scope_mode: z.enum(["unconfigured", "legacy", "projects", "workspace"]).optional(),
+  scope_state: z.enum(["enrolled", "not_enrolled", "outside", "changed", "invalid"]).optional(),
+  enrolled_project_count: z.number().int().min(0).max(1000).optional(),
+  lookup_state: z.enum(["not_scanned", "paths_excluded", "needs_rescan", "needs_review", "indexed", "partial"]).optional(),
+  context_state: z.enum(["missing", "expired", "not_ready", "ready"]).optional(),
+  task_state: z.enum(["missing", "owned", "other_owner", "unowned", "not_bound", "not_confirmed_this_turn"]).optional(),
+  task_kind: z.enum(["development", "merge_recovery"]).optional(),
+  task_phase: z.enum(["active", "suspended", "closed", "aborted"]).optional(),
+  baseline_state: z.enum(["valid", "invalid"]).optional(),
+  basis_state: z.enum(["missing", "ready", "stale"]).optional(),
+  merge_state: z.enum(["unmerged", "resolved_uncommitted", "committed", "changed", "not_merge"]).optional(),
+  initial_conflict_count: z.number().int().min(0).max(500).optional(),
+  conflict_count: z.number().int().min(0).max(500).optional(),
+  target_scope: z.enum(["within", "unplanned", "outside", "unknown"]).optional(),
+  target_count: z.number().int().min(0).max(500).optional(),
+  planned_count: z.number().int().min(0).max(500).optional(),
+  recovery_source: z.enum(["selected", "not_selected", "matched", "mismatch"]).optional(),
+  required_action: z.enum(["prepare", "query_context", "open_task", "open_merge_recovery", "check_task", "review_basis", "plan_paths", "stage_conflicts", "resolve_conflicts", "review_source", "ask_owner", "review_scope", "review_runtime", "none"]).optional(),
+  cause_code: z.enum(["BASELINE_BRANCH_CHANGED", "BASELINE_NOT_REACHABLE", "BASELINE_UNAVAILABLE", "TASK_BINDING_MISMATCH", "PROJECT_NOT_ENROLLED", "PLUGIN_NOT_CONFIGURED", "PROJECT_OUTSIDE_WORKSPACE", "WORKSPACE_CHANGED", "UNMERGED_CHANGES", "UNKNOWN"]).optional(),
+  node_version: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+  platform: z.enum(["aix", "android", "darwin", "freebsd", "haiku", "linux", "openbsd", "sunos", "win32", "unknown"]).optional(),
+  arch: z.enum(["arm", "arm64", "ia32", "loong64", "mips", "mipsel", "ppc", "ppc64", "riscv64", "s390", "s390x", "x64", "unknown"]).optional(),
+}).strict();
+export type DiagnosticContext = z.infer<typeof DiagnosticContext>;
