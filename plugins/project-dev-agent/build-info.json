@@ -1,5 +1,5 @@
 {
-  "version": "0.13.6",
+  "version": "0.13.7",
   "node": ">=18.19.0",
   "dependencies": [
     {
@@ -87,7 +87,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "4fcdc7434f333f015e851df32c5a66c05e51bd5edee4e7a6f78e2a93dd22b76c"
+      "sha256": "6edf8245068558af3e1c3afa05589004cd6e772dd3b3f0c6abed85e4cd1d3c96"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -162,22 +162,22 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "5163e0aa74562a9957c11c0827952ff41022e38aa2b56070ba1fd1aacc0d21b6"
+      "sha256": "a08fb229519efa9122911d7db2c401a674987d01cf0c39dc519bc96f35b3daf7"
     },
     {
       "path": "README.md",
       "bytes": 1747,
-      "sha256": "35be9d2556ade3035c0a04ad7c4e955d12bd4f8d846e0791086ac3a62871a2cf"
+      "sha256": "a5fd4bbeeb93c51c2a0b53eb4e73daaa573d96d0d4432d7320ca8f0db13eb37d"
     },
     {
       "path": "runtime/cli.mjs",
       "bytes": 1296555,
-      "sha256": "309c9f5adf7cdb18566b159a9f5c642f11b6fb3f4caae86fcf11096ba61b4e82"
+      "sha256": "70a6e28e952a39b89d9459607c02b115240d958590c300420cf0f7c0ca46590f"
     },
     {
       "path": "runtime/hooks.mjs",
       "bytes": 1263245,
-      "sha256": "b66e3f4a02526e538ccbcc9468fda068bae40b9221d0dedf0652aab01c584941"
+      "sha256": "e28ce1f09b691f9997880740795c377e67269d2a3f9d3a0db06d260a50151cd3"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",

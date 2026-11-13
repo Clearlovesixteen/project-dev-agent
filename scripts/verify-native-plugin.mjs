@@ -57,6 +57,12 @@ async function call(client, name, args = {}) {
   assert.notEqual(result.structuredContent?.outcome, "error", JSON.stringify(result.structuredContent));
   return result.structuredContent;
 }
+// 发布验证也要覆盖受保护的失败路径：显式 workspace 不应被升级迁移成自动 projects。
+async function callError(client, name, args = {}) {
+  const result = await client.callTool({ name, arguments: args });
+  assert.equal(result.structuredContent?.outcome, "error", JSON.stringify(result.structuredContent));
+  return result.structuredContent;
+}
 try {
   for (const directory of [home, repository, served, workspaces]) await mkdir(directory, { recursive: true });
   await cp(join(root, ".agents/plugins"), join(repository, ".agents/plugins"), { recursive: true });
@@ -155,19 +161,18 @@ try {
   assert.equal(updated.version, current);
   const second = await connect(updated.installedPath);
   assert.equal((await call(second, "plugin_status")).data.version, current);
-  // 安装/读取状态不迁移；实际接入时按新策略迁移，只登记当前仓库且保留原任务。
+  // 安装/读取状态不迁移；用户主动设置的显式 workspace 必须保留边界，同时保留原任务。
   assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), settingsBefore);
   await call(second, "project_prepare", { project: sample.path, apply: true });
   assert.equal((await call(second, "task_check", { project: sample.path })).data.recorded_task.id, task.id);
   const scopeAfter = (await call(second, "plugin_status")).data;
-  assert.equal(scopeAfter.scope_mode, "projects");
-  assert.deepEqual(scopeAfter.projects, [sample.path]);
+  assert.equal(scopeAfter.scope_mode, "workspace");
+  assert.equal(scopeAfter.workspace, workspaces);
   const secondProject = JSON.parse(await run(process.execPath, [join(updated.installedPath, "runtime/cli.mjs"), "sample", "create", "--destination", join(temporary, "separate-project-b")]));
-  await call(second, "project_prepare", { project: secondProject.path, apply: true });
-  assert.equal((await call(second, "task_check", { project: secondProject.path })).code, "NO_ACTIVE_TASK");
+  const outside = await callError(second, "project_prepare", { project: secondProject.path, apply: true });
+  assert.equal(outside.code, "PROJECT_OUTSIDE_WORKSPACE");
   assert.equal((await call(second, "task_check", { project: sample.path })).data.recorded_task.id, task.id);
-  assert.deepEqual(new Set((await call(second, "plugin_status")).data.projects), new Set([sample.path, secondProject.path]));
-  evidence.legacy_scope_migrated_to_exact_projects = true;
+  evidence.explicit_workspace_preserved = true;
   evidence.cross_project_prepare_preserves_original_task = true;
   evidence.installed_runtime_versions = [prior, current];
   evidence.project_task_preserved = true;
@@ -182,8 +187,9 @@ try {
     refresh_updates_cached_runtime: evidence.refresh_updates_cached_runtime, installed_runtime_versions: evidence.installed_runtime_versions,
     upgrade_uses_partial_clone: evidence.upgrade_uses_partial_clone,
     failed_refresh_preserved_installed_version: evidence.failed_refresh_preserved_installed_version,
-    persistent_configuration_preserved: true, project_task_preserved: true, legacy_scope_migrated_to_exact_projects: true, cross_project_prepare_preserves_original_task: true,
-    native_hook_discovery: evidence.native_hook_discovery, native_mcp_connection: evidence.native_mcp_connection }));
+    persistent_configuration_preserved: true, project_task_preserved: true, explicit_workspace_preserved: true, cross_project_prepare_preserves_original_task: true,
+    native_hook_discovery: evidence.native_hook_discovery, native_mcp_connection: evidence.native_mcp_connection,
+    explicit_workspace_preserved: evidence.explicit_workspace_preserved }));
 } finally {
   await Promise.allSettled(clients.map((client) => client.close()));
   if (http?.listening) await new Promise((done) => http.close(done));

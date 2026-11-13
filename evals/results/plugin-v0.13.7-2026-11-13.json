@@ -1,0 +1,51 @@
+{
+  "version": "0.13.7",
+  "verified_at": "2026-11-13T13:45:42+08:00",
+  "typecheck": "passed",
+  "build": "passed",
+  "targeted_regressions": {
+    "node": "20.20.2",
+    "tests": 83,
+    "pass": 83,
+    "fail": 0,
+    "cancelled": 0,
+    "scope": [
+      "project knowledge repository and source stamps",
+      "A/B worktree view resolution and combination snapshots",
+      "business model transactions and recovery",
+      "project enrollment and participation",
+      "host hooks and merge recovery",
+      "packaged plugin inventory and standalone execution"
+    ]
+  },
+  "generation_guidance": {
+    "component_priority": "component library -> existing project component -> self implementation",
+    "design_pattern_scenarios": "documented",
+    "comment_rule": "all added or modified code requires corresponding responsibility, contract, evidence, or complex-logic comments",
+    "source_and_plugin_skill_sync": "passed"
+  },
+  "native_upgrade": {
+    "from": "0.13.6",
+    "to": "0.13.7",
+    "result": "passed",
+    "mcp_tools": 16,
+    "partial_clone": true,
+    "failed_refresh_preserved_old_install": true,
+    "persistent_configuration_preserved": true,
+    "project_task_preserved": true,
+    "explicit_workspace_preserved": true,
+    "cross_project_prepare_preserves_original_task": true,
+    "native_hook_discovery": "passed",
+    "host_hook_execution_verified": false
+  },
+  "full_regressions": {
+    "status": "ci_pending",
+    "matrix": ["18.19.0", "18.19.1", "20.19.6"],
+    "workflow": ".github/workflows/runtime-compatibility.yml"
+  },
+  "limitations": [
+    "npm ci --ignore-scripts was not completed locally because the environment could not resolve the configured npm mirror; existing installed dependencies passed typecheck, build, and targeted tests.",
+    "Node 18 and Windows compatibility remain release-candidate CI gates.",
+    "Targeted tests prove tool and workflow behavior, not an unconditional improvement in generated business-code quality."
+  ]
+}
