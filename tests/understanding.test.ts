@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile, unlink, symlink, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink, symlink, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
@@ -10,6 +10,7 @@ import { UnderstandingService } from "../src/understanding/service.js";
 import { mapFiles, models, readMap } from "../src/understanding/store.js";
 import { KnowledgeService } from "../src/knowledge/service.js";
 import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
+import { prepareProject } from "../src/personal-setup.js";
 
 async function setup(t: { after: (action: () => Promise<void>) => void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -114,6 +115,23 @@ test("saved model is shadow-published to the project knowledge store and invalid
   const changed = (await service.context({ paths: ["src/pages/orders"] })).data as any;
   assert.equal(changed.project_knowledge.state, "needs_review");
   assert.ok(changed.project_knowledge.unresolved.some((item: string) => item.startsWith("order-state:")));
+});
+
+test("首次准备会把旧工作树模型影子迁移到项目公共知识库，不把分支内容直接合并", async (t) => {
+  const { service, input, binding } = await setup(t);
+  await service.scan({});
+  assert.equal((await service.record(await input())).outcome, "ok");
+  const repository = (await ProjectKnowledgeRepository.openExisting(binding.repo_identity))!;
+  await rm(repository.files.root, { recursive: true, force: true });
+  const prepared = await prepareProject(binding, { apply: true });
+  const knowledge = (prepared.data as any).project_knowledge;
+  assert.equal(knowledge.migration.attempted, 1);
+  assert.equal(knowledge.migration.published, 1);
+  assert.deepEqual(knowledge.migration.failed, []);
+  assert.equal(knowledge.snapshot_count, 1);
+  const restored = (await service.context({})).data as any;
+  assert.equal(restored.project_knowledge.state, "matched");
+  assert.equal(restored.project_knowledge.selected_models[0].model_id, "order-state");
 });
 
 test("同一工作树的模型修订会保留共享快照父链，不能把不同源码证据当作自动合并", async (t) => {

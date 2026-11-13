@@ -171,13 +171,13 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1295710,
-      "sha256": "fe19e52eccd6c9269291b0ab73ca9b2601f0f6ce4392d36af29230093a5b5ab8"
+      "bytes": 1296016,
+      "sha256": "c9e713bb8d850b801f6426f8d9248c270a832f50a153a18a3f9bef61a8818d14"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1259336,
-      "sha256": "238ddbc8fbee08b3e0fa26435961d4309dcd0fee7a56627fc54cb6f9e4a09937"
+      "bytes": 1262704,
+      "sha256": "7b12de83f57617e960f527c646139a9a2d09f9157348b18bd413e67485b3eaae"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",

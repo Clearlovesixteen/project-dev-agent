@@ -14,9 +14,10 @@ import { readGit } from "./git/command.js";
 import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { TaskStore } from "./storage/task-store.js";
 import { historyStatus } from "./history/store.js";
-import { understandingStatus } from "./understanding/store.js";
+import { understandingStatus, models } from "./understanding/store.js";
 import { currentInteraction, interactionOwner } from "./workflow/interaction.js";
 import { ProjectKnowledgeRepository } from "./project-knowledge/repository.js";
+import { publishModelShadow } from "./project-knowledge/service.js";
 
 export const ProjectPrepareInputSchema = z
   .object({ apply: z.boolean().default(false) })
@@ -165,10 +166,23 @@ export async function prepareProject(
   try {
     const repository = apply ? await ProjectKnowledgeRepository.open(binding.repo_identity) : await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
     if (repository) {
+      let migration: { attempted: number; published: number; failed: string[] } | undefined;
+      if (apply) {
+        const localModels = await models(new ProjectFiles(binding.root));
+        const failed: string[] = [];
+        for (const model of localModels) {
+          try {
+            await publishModelShadow(binding, model as unknown as Record<string, unknown>);
+          } catch (error) {
+            failed.push(`${model.id}:${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
+          }
+        }
+        migration = { attempted: localModels.length, published: localModels.length - failed.length, failed };
+      }
       const identity = await repository.files.readIdentity();
       const pointer = await repository.current();
-      project_knowledge = { state: pointer ? "ready" : "empty", project_id: identity?.project_id, snapshot_count: (await repository.currentObjectIds()).length,
-        storage: "git-common-dir/project-dev-agent" };
+      project_knowledge = { state: migration?.failed.length ? "unavailable" : pointer ? "ready" : "empty", project_id: identity?.project_id, snapshot_count: (await repository.currentObjectIds()).length,
+        storage: "git-common-dir/project-dev-agent", ...(migration ? { migration } : {}) };
     }
   } catch (error) {
     project_knowledge = { state: "unavailable", message: error instanceof Error ? error.message : String(error) };
