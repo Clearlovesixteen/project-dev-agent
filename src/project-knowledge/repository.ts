@@ -48,7 +48,27 @@ export class ProjectKnowledgeRepository {
           throw new AppError("PROJECT_KNOWLEDGE_OPERATION_CONFLICT", "operation_id 已用于另一组知识对象");
         }
         const transaction = await this.readTransaction(operation.transaction_id);
-        return { transaction, pointer: transaction.pointer };
+        // operation marker 会在 CURRENT 之前写入；进程可能在二者之间退出。
+        // 先沿当前链查找该 operation，已落入当前链时直接幂等返回。
+        const current = await this.files.read("CURRENT.json").catch((error) => {
+          if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "ENOENT") return undefined;
+          throw error;
+        });
+        const currentPointer = current ? SnapshotPointerSchema.parse(JSON.parse(current)) : undefined;
+        if (currentPointer && await this.currentChainContains(currentPointer.transaction_id, transaction.transaction_id)) {
+          return { transaction, pointer: transaction.pointer };
+        }
+        // 当前指针仍停在原事务的父节点时，可以安全补写原指针；不能回退已经包含其他提交的链。
+        if (!currentPointer || currentPointer.transaction_id === transaction.parent_transaction_id) {
+          await this.writeCurrent(currentPointer, transaction.pointer, current);
+          return { transaction, pointer: transaction.pointer };
+        }
+        // 其他工作树已经提交了新事务：以当前指针为父节点创建恢复事务，
+        // 将遗漏的 operation 接到链尾，避免覆盖或回退其他工作树的知识。
+        const recovered = await this.recoverTransaction(transaction, currentPointer);
+        await this.updateOperation(operationPath, operation, recovered.transaction_id);
+        await this.writeCurrent(currentPointer, recovered.pointer, current);
+        return { transaction: recovered, pointer: recovered.pointer };
       }
       const parent = await this.files.readCurrent();
       if (parent) {
@@ -93,6 +113,58 @@ export class ProjectKnowledgeRepository {
       }
       return { transaction, pointer };
     });
+  }
+
+  private async currentChainContains(currentTransactionId: string, targetTransactionId: string): Promise<boolean> {
+    const visited = new Set<string>();
+    let transactionId: string | null = currentTransactionId;
+    while (transactionId) {
+      if (visited.has(transactionId)) throw new AppError("PROJECT_KNOWLEDGE_TRANSACTION_CYCLE", "知识库事务链存在循环");
+      visited.add(transactionId);
+      if (transactionId === targetTransactionId) return true;
+      transactionId = (await this.readTransaction(transactionId)).parent_transaction_id;
+    }
+    return false;
+  }
+
+  private async recoverTransaction(original: TransactionRecord, parent: SnapshotPointer): Promise<TransactionRecord> {
+    const transactionId = digest(JSON.stringify([parent.transaction_id, original.operation_id, original.object_ids]));
+    const pointer: SnapshotPointer = SnapshotPointerSchema.parse({
+      schema_version: 1,
+      transaction_id: transactionId,
+      object_ids: original.object_ids,
+      committed_at: new Date().toISOString(),
+    });
+    const transaction: TransactionRecord = TransactionRecordSchema.parse({
+      schema_version: 1,
+      transaction_id: transactionId,
+      parent_transaction_id: parent.transaction_id,
+      operation_id: original.operation_id,
+      object_ids: original.object_ids,
+      pointer,
+    });
+    const existing = await this.files.read(`transactions/${transactionId}.json`).catch((error) => {
+      if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (existing) return TransactionRecordSchema.parse(JSON.parse(existing));
+    await this.files.create(`transactions/${transactionId}.json`, JSON.stringify(transaction));
+    return transaction;
+  }
+
+  private async updateOperation(path: string, current: OperationRecord, transactionId: string): Promise<void> {
+    if (current.transaction_id === transactionId) return;
+    const next: OperationRecord = OperationRecordSchema.parse({ ...current, transaction_id: transactionId });
+    await this.files.replace(path, JSON.stringify(next), JSON.stringify(current));
+  }
+
+  private async writeCurrent(previous: SnapshotPointer | undefined, next: SnapshotPointer, previousRaw?: string): Promise<void> {
+    if (!previous) {
+      await this.files.create("CURRENT.json", JSON.stringify(next));
+      return;
+    }
+    if (previous.transaction_id === next.transaction_id) return;
+    await this.files.replace("CURRENT.json", JSON.stringify(next), previousRaw ?? JSON.stringify(previous));
   }
 
   async readObject(objectId: string): Promise<ObjectEnvelope> {

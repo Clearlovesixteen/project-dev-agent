@@ -88,3 +88,37 @@ test("concurrent publishers serialize without losing either immutable object", a
   assert.match(transactions, /operation-[ab]/);
   assert.deepEqual(new Set(await first.currentObjectIds()), new Set([a.object_id, b.object_id]));
 });
+
+test("operation marker recovery repairs CURRENT after a crash before the first pointer write", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
+  const a = object("A");
+  const originalCreate = repository.files.create.bind(repository.files);
+  let failCurrent = true;
+  (repository.files as unknown as { create: typeof repository.files.create }).create = async (path, content, maximum) => {
+    if (path === "CURRENT.json" && failCurrent) { failCurrent = false; throw new Error("simulated crash before CURRENT"); }
+    return originalCreate(path, content, maximum);
+  };
+  await assert.rejects(repository.publish({ operation_id: "operation-a", objects: [a] }), /simulated crash/);
+  assert.equal(await repository.current(), undefined);
+  const recovered = await repository.publish({ operation_id: "operation-a", objects: [a] });
+  assert.equal((await repository.current())?.transaction_id, recovered.transaction.transaction_id);
+  assert.deepEqual(new Set(await repository.currentObjectIds()), new Set([a.object_id]));
+});
+
+test("operation marker recovery appends after another worktree committed meanwhile", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
+  const a = object("A"), b = object("B");
+  const originalCreate = repository.files.create.bind(repository.files);
+  let failCurrent = true;
+  (repository.files as unknown as { create: typeof repository.files.create }).create = async (path, content, maximum) => {
+    if (path === "CURRENT.json" && failCurrent) { failCurrent = false; throw new Error("simulated crash before CURRENT"); }
+    return originalCreate(path, content, maximum);
+  };
+  await assert.rejects(repository.publish({ operation_id: "operation-a", objects: [a] }), /simulated crash/);
+  const bResult = await repository.publish({ operation_id: "operation-b", objects: [b] });
+  const recovered = await repository.publish({ operation_id: "operation-a", objects: [a] });
+  assert.equal(recovered.transaction.parent_transaction_id, bResult.transaction.transaction_id);
+  assert.deepEqual(new Set(await repository.currentObjectIds()), new Set([a.object_id, b.object_id]));
+});
