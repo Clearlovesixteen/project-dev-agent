@@ -8,6 +8,20 @@ import { ObjectEnvelopeSchema, ProjectKnowledgeApplyReceiptSchema, type ObjectEn
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/**
+ * 快照的源码证据指纹只关注内容、路径和配置，不把 staged/unstaged 这种
+ * 同内容的 Git 状态变化当成新的业务语义。SourceStamp 本身仍保留完整状态，
+ * 供当前视图和诊断使用；这里避免同一模型因单纯 git add 产生两个同证据候选。
+ */
+function evidenceStampId(source: SourceStamp): string {
+  return digest(JSON.stringify({
+    head: source.head,
+    entries: source.entries.map(({ path, kind, sha256, bytes, target, error }) => ({ path, kind, sha256, bytes, ...(target ? { target } : {}), ...(error ? { error } : {}) })),
+    configuration: source.configuration,
+    coverage: source.coverage,
+  }));
+}
+
 export interface ProjectKnowledgeStatus {
   state: "not_initialized" | "empty" | "unverified" | "matched" | "needs_review" | "partial" | "unavailable";
   project_id?: string;
@@ -96,6 +110,7 @@ export async function publishModelShadow(
 ): Promise<{ snapshot_id: string; receipt_id?: string; source_stamp_id: string }> {
   const repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
   const source_stamp = await collectSourceStamp(binding);
+  const evidence_stamp_id = evidenceStampId(source_stamp);
   const modelId = typeof model.id === "string" ? model.id : "unknown";
   const revision = typeof model.revision === "number" ? model.revision : 0;
   const basis = (() => {
@@ -131,7 +146,7 @@ export async function publishModelShadow(
     source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
-    provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: source_stamp.stamp_id, recorded_at: recordedAt },
+    provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: evidence_stamp_id, recorded_at: recordedAt },
   } satisfies ModuleSnapshot;
   const parsed = ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot", object_id: digest(JSON.stringify(snapshot)), content: snapshot });
   let objects = [parsed];
