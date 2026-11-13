@@ -147,7 +147,8 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     const ownedTask = active?.owner?.session_id === owner.session_id && active.owner.actor_id === owner.actor_id ? active : undefined;
     const query = (continuation.test(prompt) && ownedTask ? ownedTask.requirement : prompt).slice(0, 2_000);
     stage = "context"; diagnostic.stage = "context";
-    const data = await provideContext(new ProjectFiles(project), { query, paths: ownedTask?.scope_paths ?? [], limit: 4 });
+    // UserPromptSubmit 受宿主短预算限制，只做共享事务轻量探测；完整源码适用性由后续 project_context 完成。
+    const data = await provideContext(new ProjectFiles(project), { query, paths: ownedTask?.scope_paths ?? [], limit: 4 }, { sharedKnowledge: "light" });
     diagnostic.context_state = ["not_scanned", "needs_rescan"].includes(data.state) ? "not_ready" : "ready";
     guard(); stage = "receipt";
     const issued = await receipts.issue(project, interaction, data.context_id);

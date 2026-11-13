@@ -9,7 +9,7 @@ import { ObjectEnvelopeSchema, type ProjectIdentity, type SnapshotPointer } from
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export interface ProjectKnowledgeStatus {
-  state: "not_initialized" | "empty" | "matched" | "needs_review" | "partial" | "unavailable";
+  state: "not_initialized" | "empty" | "unverified" | "matched" | "needs_review" | "partial" | "unavailable";
   project_id?: string;
   transaction_id?: string;
   snapshot_count: number;
@@ -21,6 +21,21 @@ export interface ProjectKnowledgeStatus {
   unresolved?: string[];
   coverage?: SourceStamp["coverage"];
   message?: string;
+}
+
+/** 钩子用的轻量状态探测：只读 identity/CURRENT，不扫描工作树；完整适用性由 project_context 核验。 */
+export async function readProjectKnowledgeLight(binding: WorktreeBinding): Promise<ProjectKnowledgeStatus> {
+  try {
+    const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
+    if (!repository) return { state: "not_initialized", snapshot_count: 0 };
+    const identity = await repository.files.readIdentity(), pointer = await repository.current();
+    if (!identity) throw new AppError("PROJECT_KNOWLEDGE_IDENTITY_MISSING", "项目知识库缺少身份记录");
+    if (!pointer) return { state: "empty", project_id: identity.project_id, snapshot_count: 0 };
+    return { state: "unverified", project_id: identity.project_id, transaction_id: pointer.transaction_id,
+      snapshot_count: pointer.object_ids.length, message: "钩子仅读取共享事务状态；编码前由 project_context 核验当前源码适用性" };
+  } catch (error) {
+    return { state: "unavailable", snapshot_count: 0, message: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** 读取项目共享知识的当前视图；普通查询只读，不会创建项目库或改写快照。 */
