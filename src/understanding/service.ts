@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AppError } from "../domain/error.js";
 import type { ToolResult } from "../domain/result.js";
 import { assertStateIgnored, type WorktreeBinding } from "../git/index.js";
+import { bindWorktree } from "../git/baseline.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { MAP_DIR, ModelRecordInput, ScanInput } from "./contracts.js";
 import { locked, understandingStatus } from "./store.js";
@@ -10,6 +11,7 @@ import { projectContext } from "./context.js";
 import { provideContext } from "../context/provider.js";
 import { renderProjectReport } from "./report.js";
 import { recordModel } from "./model-record.js";
+import { readProjectKnowledge, publishModelShadow } from "../project-knowledge/service.js";
 
 /** 管理结构扫描与业务理解候选；语义内容由 Codex 提交，服务负责核对来源和版本。 */
 export class UnderstandingService {
@@ -35,7 +37,11 @@ export class UnderstandingService {
   async context(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const data = await provideContext(this.files, input);
-      return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data, diagnostics: [] };
+      let project_knowledge: unknown;
+      try { project_knowledge = await readProjectKnowledge(await bindWorktree(this.binding.root)); }
+      catch (error) { project_knowledge = { state: "unavailable", snapshot_count: 0, message: error instanceof Error ? error.message : String(error) }; }
+      const enriched = { ...data, project_knowledge };
+      return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data: enriched, diagnostics: [] };
     });
   }
   /** 保存有源码依据的模型候选；引用匹配只证明来源，不把语义结论自动确认为规则。 */
@@ -47,6 +53,8 @@ export class UnderstandingService {
         const current = await projectContext(this.files, { model_id: model.id });
         const view = current.models[0];
         const diagnostics: { code: string; message: string }[] = [];
+        try { await publishModelShadow(this.binding, model as unknown as Record<string, unknown>); }
+        catch { diagnostics.push({ code: "PROJECT_KNOWLEDGE_SHADOW_WRITE_FAILED", message: "本地模型已保存，但项目共享快照未写入；当前任务结果不受影响，下一次模型记录会重试。" }); }
         try { await renderProjectReport(this.files); }
         catch { diagnostics.push({ code: "PROJECT_REPORT_UNAVAILABLE", message: "模型修订已保存，报告生成失败；可通过 project_context 读取，不要重复写入。" }); }
         return { outcome: "ok", code: "PROJECT_MODEL_RECORDED", data: { id: model.id, revision: model.revision,

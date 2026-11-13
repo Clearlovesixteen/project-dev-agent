@@ -20,6 +20,15 @@ export class ProjectKnowledgeRepository {
     return new ProjectKnowledgeRepository(files, repoIdentity);
   }
 
+  static async openExisting(repoIdentity: string): Promise<ProjectKnowledgeRepository | undefined> {
+    const files = await RepositoryFiles.openExisting(repoIdentity);
+    if (!files) return undefined;
+    const identity = await files.readIdentity();
+    if (!identity) throw new AppError("PROJECT_KNOWLEDGE_IDENTITY_MISSING", "项目知识库缺少身份记录");
+    if (identity.repo_identity !== repoIdentity) throw new AppError("PROJECT_KNOWLEDGE_IDENTITY_MISMATCH", "知识库已绑定其他 Git 公共目录");
+    return new ProjectKnowledgeRepository(files, repoIdentity);
+  }
+
   async current(): Promise<SnapshotPointer | undefined> { return this.files.readCurrent(); }
 
   async publish(input: PublishInput): Promise<{ transaction: TransactionRecord; pointer: SnapshotPointer }> {

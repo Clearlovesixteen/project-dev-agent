@@ -24,6 +24,23 @@ export class RepositoryFiles {
     return files;
   }
 
+  /** 只读探测已初始化的项目库；不会因为普通查询悄悄创建共享目录。 */
+  static async openExisting(commonDir: string): Promise<RepositoryFiles | undefined> {
+    const actual = await realpath(commonDir).catch(() => undefined);
+    if (!actual || !(await lstat(actual)).isDirectory()) return undefined;
+    const root = join(actual, PROJECT_KNOWLEDGE_DIR);
+    try {
+      const info = await lstat(root);
+      if (info.isSymbolicLink() || !info.isDirectory() || await realpath(root) !== root) throw unsafe("项目知识库目录不安全");
+    } catch (error) {
+      if (hasCode(error, "ENOENT")) return undefined;
+      throw error;
+    }
+    const files = new RepositoryFiles(actual);
+    for (const directory of ["objects", "transactions", "operations", "migrations"]) await files.ensureDirectory(directory);
+    return files;
+  }
+
   private async ensureRoot(): Promise<void> {
     try {
       const info = await lstat(this.root);

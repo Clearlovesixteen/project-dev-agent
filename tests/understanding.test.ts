@@ -87,6 +87,21 @@ test("models validate current exact evidence, preserve revisions and flag all re
   assert.equal((await service.record({ ...model, expected_revision: 2 })).code, "PROJECT_SOURCE_CHANGED");
 });
 
+test("saved model is shadow-published to the project knowledge store and invalidated by current code", async (t) => {
+  const { service, input, put } = await setup(t);
+  await service.scan({});
+  const model = await input();
+  assert.equal((await service.record(model)).outcome, "ok");
+  const first = (await service.context({ paths: ["src/pages/orders"] })).data as any;
+  assert.equal(first.project_knowledge.state, "matched");
+  assert.equal(first.project_knowledge.snapshot_count, 1);
+  assert.ok(first.project_knowledge.view_token);
+  await put("src/shared/status.ts", "export const state = 'closed';\n");
+  const changed = (await service.context({ paths: ["src/pages/orders"] })).data as any;
+  assert.equal(changed.project_knowledge.state, "needs_review");
+  assert.ok(changed.project_knowledge.unresolved.some((item: string) => item.startsWith("order-state:")));
+});
+
 test("excluded paths and freshly excluded model sources cannot leak through context or combined search", async (t) => {
   const { service, put, input, binding } = await setup(t);
   await service.scan({}); await service.record(await input());

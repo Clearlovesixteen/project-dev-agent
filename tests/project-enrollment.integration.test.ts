@@ -125,6 +125,17 @@ test("真实linked worktree可精确接入，Git公共目录的父项目和相�
   assert.notEqual(a.id, b.id); assert.equal(a.repo_identity, b.repo_identity); assert.notEqual(a.worktree_path, b.worktree_path);
 });
 
+test("项目准备初始化共享知识库，linked worktree复用同一项目身份", async t => {
+  const s = await setup(t), linked = join(s.fixture.root, "knowledge-linked");
+  git(s.fixture.path, ["worktree", "add", "--detach", linked]);
+  const a = (await s.settings.prepare(s.fixture.path, { apply: true })).data as any;
+  const b = (await s.settings.prepare(linked, { apply: true })).data as any;
+  assert.equal(a.project_knowledge.state, "empty");
+  assert.equal(b.project_knowledge.state, "empty");
+  assert.equal(a.project_knowledge.project_id, b.project_knowledge.project_id);
+  assert.equal(a.project_knowledge.storage, "git-common-dir/project-dev-agent");
+});
+
 test("复制其他工作树gitfile不能伪造登记；已登记gitfile被改写后不能继续绑定", async t => {
   const s = await setup(t), linked = join(s.fixture.root, "real-linked"), fake = join(s.fixture.root, "fake-linked");
   git(s.fixture.path, ["worktree", "add", "--detach", linked]);

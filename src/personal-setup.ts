@@ -16,6 +16,7 @@ import { TaskStore } from "./storage/task-store.js";
 import { historyStatus } from "./history/store.js";
 import { understandingStatus } from "./understanding/store.js";
 import { currentInteraction, interactionOwner } from "./workflow/interaction.js";
+import { ProjectKnowledgeRepository } from "./project-knowledge/repository.js";
 
 export const ProjectPrepareInputSchema = z
   .object({ apply: z.boolean().default(false) })
@@ -160,6 +161,18 @@ export async function prepareProject(
       message: error instanceof Error ? error.message : String(error),
     };
   }
+  let project_knowledge: unknown = { state: "not_initialized", snapshot_count: 0 };
+  try {
+    const repository = apply ? await ProjectKnowledgeRepository.open(binding.repo_identity) : await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
+    if (repository) {
+      const identity = await repository.files.readIdentity();
+      const pointer = await repository.current();
+      project_knowledge = { state: pointer ? "ready" : "empty", project_id: identity?.project_id, snapshot_count: (await repository.currentObjectIds()).length,
+        storage: "git-common-dir/project-dev-agent" };
+    }
+  } catch (error) {
+    project_knowledge = { state: "unavailable", message: error instanceof Error ? error.message : String(error) };
+  }
   return {
     outcome: "ok",
     code: "PROJECT_STATUS",
@@ -174,6 +187,7 @@ export async function prepareProject(
       history,
       history_freshness,
       understanding,
+      project_knowledge,
       active_task: active
         ? {
             id: active.id,
