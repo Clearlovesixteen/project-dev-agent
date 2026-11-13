@@ -186,8 +186,8 @@
     },
     {
       "path": "skills/project-dev/references/generation-rules.md",
-      "bytes": 7308,
-      "sha256": "9f277ffa8a3decf3f47e28cc2da82dc15e15d29f4511f17e521d6204fea61aa2"
+      "bytes": 10400,
+      "sha256": "5da473b1b9d6f9a8cc5595ba39ed259544f33bbbe08666c7fe776160c5ef289a"
     },
     {
       "path": "skills/project-dev/references/history-inputs.md",
@@ -211,13 +211,13 @@
     },
     {
       "path": "skills/project-dev/references/workflow.md",
-      "bytes": 30771,
-      "sha256": "e047175dfc9a5dac39879d74e2acc1948439d185e4d1b1fb9ff94f33d7ef2ba9"
+      "bytes": 31167,
+      "sha256": "d3c136368af69aa97de09040a9aaafb4be57853c4b87428b911a2e54f466804c"
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 5901,
-      "sha256": "fcb4eb0a74027f2f7a2b984e1b4575f234d697bb672092e5bfc5c8a8e2c818d6"
+      "bytes": 6009,
+      "sha256": "b1a150b12791d546ea8fa9358cfcb45ebddc5a03c1f4c7b17de1c42ca368d850"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
