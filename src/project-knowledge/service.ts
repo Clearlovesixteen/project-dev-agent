@@ -128,7 +128,7 @@ export async function publishModelShadow(
   const recordedAt = typeof model.recorded_at === "string" ? model.recorded_at : new Date().toISOString();
   const currentIds = await repository.currentObjectIds();
   const currentSources = new Map(related.map((item) => [item.path, item.sha256]));
-  const prior = (await Promise.all(currentIds.map(async (id) => {
+  const priorCandidates = (await Promise.all(currentIds.map(async (id) => {
     try {
       const object = await repository.readObject(id);
       if (object.object_type !== "module_snapshot") return undefined;
@@ -138,11 +138,19 @@ export async function publishModelShadow(
       const previousRevision = typeof previousContent === "object" && previousContent !== null && typeof (previousContent as Record<string, unknown>).revision === "number"
         ? (previousContent as Record<string, unknown>).revision as number : 0;
       const lineage = parsed.data.source_fingerprints.every((item) => currentSources.get(item.path) === item.sha256);
-      return previousRevision < revision && lineage ? { id, revision: previousRevision } : undefined;
+      return previousRevision < revision && lineage
+        ? { id, revision: previousRevision, evidence: new Set(parsed.data.source_fingerprints.map(item => `${item.path}:${item.sha256}`)) }
+        : undefined;
     } catch { return undefined; }
-  }))).filter((item): item is { id: string; revision: number } => Boolean(item))
-    .sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id))[0];
-  const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId, parent_snapshot_ids: prior ? [prior.id] : [], basis,
+  }))).filter((item): item is { id: string; revision: number; evidence: Set<string> } => Boolean(item));
+  // 组合当前源码时保留所有“最大父快照”：同一工作树的旧修订被更高修订
+  // 支配，A/B 两个同级来源则同时保留，避免把分支整合误记成单父覆盖。
+  const parents = priorCandidates.filter(candidate => !priorCandidates.some(other => {
+    if (other.id === candidate.id || other.revision < candidate.revision || other.evidence.size < candidate.evidence.size) return false;
+    const superset = [...candidate.evidence].every(key => other.evidence.has(key));
+    return superset && (other.revision > candidate.revision || other.evidence.size > candidate.evidence.size);
+  })).sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id));
+  const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId, parent_snapshot_ids: parents.map(parent => parent.id), basis,
     source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
@@ -168,7 +176,10 @@ export async function publishModelShadow(
     receipt_id = digest(JSON.stringify(receipt));
     objects.push(ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "receipt", object_id: receipt_id, content: receipt }));
   }
-  const operation_id = options.receipt?.operation_id ?? `model-shadow:${modelId}:${revision}:${source_stamp.stamp_id}`;
+  // 普通模型影子写入也把最终快照 ID 纳入 operation，避免同一工作树上
+  // 两个同 revision 但来源范围不同的候选互相占用同一个操作号；同内容
+  // 重试仍保持幂等。
+  const operation_id = options.receipt?.operation_id ?? `model-shadow:${modelId}:${revision}:${parsed.object_id}`;
   // 旧版本在共享库已写入模型、但本地回执丢失时，重试会重新生成 applied_at，
   // 从而得到不同 receipt hash。复用已有 operation 中的不可变对象，仍让
   // repository.publish 负责把该事务接回 CURRENT 链尾。

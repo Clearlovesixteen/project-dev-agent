@@ -151,6 +151,25 @@ test("同一源码内容仅改变 staged 状态时不会产生重复的共享业
   assert.equal(((await service.context({})).data as any).project_knowledge.state, "matched");
 });
 
+test("合并后的共享快照保留 A/B 两个最大父快照，不把整合记录成单分支覆盖", async (t) => {
+  const { service, files, binding } = await setup(t);
+  await service.scan({});
+  const entries = await mapFiles(files);
+  const page = entries.find(entry => entry.path === "src/pages/orders/index.tsx")!;
+  const status = entries.find(entry => entry.path === "src/shared/status.ts")!;
+  const common = { id: "parallel-model", module: "src/pages/orders", revision: 1, recorded_at: "2026-01-01T00:00:00.000Z" };
+  await publishModelShadow(binding, { ...common, related_versions: [{ path: page.path, sha256: page.sha256 }] });
+  await publishModelShadow(binding, { ...common, related_versions: [{ path: status.path, sha256: status.sha256 }], recorded_at: "2026-01-01T00:00:01.000Z" });
+  await publishModelShadow(binding, { ...common, revision: 2, related_versions: [{ path: page.path, sha256: page.sha256 }, { path: status.path, sha256: status.sha256 }] });
+  const repository = (await ProjectKnowledgeRepository.openExisting(binding.repo_identity))!;
+  const snapshots = (await Promise.all((await repository.currentObjectIds()).map(id => repository.readObject(id))))
+    .filter(object => object.object_type === "module_snapshot")
+    .map(object => ({ id: object.object_id, content: object.content as any }))
+    .filter(object => object.content.model_id === "parallel-model");
+  const combined = snapshots.find(object => object.content.content.revision === 2)!;
+  assert.deepEqual(new Set(combined.content.parent_snapshot_ids), new Set(snapshots.filter(object => object.content.content.revision === 1).map(object => object.id)));
+});
+
 test("同一工作树的模型修订会保留共享快照父链，不能把不同源码证据当作自动合并", async (t) => {
   const { service, input, binding } = await setup(t);
   await service.scan({});
