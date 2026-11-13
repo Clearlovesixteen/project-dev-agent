@@ -11,6 +11,7 @@ import { mapFiles, models, readMap } from "../src/understanding/store.js";
 import { KnowledgeService } from "../src/knowledge/service.js";
 import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
 import { prepareProject } from "../src/personal-setup.js";
+import { publishModelShadow } from "../src/project-knowledge/service.js";
 
 async function setup(t: { after: (action: () => Promise<void>) => void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -132,6 +133,22 @@ test("首次准备会把旧工作树模型影子迁移到项目公共知识库�
   const restored = (await service.context({})).data as any;
   assert.equal(restored.project_knowledge.state, "matched");
   assert.equal(restored.project_knowledge.selected_models[0].model_id, "order-state");
+});
+
+test("同一源码内容仅改变 staged 状态时不会产生重复的共享业务候选", async (t) => {
+  const { service, input, files, binding } = await setup(t);
+  await service.scan({});
+  assert.equal((await service.record(await input())).outcome, "ok");
+  const local = (await models(files))[0]!;
+  const repository = (await ProjectKnowledgeRepository.openExisting(binding.repo_identity))!;
+  const before = await repository.currentObjectIds();
+  execFileSync("git", ["add", "src/shared/status.ts"], { cwd: binding.root });
+  await publishModelShadow(binding, local as unknown as Record<string, unknown>);
+  const after = await repository.currentObjectIds();
+  const snapshots = (await Promise.all(after.map(id => repository.readObject(id)))).filter(object => object.object_type === "module_snapshot");
+  assert.equal(new Set(snapshots.map(object => object.object_id)).size, 1);
+  assert.ok(after.length >= before.length);
+  assert.equal(((await service.context({})).data as any).project_knowledge.state, "matched");
 });
 
 test("同一工作树的模型修订会保留共享快照父链，不能把不同源码证据当作自动合并", async (t) => {
