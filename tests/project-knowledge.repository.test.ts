@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { lstat, mkdtemp, mkdir, readlink, rm, symlink } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readlink, readdir, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
@@ -52,6 +52,14 @@ test("repository files reject a symlinked knowledge root and path traversal", as
   await symlink(target, files.root);
   await assert.rejects(RepositoryFiles.open(binding.repo_identity), /符号链接|不安全/);
   assert.equal((await lstat(files.root)).isSymbolicLink(), true);
+});
+
+test("openExisting 是只读探测，知识库结构不完整时不会偷偷创建目录", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), files = await RepositoryFiles.open(binding.repo_identity);
+  await rm(join(files.root, "objects"), { recursive: true, force: true });
+  await assert.rejects(RepositoryFiles.openExisting(binding.repo_identity), /缺少目录：objects/);
+  assert.deepEqual((await readdir(files.root)).sort(), ["migrations", "operations", "transactions"].sort());
 });
 
 test("immutable objects and CURRENT are committed atomically and same operation is idempotent", async (t) => {

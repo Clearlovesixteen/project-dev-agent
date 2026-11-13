@@ -39,6 +39,14 @@ test("dirty content does not reuse a snapshot from another branch", () => {
   assert.ok(view.modules[0]!.reasons.includes("source_changed:src/a.ts"));
 });
 
+test("两个工作树对同一模块各自记录时，合并后的源码不会自动选中任一分支", () => {
+  const a = snapshot("branch-a", "procurement", [["src/a.ts", "A"]]);
+  const b = snapshot("branch-b", "procurement", [["src/b.ts", "B"]]);
+  const view = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A"), source("src/b.ts", "B")]), snapshots: [a, b] });
+  assert.equal(view.modules[0]!.state, "ambiguous");
+  assert.ok(view.unresolved.includes("procurement:ambiguous"));
+});
+
 test("a verified combination snapshot dominates its two parent branch snapshots", () => {
   const a = snapshot("a", "procurement", [["src/a.ts", "A"]]);
   const b = snapshot("b", "procurement", [["src/b.ts", "B"]]);

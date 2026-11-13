@@ -9,6 +9,7 @@ import { ProjectFiles } from "../src/storage/project-files.js";
 import { UnderstandingService } from "../src/understanding/service.js";
 import { mapFiles, models, readMap } from "../src/understanding/store.js";
 import { KnowledgeService } from "../src/knowledge/service.js";
+import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
 
 async function setup(t: { after: (action: () => Promise<void>) => void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -88,7 +89,7 @@ test("models validate current exact evidence, preserve revisions and flag all re
 });
 
 test("saved model is shadow-published to the project knowledge store and invalidated by current code", async (t) => {
-  const { service, input, put } = await setup(t);
+  const { service, input, put, binding } = await setup(t);
   await service.scan({});
   const model = await input();
   assert.equal((await service.record(model)).outcome, "ok");
@@ -96,6 +97,14 @@ test("saved model is shadow-published to the project knowledge store and invalid
   assert.equal(first.project_knowledge.state, "matched");
   assert.equal(first.project_knowledge.snapshot_count, 1);
   assert.ok(first.project_knowledge.view_token);
+  const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
+  assert.ok(repository);
+  const snapshot = await repository.readObject((await repository.currentObjectIds())[0]!);
+  const provenance = (snapshot.content as any).provenance;
+  assert.equal(provenance.repo_identity, binding.repo_identity);
+  assert.equal(provenance.head, binding.head);
+  assert.match(provenance.worktree_id, /^[a-f0-9]{64}$/);
+  assert.match(provenance.source_stamp_id, /^[a-f0-9]{64}$/);
   await put("src/shared/status.ts", "export const state = 'closed';\n");
   const changed = (await service.context({ paths: ["src/pages/orders"] })).data as any;
   assert.equal(changed.project_knowledge.state, "needs_review");
