@@ -2,7 +2,6 @@ import { z } from "zod";
 import { AppError } from "../domain/error.js";
 import type { ToolResult } from "../domain/result.js";
 import { assertStateIgnored, type WorktreeBinding } from "../git/index.js";
-import { bindWorktree } from "../git/baseline.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { MAP_DIR, ModelRecordInput, ScanInput } from "./contracts.js";
 import { locked, understandingStatus } from "./store.js";
@@ -11,7 +10,7 @@ import { projectContext } from "./context.js";
 import { provideContext } from "../context/provider.js";
 import { renderProjectReport } from "./report.js";
 import { recordModel } from "./model-record.js";
-import { readProjectKnowledge, publishModelShadow } from "../project-knowledge/service.js";
+import { publishModelShadow } from "../project-knowledge/service.js";
 
 /** 管理结构扫描与业务理解候选；语义内容由 Codex 提交，服务负责核对来源和版本。 */
 export class UnderstandingService {
@@ -37,12 +36,9 @@ export class UnderstandingService {
   async context(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const data = await provideContext(this.files, input);
-      let project_knowledge: unknown;
-      try { project_knowledge = await readProjectKnowledge(await bindWorktree(this.binding.root)); }
-      catch (error) { project_knowledge = { state: "unavailable", snapshot_count: 0, message: error instanceof Error ? error.message : String(error) }; }
-      const enriched = { ...data, project_knowledge };
-      const sharedState = typeof project_knowledge === "object" && project_knowledge !== null && "state" in project_knowledge
-        ? (project_knowledge as { state?: unknown }).state : "unavailable";
+      const enriched = data;
+      const sharedState = typeof data.project_knowledge === "object" && data.project_knowledge !== null && "state" in data.project_knowledge
+        ? (data.project_knowledge as { state?: unknown }).state : "unavailable";
       const sharedIncomplete = !["not_initialized", "empty", "matched"].includes(String(sharedState));
       return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) || sharedIncomplete ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data: enriched, diagnostics: [] };
     });

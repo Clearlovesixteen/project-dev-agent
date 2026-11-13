@@ -16,6 +16,12 @@ export function compactContext(data: Record<string, any>) {
       details_request: model.details_request ?? { model_id: model.id, model_revision: model.revision } })),
     knowledge: (data.knowledge_context?.results ?? []).slice(0, 3).map((entry: any) => ({ id: entry.id, title: entry.title,
       rule: String(entry.rule ?? "").slice(0, 180), effective: entry.effective, file: entry.file, version: entry.version })),
+    // 只把共享知识视图的状态和可追溯 ID 放入自动上下文；完整快照仍通过 project_context 按需读取。
+    project_knowledge: data.project_knowledge ? {
+      state: data.project_knowledge.state, project_id: data.project_knowledge.project_id,
+      transaction_id: data.project_knowledge.transaction_id, view_token: data.project_knowledge.view_token,
+      unresolved: (data.project_knowledge.unresolved ?? []).slice(0, 8),
+    } : undefined,
     business_links: (data.business_graph?.edges ?? []).slice(0, 4),
     truncated: true,
   };

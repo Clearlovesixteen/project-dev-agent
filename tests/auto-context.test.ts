@@ -44,6 +44,8 @@ test("钩子默认自动；observe 不注入，闲聊只提供入口不建任务
 test("自动上下文同源检索、有限输出、按会话去重，生命周期刷新，回执严格绑定项目与身份", async t => {
   const { call, mode, home, fixture, event } = await setup(t); await mode("auto");
   const first = context(await call()); assert.ok(first.includes("Project Dev Agent")); assert.ok(first.includes("context_id="));
+  // 原生 UserPromptSubmit 与 MCP project_context 必须读取同一份共享知识视图。
+  assert.ok(first.includes("project_knowledge")); assert.ok(first.includes('"state":"empty"'));
   assert.ok(Buffer.byteLength(first) < 6_500); assert.ok(!first.includes("permissionDecision"));
   assert.ok(context(await call()).includes("与前次相同"));
   await call({ hook_event_name: "SessionStart", source: "compact" });
