@@ -171,6 +171,7 @@ export class ProjectKnowledgeRepository {
     const raw = await this.files.read(`objects/${objectId}.json`);
     const object = ObjectEnvelopeSchema.parse(JSON.parse(raw));
     if (object.object_id !== objectId) throw new AppError("PROJECT_KNOWLEDGE_OBJECT_CORRUPT", `对象 ID 不匹配：${objectId}`);
+    if (digest(JSON.stringify(object.content)) !== objectId) throw new AppError("PROJECT_KNOWLEDGE_OBJECT_CORRUPT", `对象内容哈希不匹配：${objectId}`);
     return object;
   }
 

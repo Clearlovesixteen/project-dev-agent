@@ -79,6 +79,14 @@ test("immutable objects and CURRENT are committed atomically and same operation 
   await assert.rejects(repository.publish({ operation_id: "operation-a", objects: [b] }), /operation_id 已用于另一组/);
 });
 
+test("读取共享对象会校验内容哈希，损坏快照不会被当作最新知识", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
+  const a = object("A"); await repository.publish({ operation_id: "operation-a", objects: [a] });
+  await repository.files.replace(`objects/${a.object_id}.json`, JSON.stringify({ ...a, content: { value: "tampered" } }), JSON.stringify(a));
+  await assert.rejects(repository.readObject(a.object_id), /对象内容哈希不匹配/);
+});
+
 test("concurrent publishers serialize without losing either immutable object", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path), first = await ProjectKnowledgeRepository.open(binding.repo_identity), second = await ProjectKnowledgeRepository.open(binding.repo_identity);

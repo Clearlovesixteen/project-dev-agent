@@ -16,6 +16,8 @@ export interface ProjectKnowledgeStatus {
   source_stamp_id?: string;
   view_token?: string;
   modules?: KnowledgeView["modules"];
+  /** 当前源码确实匹配的共享模型正文；歧义/过期时不返回，避免 Codex 误用旧分支结论。 */
+  selected_models?: Array<{ snapshot_id: string; model_id: string; module: string; basis: ModuleSnapshot["basis"]; content: unknown; provenance?: ModuleSnapshot["provenance"] }>;
   unresolved?: string[];
   coverage?: SourceStamp["coverage"];
   message?: string;
@@ -39,8 +41,14 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
     const objects = await Promise.all(objectIds.map((id) => opened.readObject(id)));
     const view = resolveKnowledgeView({ source_stamp, snapshots: objects });
     const state = view.modules.length === 0 ? "empty" : view.modules.some((item) => item.state === "partial") ? "partial" : view.unresolved.length ? "needs_review" : "matched";
+    const selected_models = view.selected_snapshot_ids.map((id) => {
+      const object = objects.find((item) => item.object_id === id);
+      if (!object || object.object_type !== "module_snapshot") return undefined;
+      const snapshot = ModuleSnapshotSchema.parse(object.content);
+      return { snapshot_id: id, model_id: snapshot.model_id, module: snapshot.module, basis: snapshot.basis, content: snapshot.content, ...(snapshot.provenance ? { provenance: snapshot.provenance } : {}) };
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item));
     return { state, project_id: identity.project_id, transaction_id: pointer.transaction_id, snapshot_count: objectIds.length,
-      source_stamp_id: source_stamp.stamp_id, view_token: view.view_token, modules: view.modules, unresolved: view.unresolved, coverage: source_stamp.coverage };
+      source_stamp_id: source_stamp.stamp_id, view_token: view.view_token, modules: view.modules, selected_models, unresolved: view.unresolved, coverage: source_stamp.coverage };
   } catch (error) {
     const common = { ...(identity?.project_id ? { project_id: identity.project_id } : {}), ...(pointer?.transaction_id ? { transaction_id: pointer.transaction_id } : {}), snapshot_count: pointer?.object_ids.length ?? 0 };
     if (error instanceof AppError && error.code === "VIEW_CHANGED") return {

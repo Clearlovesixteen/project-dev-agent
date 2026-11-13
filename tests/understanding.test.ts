@@ -97,6 +97,8 @@ test("saved model is shadow-published to the project knowledge store and invalid
   assert.equal(first.project_knowledge.state, "matched");
   assert.equal(first.project_knowledge.snapshot_count, 1);
   assert.ok(first.project_knowledge.view_token);
+  assert.equal(first.project_knowledge.selected_models[0].model_id, "order-state");
+  assert.equal(first.project_knowledge.selected_models[0].content.id, "order-state");
   const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
   assert.ok(repository);
   const snapshot = await repository.readObject((await repository.currentObjectIds())[0]!);
