@@ -71,6 +71,8 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
     return "inferred";
   })() as "observed" | "intended" | "inferred";
   const related = Array.isArray(model.related_versions) ? model.related_versions.filter((item): item is { path: string; sha256: string } => typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).path === "string" && typeof (item as Record<string, unknown>).sha256 === "string") : [];
+  // 本地 SavedModel 带有工作树绝对路径，跨工作树共享时去掉它；工作树与 HEAD 由 provenance 提供。
+  const sharedModel = Object.fromEntries(Object.entries(model).filter(([key]) => key !== "project"));
   const currentIds = await repository.currentObjectIds();
   const prior = (await Promise.all(currentIds.map(async (id) => {
     try {
@@ -86,7 +88,7 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
   }))).filter((item): item is { id: string; revision: number } => Boolean(item))
     .sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id))[0];
   const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId, parent_snapshot_ids: prior ? [prior.id] : [], basis,
-    source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: model } satisfies ModuleSnapshot;
+    source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
     provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: source_stamp.stamp_id, recorded_at: new Date().toISOString() },
