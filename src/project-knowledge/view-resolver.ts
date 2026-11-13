@@ -15,6 +15,12 @@ export const ModuleSnapshotSchema = z.object({
   source_fingerprints: z.array(FingerprintSchema).max(5_000),
   dependency_fingerprints: z.array(FingerprintSchema).max(1_000),
   configuration_fingerprints: z.array(FingerprintSchema).max(200),
+  // provenance 只说明快照由哪个工作树、哪个源码状态产生，不参与“是否适用”的裁决。
+  // 设为可选以兼容 0.13.6 之前已经写入的本地知识对象。
+  provenance: z.object({
+    repo_identity: z.string().min(1), worktree_id: HASH, head: z.string().regex(/^[a-f0-9]{40,64}$/),
+    source_stamp_id: HASH, recorded_at: z.string().datetime({ offset: true }),
+  }).strict().optional(),
   content: z.unknown(),
 }).strict();
 export type ModuleSnapshot = z.infer<typeof ModuleSnapshotSchema>;

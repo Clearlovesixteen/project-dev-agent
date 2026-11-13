@@ -41,7 +41,10 @@ export class UnderstandingService {
       try { project_knowledge = await readProjectKnowledge(await bindWorktree(this.binding.root)); }
       catch (error) { project_knowledge = { state: "unavailable", snapshot_count: 0, message: error instanceof Error ? error.message : String(error) }; }
       const enriched = { ...data, project_knowledge };
-      return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data: enriched, diagnostics: [] };
+      const sharedState = typeof project_knowledge === "object" && project_knowledge !== null && "state" in project_knowledge
+        ? (project_knowledge as { state?: unknown }).state : "unavailable";
+      const sharedIncomplete = !["not_initialized", "empty", "matched"].includes(String(sharedState));
+      return { outcome: ["needs_rescan", "needs_review", "partial"].includes(data.state) || sharedIncomplete ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data: enriched, diagnostics: [] };
     });
   }
   /** 保存有源码依据的模型候选；引用匹配只证明来源，不把语义结论自动确认为规则。 */

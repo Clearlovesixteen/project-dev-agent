@@ -37,7 +37,18 @@ export class RepositoryFiles {
       throw error;
     }
     const files = new RepositoryFiles(actual);
-    for (const directory of ["objects", "transactions", "operations", "migrations"]) await files.ensureDirectory(directory);
+    // 查询路径必须是只读探测。缺少任一结构目录表示初始化不完整，交给 prepare(apply:true)
+    // 修复；不能让普通 project_context 通过 ensureDirectory 改写用户的 Git 公共目录。
+    for (const directory of ["objects", "transactions", "operations", "migrations"]) {
+      const directoryPath = join(files.root, directory);
+      try {
+        const info = await lstat(directoryPath);
+        if (info.isSymbolicLink() || !info.isDirectory() || await realpath(directoryPath) !== directoryPath) throw unsafe(`知识库目录不安全：${directory}`);
+      } catch (error) {
+        if (hasCode(error, "ENOENT")) throw new AppError("PROJECT_KNOWLEDGE_INCOMPLETE", `项目知识库缺少目录：${directory}`);
+        throw error;
+      }
+    }
     return files;
   }
 
