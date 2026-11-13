@@ -143,9 +143,11 @@ export class PluginSettings {
   private async enroll(files: ProjectFiles, entry: Entry): Promise<void> {
     await files.directory("project-dev-agent");
     let release: (() => Promise<void>) | undefined;
+    // 首次接入可能同时触发项目知识库初始化和多个 Codex 会话；配置锁只保护极短的
+    // 白名单写入。给并发初始化一个有界排队窗口，避免宿主负载高时把正常 A/B 接入误报为失败。
     for (let attempt = 0; ; attempt++) {
       try { release = await acquireFileLock(files, LOCK, "PLUGIN_SETTINGS_BUSY"); break; }
-      catch (error) { if (!hasCode(error, "PLUGIN_SETTINGS_BUSY") || attempt >= 20) throw error; await delay(15); }
+      catch (error) { if (!hasCode(error, "PLUGIN_SETTINGS_BUSY") || attempt >= 100) throw error; await delay(50); }
     }
     try {
       const current = await this.read(files);
