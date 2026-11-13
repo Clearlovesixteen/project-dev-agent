@@ -428,7 +428,7 @@ export function createServer(
     "project_model_record",
     {
       description:
-        "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，可选 assertion 描述对象、属性及取值以辅助冲突检查；支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason。不会确认团队规则。",
+        "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，可选 assertion 描述对象、属性及取值以辅助冲突检查；支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason；若 project_context 返回 project_knowledge.view_token，建议原样传入 knowledge_view_token，视图变化会拒绝过期记录。不会确认团队规则。",
       inputSchema: ModelRecordInput.safeExtend(scope),
       annotations: {
         readOnlyHint: false,

@@ -10,7 +10,7 @@ import { projectContext } from "./context.js";
 import { provideContext } from "../context/provider.js";
 import { renderProjectReport } from "./report.js";
 import { recordModel } from "./model-record.js";
-import { publishModelShadow } from "../project-knowledge/service.js";
+import { publishModelShadow, readProjectKnowledge } from "../project-knowledge/service.js";
 
 /** 管理结构扫描与业务理解候选；语义内容由 Codex 提交，服务负责核对来源和版本。 */
 export class UnderstandingService {
@@ -47,6 +47,11 @@ export class UnderstandingService {
   async record(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = ModelRecordInput.parse(input); await assertStateIgnored(this.binding);
+      if (request.knowledge_view_token) {
+        const currentKnowledge = await readProjectKnowledge(this.binding);
+        if (!currentKnowledge.view_token || currentKnowledge.view_token !== request.knowledge_view_token)
+          throw new AppError("PROJECT_KNOWLEDGE_VIEW_STALE", "共享项目知识视图已变化，请重新查询 project_context 后再记录模型");
+      }
       return locked(this.files, async () => {
         const model = await recordModel(this.files, this.binding, request);
         const current = await projectContext(this.files, { model_id: model.id });

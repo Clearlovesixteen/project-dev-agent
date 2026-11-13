@@ -76,6 +76,8 @@ export const ModelPatch = z.object({
 // MCP 根参数保持对象类型，旧版完整记录仍兼容；具体分支在服务中按对应内容契约严格解析。
 export const ModelRecordInput = ModelMetadata.partial().extend({
   id: IdSchema, scan_id: HASH, expected_revision: z.number().int().nonnegative().default(0),
+  /** 可选的共享项目知识视图令牌；旧调用不传时保持本地模型兼容路径。 */
+  knowledge_view_token: HASH.optional(),
   schema_version: z.literal(2).optional(), revision_reason: ShortText.optional(),
   rules: z.array(z.union([BusinessRule, LegacyRule])).max(20).optional(),
   sources: z.array(z.union([ModelSource, FileSource])).min(1).max(30).optional(),

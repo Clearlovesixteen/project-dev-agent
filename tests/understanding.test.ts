@@ -64,6 +64,8 @@ test("repeat scans reuse extraction but re-resolve aliases and find added/delete
 test("models validate current exact evidence, preserve revisions and flag all related changes", async (t) => {
   const { service, files, input, put, binding } = await setup(t);
   await service.scan({}); const model = await input();
+  assert.equal((await service.record({ ...model, knowledge_view_token: "0".repeat(64) })).code, "PROJECT_KNOWLEDGE_VIEW_STALE");
+  assert.equal((await models(files)).length, 0, "过期共享视图不能先写入本地模型");
   assert.equal((await service.record({ ...model, sources: [{ ...model.sources[0], quote: "invented" }] })).code, "PROJECT_MODEL_EVIDENCE_INVALID");
   assert.equal((await service.record({ ...model, sources: [{ ...model.sources[0], line: 1 }] })).code, "PROJECT_MODEL_EVIDENCE_INVALID");
   assert.equal((await service.record({ ...model, sources: [{ ...model.sources[0], sha256: "0".repeat(64) }] })).code, "PROJECT_SOURCE_CHANGED");
