@@ -448,7 +448,7 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </div>
 </article><article class="topic" id="decisions" aria-labelledby="decisions-title">
 <header class="topic-head"><span class="topic-index">2.3</span><div><h3 id="decisions-title">工程约束：模块化、注释、组件与设计模式</h3><p>说明编码前如何判断沿用、扩展或新增。</p></div></header>
-<div class="topic-content"><p class="intro-note"><b>共同约束：</b>按职责模块化，保留本次用户要求，模块职责、公共契约和关键业务取舍配套中文注释；再结合实际变化判断组件复用和设计模式。</p><div class="subsection-title">
+<div class="topic-content"><p class="intro-note"><b>共同约束：</b>按职责模块化，保留本次用户要求；凡新增或修改代码都必须补充或修正覆盖本次变化的中文注释，简单代码至少有职责级注释，复杂分支补充依据和原因；再结合实际变化判断组件复用和设计模式。</p><div class="subsection-title">
 <span class="pillar-tag">选择 A / 组件</span>
 <h4>按顺序检查，同时满足项目约束</h4>
 </div>
@@ -494,35 +494,76 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </thead>
 <tbody>
 <tr>
-<th scope="row">多种算法或处理行为</th>
-<td>
-<strong>策略 / 函数表 / 函数组合</strong>例如多个可替换的校验或计价行为。</td>
-<td>是否真有多种行为？输入输出是否稳定？能否扩展现有机制？</td>
+<th scope="row">可替换算法</th>
+<td><strong>策略 / 函数表</strong>多个校验、计价或处理行为共享同一契约。</td>
+<td>只有一个稳定实现时不建空接口。</td>
 </tr>
 <tr>
-<th scope="row">复杂状态转换</th>
-<td>
-<strong>显式转换表 / 状态模式</strong>集中表达合法转换和操作限制。</td>
-<td>状态和例外是否有业务依据？简单判断是否已足够？</td>
+<th scope="row">状态转换</th>
+<td><strong>状态模式 / 转换表</strong>状态、权限和终态受规则约束。</td>
+<td>简单布尔条件用普通分支。</td>
 </tr>
 <tr>
-<th scope="row">外部接口存在差异</th>
-<td>
-<strong>边界适配器</strong>集中处理字段和接口差异。</td>
-<td>项目是否已有适配层？调用方是否还被迫理解外部细节？</td>
+<th scope="row">外部协议差异</th>
+<td><strong>适配器</strong>集中处理字段、错误和调用方式差异。</td>
+<td>已有适配层时优先扩展它。</td>
 </tr>
 <tr>
-<th scope="row">简单字段、文案与分支</th>
-<td>
-<strong>沿用已有函数与结构</strong>可以明确选择不新增设计模式。</td>
-<td>能否清楚表达？是否产生无实际用途的工厂、接口或继承层？</td>
+<th scope="row">对象创建变化</th>
+<td><strong>工厂 / 抽象工厂</strong>按类型、配置或环境创建同类对象。</td>
+<td>只有一次构造时直接 new。</td>
+</tr>
+<tr>
+<th scope="row">复杂对象构造</th>
+<td><strong>建造者</strong>多步骤、可选参数或顺序约束容易产生半成品。</td>
+<td>简单数据对象不引入 builder。</td>
+</tr>
+<tr>
+<th scope="row">固定流程、可变步骤</th>
+<td><strong>模板方法 / 流程编排</strong>主流程稳定，步骤可替换。</td>
+<td>两步逻辑不建立继承层级。</td>
+</tr>
+<tr>
+<th scope="row">顺序处理与短路</th>
+<td><strong>责任链</strong>多个校验、请求或兜底处理器按顺序尝试。</td>
+<td>单处理器或必须全部执行时用普通编排。</td>
+</tr>
+<tr>
+<th scope="row">可排队操作</th>
+<td><strong>命令</strong>操作需要排队、重试、撤销或审计。</td>
+<td>普通函数调用不提前建命令体系。</td>
+</tr>
+<tr>
+<th scope="row">事件扩展</th>
+<td><strong>观察者 / 发布订阅</strong>一个事件通知多个可增减模块。</td>
+<td>同步单调用不引入全局事件总线。</td>
+</tr>
+<tr>
+<th scope="row">横切能力</th>
+<td><strong>装饰器 / 中间件</strong>叠加日志、权限、缓存或重试。</td>
+<td>只增加一次行为时直接改边界实现。</td>
+</tr>
+<tr>
+<th scope="row">复杂子系统</th>
+<td><strong>外观</strong>为多个子系统提供一个稳定编排入口。</td>
+<td>不隐藏本应由调用方决定的业务规则。</td>
+</tr>
+<tr>
+<th scope="row">受控访问</th>
+<td><strong>代理</strong>在不改原接口时增加权限、缓存、懒加载或远程控制。</td>
+<td>简单转发函数不单独建代理类。</td>
+</tr>
+<tr>
+<th scope="row">简单变化</th>
+<td><strong>沿用已有函数、分支或数据表</strong>明确记录“不采用模式”。</td>
+<td>没有稳定变化轴时不为凑模式抽象。</td>
 </tr>
 </tbody>
 </table>
 </div>
 <div class="decision-receipt">
 <b>最终记录什么</b>
-<p>已读依据 → 解决什么问题 → 沿用 / 扩展 / 新建及原因 → 成本与影响 → 对应验收。模块职责、公共契约和关键取舍配套中文注释；代码变化时同步维护。</p>
+<p>已读依据 → 解决什么问题 → 沿用 / 扩展 / 新建及原因 → 成本与影响 → 对应验收。每次新增或修改代码都要检查职责、契约、关键依据和复杂逻辑的注释覆盖；注释失效时同步修正或删除。</p>
 </div>
 <p class="boundary">Codex 负责设计判断与代码审查，MCP 核对来源、修订及验收关联。没有仅凭组件名称或模式名称就能证明设计正确的自动评判器。</p></div>
 </article><article class="topic" id="technical" aria-labelledby="technical-title">
