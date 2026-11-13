@@ -4,7 +4,7 @@ import type { WorktreeBinding } from "../git/baseline.js";
 import { ProjectKnowledgeRepository } from "./repository.js";
 import { collectSourceStamp, type SourceStamp } from "./source-stamp.js";
 import { ModuleSnapshotSchema, resolveKnowledgeView, type KnowledgeView, type ModuleSnapshot } from "./view-resolver.js";
-import { ObjectEnvelopeSchema, type ProjectIdentity, type SnapshotPointer } from "./contracts.js";
+import { ObjectEnvelopeSchema, ProjectKnowledgeApplyReceiptSchema, type ObjectEnvelope, type ProjectIdentity, type SnapshotPointer, type ProjectKnowledgeApplyReceipt } from "./contracts.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -74,7 +74,26 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
 }
 
 /** 将当前工作树的已保存模型以不可变快照写入项目库；失败不回滚本地模型。 */
-export async function publishModelShadow(binding: WorktreeBinding, model: Record<string, unknown>): Promise<{ snapshot_id: string }> {
+export interface ModelShadowReceiptInput {
+  operation_id: string;
+  task_id: string;
+  delta_id: string;
+  delta_fingerprint: string;
+  review_snapshot: string;
+}
+
+/**
+ * 将本地模型作为项目级不可变快照提交。
+ *
+ * 业务变更应用时可同时传入 receipt：快照和回执会进入同一项目知识事务，
+ * 这样工作树本地记录已落盘而共享库未更新时，下一次可按 operation_id 完整
+ * 重试；不会出现只留下“模型已改”却找不到任务来源的半条记录。
+ */
+export async function publishModelShadow(
+  binding: WorktreeBinding,
+  model: Record<string, unknown>,
+  options: { receipt?: ModelShadowReceiptInput } = {},
+): Promise<{ snapshot_id: string; receipt_id?: string; source_stamp_id: string }> {
   const repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
   const source_stamp = await collectSourceStamp(binding);
   const modelId = typeof model.id === "string" ? model.id : "unknown";
@@ -88,6 +107,10 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
   const related = Array.isArray(model.related_versions) ? model.related_versions.filter((item): item is { path: string; sha256: string } => typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).path === "string" && typeof (item as Record<string, unknown>).sha256 === "string") : [];
   // 本地 SavedModel 带有工作树绝对路径，跨工作树共享时去掉它；工作树与 HEAD 由 provenance 提供。
   const sharedModel = Object.fromEntries(Object.entries(model).filter(([key]) => key !== "project"));
+  // 同一业务模型修订在共享回执保存失败后会再次构造快照；使用模型自身的
+  // immutable recorded_at 作为 provenance 时间，避免重试仅因当前时间变化而
+  // 产生新的 snapshot_id。
+  const recordedAt = typeof model.recorded_at === "string" ? model.recorded_at : new Date().toISOString();
   const currentIds = await repository.currentObjectIds();
   const currentSources = new Map(related.map((item) => [item.path, item.sha256]));
   const prior = (await Promise.all(currentIds.map(async (id) => {
@@ -108,9 +131,43 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
     source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
-    provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: source_stamp.stamp_id, recorded_at: new Date().toISOString() },
+    provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: source_stamp.stamp_id, recorded_at: recordedAt },
   } satisfies ModuleSnapshot;
   const parsed = ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot", object_id: digest(JSON.stringify(snapshot)), content: snapshot });
-  await repository.publish({ operation_id: `model-shadow:${modelId}:${revision}:${source_stamp.stamp_id}`, objects: [parsed] });
-  return { snapshot_id: parsed.object_id };
+  let objects = [parsed];
+  let receipt_id: string | undefined;
+  if (options.receipt) {
+    const receipt: ProjectKnowledgeApplyReceipt = ProjectKnowledgeApplyReceiptSchema.parse({
+      schema_version: 1,
+      kind: "model_apply",
+      ...options.receipt,
+      repo_identity: binding.repo_identity,
+      worktree_id: digest(`${binding.repo_identity}\n${binding.root}`),
+      head: source_stamp.head,
+      source_stamp_id: source_stamp.stamp_id,
+      snapshot_id: parsed.object_id,
+      model_id: modelId,
+      model_revision: revision,
+      applied_at: new Date().toISOString(),
+    });
+    receipt_id = digest(JSON.stringify(receipt));
+    objects.push(ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "receipt", object_id: receipt_id, content: receipt }));
+  }
+  const operation_id = options.receipt?.operation_id ?? `model-shadow:${modelId}:${revision}:${source_stamp.stamp_id}`;
+  // 旧版本在共享库已写入模型、但本地回执丢失时，重试会重新生成 applied_at，
+  // 从而得到不同 receipt hash。复用已有 operation 中的不可变对象，仍让
+  // repository.publish 负责把该事务接回 CURRENT 链尾。
+  const existingOperation = await repository.readOperation(operation_id);
+  if (existingOperation) {
+    const existingObjects = await Promise.all(existingOperation.object_ids.map(id => repository.readObject(id)));
+    const existingSnapshot = existingObjects.find(object => object.object_type === "module_snapshot");
+    if (!existingSnapshot || existingSnapshot.object_id !== parsed.object_id)
+      throw new AppError("PROJECT_KNOWLEDGE_OPERATION_CONFLICT", "同一模型应用操作号对应了不同的源码快照");
+    if (options.receipt && !existingObjects.some(object => object.object_type === "receipt"))
+      throw new AppError("PROJECT_KNOWLEDGE_OPERATION_CONFLICT", "同一模型应用操作号缺少共享应用回执");
+    objects = existingOperation.object_ids.map(id => objects.find(object => object.object_id === id) ?? existingObjects.find(object => object.object_id === id)!).filter((object): object is ObjectEnvelope => Boolean(object));
+    receipt_id = existingObjects.find(object => object.object_type === "receipt")?.object_id ?? receipt_id;
+  }
+  await repository.publish({ operation_id, objects });
+  return { snapshot_id: parsed.object_id, ...(receipt_id ? { receipt_id } : {}), source_stamp_id: source_stamp.stamp_id };
 }

@@ -13,6 +13,8 @@ import { ruleFingerprint } from "../src/understanding/model-evidence.js";
 import type { ModelV2, RuleV2 } from "../src/understanding/model-contracts.js";
 import { BusinessDeltaInputSchema } from "../src/quality/business-delta-contracts.js";
 import { recordBusinessDeltas, businessDeltaScenarios, businessDeltaReview, applyBusinessDelta, type BusinessDeltaTask } from "../src/quality/business-deltas.js";
+import { ProjectKnowledgeApplyReceiptSchema } from "../src/project-knowledge/contracts.js";
+import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
 
 async function setup(t: { after(action: () => Promise<void>): void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -78,6 +80,26 @@ test("真实代码核验后显式回写 observed，保留无关规则与旧证�
   assert.deepEqual(await applyBusinessDelta(s.binding, s.task, input), receipt);
   assert.equal((await models(s.files))[0]!.revision, 2);
   assert.equal((await businessDeltaReview(s.binding, s.task, receipt.review_snapshot)).state, "checked");
+});
+
+test("业务模型应用与共享项目回执进入同一事务，重试不会丢失跨工作树依据", async t => {
+  const s = await setup(t); await s.record(); await s.implement(); await s.markChecked();
+  const input = await s.applyInput();
+  const receipt = await applyBusinessDelta(s.binding, s.task, input);
+  const repository = (await ProjectKnowledgeRepository.openExisting(s.binding.repo_identity))!;
+  const objects = await Promise.all((await repository.currentObjectIds()).map(id => repository.readObject(id)));
+  const snapshot = objects.find(object => object.object_type === "module_snapshot");
+  const sharedReceipt = objects.find(object => object.object_type === "receipt");
+  assert.ok(snapshot);
+  assert.ok(sharedReceipt);
+  const parsedReceipt = ProjectKnowledgeApplyReceiptSchema.parse(sharedReceipt!.content);
+  assert.equal(parsedReceipt.task_id, s.task.id);
+  assert.equal(parsedReceipt.delta_id, input.delta_id);
+  assert.equal(parsedReceipt.model_revision, receipt.model_revision);
+  assert.equal(parsedReceipt.snapshot_id, snapshot!.object_id);
+  assert.equal(parsedReceipt.review_snapshot, receipt.review_snapshot);
+  assert.deepEqual(await applyBusinessDelta(s.binding, s.task, input), receipt);
+  assert.equal((await repository.currentObjectIds()).length, objects.length, "同一操作号重试不应追加重复对象");
 });
 
 test("验收存在不等于覆盖场景，无关ID和旧草案绑定不能发布", async t => {

@@ -41,6 +41,7 @@ import {
   type BusinessDeltaRecord,
   type BusinessDeltaReceipt,
 } from "./business-delta-contracts.js";
+import { publishModelShadow } from "../project-knowledge/service.js";
 
 export type BusinessDeltaTask = Pick<
   Task,
@@ -589,6 +590,19 @@ export async function applyBusinessDelta(
         review_snapshot: token,
         applied_at: new Date().toISOString(),
       });
+    const publishSharedApply = async (published: ModelV2, reviewToken = snapshot.hash) => {
+      // 共享快照和应用回执必须使用同一 operation_id；失败时保留本地 pending，
+      // 下一次调用会先恢复并重试这一事务，不能把本地模型当成已同步。
+      return publishModelShadow(binding, published as unknown as Record<string, unknown>, {
+        receipt: {
+          operation_id: marker,
+          task_id: task.id,
+          delta_id: record.input.id,
+          delta_fingerprint: record.fingerprint,
+          review_snapshot: reviewToken,
+        },
+      });
+    };
     const preserveReceipt = (receipt: BusinessDeltaReceipt) => {
       if (journal.receipt_history.length >= 40)
         throw new AppError(
@@ -601,6 +615,11 @@ export async function applyBusinessDelta(
     };
     // 模型已发布而回执尚未保存：marker证明该次发布；先保留原快照回执，再处理新的代码复核。
     if (journal.pending) {
+      if (journal.pending.review_snapshot !== snapshot.hash)
+        throw new AppError(
+          "BUSINESS_DELTA_RECOVERY_STALE",
+          "上次业务模型发布中断后工作树已变化；先恢复原代码快照或重新核对该草案，不能把旧发布绑定到新代码",
+        );
       const recovered = await recoverPublication(files, model, journal.pending);
       if (recovered) {
         const recoveredRule = recovered.rules.find(
@@ -614,6 +633,7 @@ export async function applyBusinessDelta(
             "BUSINESS_DELTA_CONFLICT",
             "中断后的目标规则已被其他变更修改，请先核对业务链，不能认领旧发布为当前结果",
           );
+        await publishSharedApply(recovered, journal.pending.review_snapshot);
         preserveReceipt(
           makeReceipt(recovered, journal.pending.review_snapshot),
         );
@@ -785,6 +805,7 @@ export async function applyBusinessDelta(
       );
     journal.pending.published_hash = publishedIndex.hash;
     await save(files, path, journal);
+    await publishSharedApply(published);
     const receipt = makeReceipt(published, snapshot.hash);
     preserveReceipt(receipt);
     await save(files, path, journal);

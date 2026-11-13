@@ -182,6 +182,16 @@ export class ProjectKnowledgeRepository {
     return transaction;
   }
 
+  /** 查询既有 operation marker，供中断恢复在对象内容已提交时复用原事务。 */
+  async readOperation(operationId: string): Promise<OperationRecord | undefined> {
+    const path = `operations/${digest(operationId)}.json`;
+    const raw = await this.files.read(path).catch((error) => {
+      if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "ENOENT") return undefined;
+      throw error;
+    });
+    return raw === undefined ? undefined : OperationRecordSchema.parse(JSON.parse(raw));
+  }
+
   /** 按父事务从当前状态读取完整对象链；不把 CURRENT 的单批对象误当作全项目模型。 */
   async currentObjectIds(): Promise<string[]> {
     const pointer = await this.current();
