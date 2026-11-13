@@ -14,6 +14,7 @@ import { TaskService } from "../src/task-service.js";
 import { UnderstandingService } from "../src/understanding/service.js";
 import { recordRequirementSources } from "../src/quality/requirement-review.js";
 import { recordValidationPlan } from "../src/quality/validation-plan.js";
+import { ParticipationStore } from "../src/workflow/participation.js";
 
 const exec = promisify(execFile);
 const context = (result: Record<string, unknown>) => (result.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext ?? "";
@@ -96,6 +97,15 @@ test("缺失检查配置返回可定位的稳定错误，不再退化为 OPERATI
     assert.match(error.message, /lint/); assert.match(error.message, /\.stylelintrc\.js/);
     return true;
   });
+});
+
+test("共享业务模型出现歧义时，查询回执不能放行后续代码修改", async t => {
+  const s = await setup(t), store = new ParticipationStore(s.home), interaction = { session_id: "reliability-session", turn_id: "turn-1" };
+  await store.observedTool(s.fixture.path, interaction, s.binding.branch, "project_context", {
+    outcome: "incomplete", data: { context_id: "a".repeat(64), state: "indexed", project_knowledge: { state: "needs_review" } },
+  });
+  const saved = await store.read(s.fixture.path, interaction, s.binding.branch);
+  assert.equal(saved?.context_ready, false);
 });
 
 test("切换分支创建新任务保留旧分支任务，切回后恢复原任务", async t => {

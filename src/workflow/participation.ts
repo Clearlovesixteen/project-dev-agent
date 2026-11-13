@@ -79,7 +79,12 @@ export class ParticipationStore {
       if (tool === "project_context" && typeof data.context_id === "string") {
         state.context_id = data.context_id; state.context_at = Date.now();
         state.context_turn = interaction.turn_id ?? null;
-        state.context_ready = !["not_scanned", "needs_rescan"].includes(String(data.state));
+        const localReady = !["not_scanned", "needs_rescan"].includes(String(data.state));
+        const shared = data.project_knowledge && typeof data.project_knowledge === "object" ? data.project_knowledge as { state?: unknown } : undefined;
+        // 共享知识库是同一项目跨工作树的模型来源。匹配失败时可以继续排查，但不能把旧分支
+        // 的业务结论当作修改依据；empty/not_initialized 表示项目尚无可复用模型，仍可建模。
+        const sharedReady = !shared || ["empty", "not_initialized", "matched"].includes(String(shared.state));
+        state.context_ready = localReady && sharedReady;
       }
       const taskId = typeof data.id === "string" ? data.id : typeof data.task_id === "string" ? data.task_id : undefined;
       if (tool.startsWith("task_") && taskId) {
