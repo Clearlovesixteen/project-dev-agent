@@ -114,6 +114,18 @@ test("saved model is shadow-published to the project knowledge store and invalid
   assert.ok(changed.project_knowledge.unresolved.some((item: string) => item.startsWith("order-state:")));
 });
 
+test("同一工作树的模型修订会保留共享快照父链，不能把不同源码证据当作自动合并", async (t) => {
+  const { service, input, binding } = await setup(t);
+  await service.scan({});
+  assert.equal((await service.record(await input())).outcome, "ok");
+  const repository = (await ProjectKnowledgeRepository.openExisting(binding.repo_identity))!;
+  const firstId = (await repository.currentObjectIds())[0]!;
+  assert.equal((await service.record({ ...await input(), expected_revision: 1, summary: "同一证据下的修订" })).outcome, "ok");
+  const ids = await repository.currentObjectIds();
+  const second = await repository.readObject(ids.find(id => id !== firstId)!);
+  assert.deepEqual((second.content as any).parent_snapshot_ids, [firstId]);
+});
+
 test("excluded paths and freshly excluded model sources cannot leak through context or combined search", async (t) => {
   const { service, put, input, binding } = await setup(t);
   await service.scan({}); await service.record(await input());

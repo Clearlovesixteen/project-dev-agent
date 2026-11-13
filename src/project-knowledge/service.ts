@@ -74,6 +74,7 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
   // 本地 SavedModel 带有工作树绝对路径，跨工作树共享时去掉它；工作树与 HEAD 由 provenance 提供。
   const sharedModel = Object.fromEntries(Object.entries(model).filter(([key]) => key !== "project"));
   const currentIds = await repository.currentObjectIds();
+  const currentSources = new Map(related.map((item) => [item.path, item.sha256]));
   const prior = (await Promise.all(currentIds.map(async (id) => {
     try {
       const object = await repository.readObject(id);
@@ -83,7 +84,8 @@ export async function publishModelShadow(binding: WorktreeBinding, model: Record
       const previousContent = parsed.data.content;
       const previousRevision = typeof previousContent === "object" && previousContent !== null && typeof (previousContent as Record<string, unknown>).revision === "number"
         ? (previousContent as Record<string, unknown>).revision as number : 0;
-      return previousRevision < revision ? { id, revision: previousRevision } : undefined;
+      const lineage = parsed.data.source_fingerprints.every((item) => currentSources.get(item.path) === item.sha256);
+      return previousRevision < revision && lineage ? { id, revision: previousRevision } : undefined;
     } catch { return undefined; }
   }))).filter((item): item is { id: string; revision: number } => Boolean(item))
     .sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id))[0];
