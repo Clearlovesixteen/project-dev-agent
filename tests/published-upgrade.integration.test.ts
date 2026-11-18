@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdir, readFile, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,23 +10,22 @@ import { readProjectKnowledge } from "../src/project-knowledge/service.js";
 import { ProjectFiles } from "../src/storage/project-files.js";
 import { UnderstandingService } from "../src/understanding/service.js";
 import { mapFiles, modelIndex, readMap } from "../src/understanding/store.js";
+import { withSampleGit } from "../src/sample/git-isolation.js";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 
 const sourcePath = "src/project-status.js";
 const modelId = "project-status";
 const marker = (value: string) => `export const status = "${value}";\n`;
 
-function git(root: string, ...args: string[]) {
-  return execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], { cwd: root, stdio: "pipe" });
-}
-
 /** 每棵工作树使用自己的扫描、代码和任务文件，测试只共享实际的 Git 公共目录。 */
 async function modelFixture(t: test.TestContext) {
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
+  // 验证用的提交与合并沿用样例仓库的隔离环境，Git 身份由用例提供。
+  const git = (root: string, ...args: string[]) => withSampleGit(fixture.root, run => run(root, args));
   await writeFile(join(fixture.path, sourcePath), marker("initial"));
-  git(fixture.path, "add", "--", sourcePath);
-  git(fixture.path, "commit", "-m", "Initial shared status");
+  await git(fixture.path, "add", "--", sourcePath);
+  await git(fixture.path, "commit", "-m", "Initial shared status");
   const home = join(fixture.root, "isolated-codex");
   await mkdir(home);
   const settings = new PluginSettings(home);
@@ -53,7 +51,7 @@ async function modelFixture(t: test.TestContext) {
   const a = await attach(fixture.path);
   const branch = async (name: string) => {
     const root = join(fixture.root, name);
-    git(fixture.path, "worktree", "add", "-b", name, root, "HEAD");
+    await git(fixture.path, "worktree", "add", "-b", name, root, "HEAD");
     return attach(root);
   };
   const { scan_id, source } = await a.scan();
@@ -73,11 +71,11 @@ async function modelFixture(t: test.TestContext) {
       ...(base ? { base_snapshot_id: base } : {}), ...(reviewed ? { reviewed_snapshot_ids: reviewed } : {}),
       patch: { metadata: { summary }, upsert_sources: [source], upsert_rules: [{ ...rule, description: summary }] } };
   };
-  return { fixture, a, branch, baseline, input, settings };
+  return { fixture, a, branch, baseline, input, settings, git };
 }
 
 test("linked worktree 从常规业务查询直接读取共享模型，冲突复核后各分支继续取得自己的适用模型", async t => {
-  const { a, branch, baseline, input, settings } = await modelFixture(t);
+  const { a, branch, baseline, input, settings, git } = await modelFixture(t);
   const b = await branch("version-b"), integration = await branch("integration");
   await b.scan();
   assert.deepEqual(await modelIndex(b.files), []);
@@ -99,15 +97,16 @@ test("linked worktree 从常规业务查询直接读取共享模型，冲突复�
 
   // 先提交两个版本，再在单独工作树运行真正的 Git 合并并手工解决同一文件的冲突。
   for (const tree of [a, b]) {
-    git(tree.binding.root, "add", "--", sourcePath);
-    git(tree.binding.root, "commit", "-m", "Change branch status");
+    await git(tree.binding.root, "add", "--", sourcePath);
+    await git(tree.binding.root, "commit", "-m", "Change branch status");
   }
   const integrationRoot = integration.binding.root;
-  git(integrationRoot, "merge", "--no-edit", a.binding.branch!);
-  assert.throws(() => git(integrationRoot, "merge", "--no-edit", b.binding.branch!));
+  await git(integrationRoot, "merge", "--no-edit", a.binding.branch!);
+  await assert.rejects(git(integrationRoot, "merge", "--no-edit", b.binding.branch!), { code: 1 });
+  assert.equal(await git(integrationRoot, "diff", "--name-only", "--diff-filter=U"), sourcePath);
   await integration.set("combined");
-  git(integrationRoot, "add", "--", sourcePath);
-  git(integrationRoot, "commit", "-m", "Review combined status behavior");
+  await git(integrationRoot, "add", "--", sourcePath);
+  await git(integrationRoot, "commit", "-m", "Review combined status behavior");
   await integration.scan();
   const ambiguous = await integration.context({ model_id: modelId });
   assert.equal(ambiguous.project_knowledge.modules?.[0]?.state, "ambiguous");
