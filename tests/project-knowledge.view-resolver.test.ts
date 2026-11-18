@@ -50,7 +50,7 @@ test("两个工作树对同一模块各自记录时，合并后的源码不会�
 test("a verified combination snapshot dominates its two parent branch snapshots", () => {
   const a = snapshot("a", "procurement", [["src/a.ts", "A"]]);
   const b = snapshot("b", "procurement", [["src/b.ts", "B"]]);
-  const combined = snapshot("combined", "procurement", [["src/a.ts", "A"], ["src/b.ts", "B"]], [a.object_id, b.object_id]);
+  const combined = snapshot("combined", "procurement", [["src/a.ts", "A"], ["src/b.ts", "B"]], ["a", "b"]);
   const view = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A"), source("src/b.ts", "B")]), snapshots: [a, b, combined] });
   assert.equal(view.modules[0]!.state, "matched");
   assert.equal(view.modules[0]!.selected_snapshot_id, combined.object_id);
@@ -62,6 +62,24 @@ test("same evidence with different semantic snapshots remains ambiguous", () => 
   const view = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A")]), snapshots: [a, b] });
   assert.equal(view.modules[0]!.state, "ambiguous");
   assert.ok(view.unresolved.includes("procurement:ambiguous"));
+});
+
+test("证据文件更多的独立分支不能越过另一分支的业务结论", () => {
+  const a = snapshot("a", "procurement", [["src/a.ts", "A"]]);
+  const b = snapshot("b", "procurement", [["src/a.ts", "A"], ["src/b.ts", "B"]]);
+  const view = resolveKnowledgeView({
+    source_stamp: stamp([source("src/a.ts", "A"), source("src/b.ts", "B")]), snapshots: [a, b],
+  });
+  assert.equal(view.modules[0]!.state, "ambiguous");
+  assert.deepEqual(view.selected_snapshot_ids, []);
+});
+
+test("同一谱系回到旧源码时仍选择已经复核的后继快照", () => {
+  const a = snapshot("a", "procurement", [["src/a.ts", "A"]]);
+  const b = snapshot("b", "procurement", [["src/a.ts", "B"]], ["a"]);
+  const c = snapshot("c", "procurement", [["src/a.ts", "A"]], ["b"]);
+  const view = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A")]), snapshots: [c, a, b] });
+  assert.equal(view.modules[0]!.selected_snapshot_id, c.object_id);
 });
 
 test("incomplete source coverage never reports a fully matched view", () => {

@@ -32,7 +32,7 @@ export function impactCandidates(entries: MapFile[], models: SavedModel[], paths
   const related = relatedModelIds(models, new Set(direct.map(model => model.id)));
   for (const model of models.filter(model => direct.includes(model) || related.has(model.id))) {
     for (const path of model.related_paths) add(path, "business_model", 3, model.id);
-    if (model.schema_version === 2) for (const relation of model.relations) add(relation.target_path, `business_${relation.kind}`, 5, model.id);
+    if (model.schema_version !== 1) for (const relation of model.relations) add(relation.target_path, `business_${relation.kind}`, 5, model.id);
   }
   const ordered = [...candidates.values()].sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
   return { candidates: ordered.slice(0, limit).map(({ score, ...item }) => ({ ...item, in_checklist: covered.has(item.path) })),

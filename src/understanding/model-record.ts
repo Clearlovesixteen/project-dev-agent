@@ -1,33 +1,53 @@
+import { digest } from "../knowledge/document.js";
 import { AppError } from "../domain/error.js";
 import type { WorktreeBinding } from "../git/index.js";
 import { gitLine, readGit } from "../git/command.js";
 import { loadConfig } from "../knowledge/config.js";
-import { digest } from "../knowledge/document.js";
 import { ProjectFiles } from "../storage/project-files.js";
-import { MAP_DIR } from "./contracts.js";
-import { LegacyContent, SavedLegacyModel, SavedModelV2, type RecordRequest, type SavedModel } from "./model-contracts.js";
+import { LegacyContent, SavedLegacyModel, SavedModelV2, SavedModelV3, type RecordRequest, type SavedModel } from "./model-contracts.js";
 import { ModelEvidence, dependencyFingerprint, entityFingerprint, ruleFingerprint, sourceFingerprint, sourcePath } from "./model-evidence.js";
 import { prepareModel, priorRelation, priorRule } from "./model-update.js";
 import { excluded, mapConfigHash } from "./scan.js";
-import { mapFiles, modelIndex, models, optional, readMap, save } from "./store.js";
+import { mapFiles, modelIndex, models, readMap, publishModel } from "./store.js";
+import { CodeBindingResolver } from "./code-bindings.js";
+import { assertEnhancedModelWrites } from "../runtime/business-model-release.js";
+import type { SavedBinding } from "./semantic-contracts.js";
+import type { SourceV2 } from "./model-contracts.js";
+
+/** 定位与依据来自同一内容版本。符号绑定至少引用该声明范围内的一段原文。 */
+async function verifyBindingSource(resolver: CodeBindingResolver, binding: SavedBinding, sources: Map<string, SourceV2>) {
+  if (binding.planned || binding.resolution !== "resolved") return;
+  const candidates = binding.source_ids.map(id => sources.get(id)).filter(source => source?.kind === "code" && source.path === binding.path);
+  const { text, sha256 } = await resolver.source(binding.path);
+  if (!candidates.some(source => {
+    if (!source || source.kind !== "code" || source.sha256 !== sha256) return false;
+    if (binding.start === null || binding.end === null) return true;
+    let offset = 0;
+    for (let line = 1; line < source.line; line++) offset = text.indexOf("\n", offset) + 1;
+    const quote = text.indexOf(source.quote, offset);
+    return quote >= binding.start && quote + source.quote.length <= binding.end;
+  })) throw new AppError("PROJECT_MODEL_BINDING_SOURCE", `代码依据需位于所绑定的真实声明：${binding.path}${binding.symbol ? `#${binding.symbol}` : ""}`);
+}
 
 /** 调用方持有理解目录写锁。先校验证据和引用，最后才发布不可变修订及索引。 */
-export async function recordModel(files: ProjectFiles, binding: WorktreeBinding, request: RecordRequest): Promise<SavedModel> {
+export async function buildModel(files: ProjectFiles, binding: WorktreeBinding, request: RecordRequest,
+  existing: SavedModel[], nextRevision = request.expected_revision + 1): Promise<SavedModel> {
+  assertEnhancedModelWrites(request.schema_version === 3);
   const map = await readMap(files), { config } = await loadConfig(files);
   if (!map || map.scan_id !== request.scan_id || map.repo_identity !== binding.repo_identity || map.config_hash !== await mapConfigHash(files, config)
     || map.head !== gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout)) {
     throw new AppError("PROJECT_MAP_CHANGED", "记录模型前，请先读取当前配置、HEAD 和项目结构索引");
   }
-  const index = await modelIndex(files), existing = await models(files), prior = existing.find((model) => model.id === request.id);
+  const index = await modelIndex(files), prior = existing.find((model) => model.id === request.id);
   if ((prior?.revision ?? 0) !== request.expected_revision) throw new AppError("PROJECT_MODEL_REVISION_CONFLICT", "更新前请读取模型最新修订，保留其他修改");
   if (!prior && index.length >= 200) throw new AppError("PROJECT_MODEL_LIMIT", "当前工作区已有 200 个模型");
-  if (prior?.schema_version === 2 && request.schema_version !== 2) throw new AppError("PROJECT_MODEL_DOWNGRADE", "新版模型不能降级覆盖，请使用 schema_version: 2 和 patch");
+  if (prior && prior.schema_version !== 1 && (request.schema_version ?? 1) < prior.schema_version) throw new AppError("PROJECT_MODEL_DOWNGRADE", "新版模型不能降级覆盖，请使用当前 schema_version 和 patch");
   const entries = new Map((await mapFiles(files)).map((entry) => [entry.path, entry]));
   const evidence = new ModelEvidence(files, config, entries, binding.repo_identity);
-  const metadata = { project: binding.root, scan_id: request.scan_id, revision: request.expected_revision + 1, recorded_at: new Date().toISOString() };
+  const metadata = { project: binding.root, scan_id: request.scan_id, revision: nextRevision, recorded_at: new Date().toISOString() };
   let model: SavedModel;
-  if (request.schema_version !== 2) {
-    const { scan_id, expected_revision, schema_version, revision_reason, patch, ...body } = request;
+  if (!request.schema_version) {
+    const { scan_id, expected_revision, schema_version, revision_reason, patch, knowledge_view_token, base_snapshot_id, reviewed_snapshot_ids, ...body } = request;
     const content = LegacyContent.parse(body);
     const related_versions = [];
     for (const path of content.related_paths) related_versions.push({ path, sha256: await evidence.currentPath(path) });
@@ -50,8 +70,15 @@ export async function recordModel(files: ProjectFiles, binding: WorktreeBinding,
       return ids.map((id) => ({ id, fingerprint: sourceFingerprint(sources.get(id)!) }));
     };
     const rules = [];
-    for (const rule of content.rules) rules.push(reviewedRules.has(rule.id)
-      ? { ...rule, evidence_versions: await versions(rule.source_ids) } : priorRule(old, rule.id)!);
+    const resolver = new CodeBindingResolver(files, config);
+    for (const rule of content.rules) {
+      if (!reviewedRules.has(rule.id)) { rules.push(priorRule(old, rule.id)!); continue; }
+      const evidence_versions = await versions(rule.source_ids);
+      const bindings = rule.bindings
+        ? await Promise.all(rule.bindings.map(item => resolver.resolve(item))) : undefined;
+      for (const binding of bindings ?? []) await verifyBindingSource(resolver, binding, sources);
+      rules.push({ ...rule, evidence_versions, ...(bindings ? { bindings } : {}) });
+    }
     const relations = [];
     for (const relation of content.relations) {
       if (!reviewedRelations.has(relation.id)) { relations.push(priorRelation(old, relation.id)!); continue; }
@@ -59,7 +86,7 @@ export async function recordModel(files: ProjectFiles, binding: WorktreeBinding,
       if (relation.target_model_id && (!target || target.related_paths.some((path) => excluded(path, config)))) {
         throw new AppError("PROJECT_MODEL_RELATION_TARGET", "引用的业务模型不存在或已排除；先查询可用模型");
       }
-      if (relation.target_rule_ids && (!target || target.schema_version !== 2 || relation.target_rule_ids.some(id => !target.rules.some(rule => rule.id === id))))
+      if (relation.target_rule_ids && (!target || target.schema_version === 1 || relation.target_rule_ids.some(id => !target.rules.some(rule => rule.id === id))))
         throw new AppError("PROJECT_MODEL_TARGET_RULE", "目标规则 ID 不存在，不能保存虚构的关联");
       if (relation.target_entity_ids?.some(id => !target?.entities.some(entity => entity.id === id)))
         throw new AppError("PROJECT_MODEL_ENTITY_REFERENCE", "目标实体 ID 不存在");
@@ -69,9 +96,9 @@ export async function recordModel(files: ProjectFiles, binding: WorktreeBinding,
         ...(target ? { target_model_revision: target.revision } : {}),
         ...(relation.entity_ids ? { entity_versions: relation.entity_ids.map(id => ({ id,
           fingerprint: entityFingerprint(content.entities.find(entity => entity.id === id)!, [...sources.values()]) })) } : {}),
-        ...(target?.schema_version === 2 && relation.target_entity_ids ? { target_entity_versions: relation.target_entity_ids.map(id => ({ id,
+        ...(target && target.schema_version !== 1 && relation.target_entity_ids ? { target_entity_versions: relation.target_entity_ids.map(id => ({ id,
           fingerprint: entityFingerprint(target.entities.find(entity => entity.id === id)!, target.sources) })) } : {}),
-        ...(target?.schema_version === 2 && relation.target_rule_ids ? { target_rule_versions: relation.target_rule_ids.map(id => ({ id,
+        ...(target && target.schema_version !== 1 && relation.target_rule_ids ? { target_rule_versions: relation.target_rule_ids.map(id => ({ id,
           fingerprint: dependencyFingerprint(target.rules.find(rule => rule.id === id)!) })) } : {}) });
     }
     const refreshed = new Set([...validated].flatMap((id) => { const path = sourcePath(sources.get(id)!); return path ? [path] : []; }));
@@ -81,12 +108,18 @@ export async function recordModel(files: ProjectFiles, binding: WorktreeBinding,
       const previous = old?.related_versions.find((item) => item.path === path);
       related_versions.push(previous && !refreshed.has(path) ? previous : { path, sha256: await evidence.currentPath(path) });
     }
-    model = SavedModelV2.parse({ ...content, ...metadata, schema_version: 2, revision_reason: request.revision_reason,
+    model = (request.schema_version === 3 ? SavedModelV3 : SavedModelV2).parse({ ...content, ...metadata, schema_version: request.schema_version, revision_reason: request.revision_reason,
       sources: [...sources.values()], rules, relations, related_versions });
   }
-  const raw = JSON.stringify(model) + "\n", hash = digest(raw), path = `${MAP_DIR}/models/${hash}.json`;
-  if (Buffer.byteLength(raw) > 65_536) throw new AppError("FILE_LIMIT", "模型超过 64 KiB，请按业务能力拆分并通过 target_model_id 复用公共模型");
-  if (await optional(files, path) === undefined) await files.create(path, raw);
-  await save(files, `${MAP_DIR}/models.json`, [...index.filter((item) => item.id !== model.id), { id: model.id, revision: model.revision, hash }]);
+  if (Buffer.byteLength(JSON.stringify(model) + "\n") > 65_536)
+    throw new AppError("FILE_LIMIT", "模型超过 64 KiB，请按业务能力拆分并通过 target_model_id 复用公共模型");
+  return model;
+}
+
+/** 业务验收回写使用本地日志恢复中断，由应用流程随后提交共享快照和验收回执。 */
+export async function recordModel(files: ProjectFiles, binding: WorktreeBinding, request: RecordRequest,
+  existing?: SavedModel[]): Promise<SavedModel> {
+  const model = await buildModel(files, binding, request, existing ?? await models(files));
+  await publishModel(files, model);
   return model;
 }

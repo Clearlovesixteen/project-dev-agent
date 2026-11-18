@@ -3,8 +3,9 @@ import { ProjectFiles } from "../storage/project-files.js";
 import { digest } from "../knowledge/document.js";
 import { loadConfig } from "../knowledge/config.js";
 import { gitLine, readGit } from "../git/command.js";
+import { bindWorktree } from "../git/baseline.js";
 import { ContextInput, type MapFile } from "./contracts.js";
-import { mapFiles, models, readMap } from "./store.js";
+import { mapFiles, readMap } from "./store.js";
 import { excluded, mapConfigHash, safeSource } from "./scan.js";
 import { AppError } from "../domain/error.js";
 import { ModelEvidence, sourcePath } from "./model-evidence.js";
@@ -14,6 +15,9 @@ import { auditModels } from "./model-audit.js";
 import { materializeModel, modelPreview, selectModelRules } from "./model-view.js";
 import { lexicalProvider } from "./retrieval.js";
 import { businessGraph } from "./business-graph.js";
+import { codeLocations } from "./code-locations.js";
+import { readModelSnapshot, type ProjectKnowledgeStatus } from "../project-knowledge/service.js";
+import { modelVisible, readWorktreeModels, worktreeModel } from "../project-knowledge/worktree-models.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -26,13 +30,20 @@ export function moduleSummary(entries: MapFile[]) {
   }
   return [...groups.values()].sort((a, b) => a.module.localeCompare(b.module));
 }
-export async function projectContext(files: ProjectFiles, input: unknown) {
+export async function projectContext(files: ProjectFiles, input: unknown, knowledge?: ProjectKnowledgeStatus) {
   const request = ContextInput.parse(input), map = await readMap(files);
   if (!map) return { state: "not_scanned", files: [], models: [], modules: [], next_step: "请运行 project_scan 建立本地项目结构索引。" };
   const { config } = await loadConfig(files);
   const paths = request.paths.filter((path) => !excluded(path, config));
   if (request.paths.length && !paths.length) return { state: "paths_excluded", files: [], models: [], modules: [] };
   const entries = (await mapFiles(files)).filter((entry) => !excluded(entry.path, config));
+  if (request.code_locations) {
+    const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head || await mapConfigHash(files, config) !== map.config_hash;
+    const locations = stale ? [] : await codeLocations(files, config, entries, request.code_locations);
+    return { state: stale || locations.some(item => item.state === "stale") ? "needs_rescan" : locations.every(item => item.state === "resolved") ? "indexed" : "partial",
+      files: [], models: [], modules: [], code_locations: locations,
+      limitation: "仅在当前结构快照内追踪显式导入和重导出。动态引用、通配重导出、歧义及未索引内容保留待核对。" };
+  }
   const terms = [...new Intl.Segmenter("zh", { granularity: "word" }).segment(request.query.toLowerCase())].filter((term) => term.isWordLike).map((term) => term.segment).slice(0, 50);
   const score = (text: string) => terms.filter((term) => text.toLowerCase().includes(term)).length;
   const matched = entries.filter((entry) => (!paths.length || paths.some((path) => intersects(path, entry.path))) && (!request.modules.length || request.modules.includes(entry.module)))
@@ -68,16 +79,28 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     const bytes = Buffer.byteLength(JSON.stringify(result)); if (fileBytes + bytes > 40_000) break;
     fileResults.push(result); fileBytes += bytes;
   }
-  const eligibleModels = (await models(files)).filter((model) =>
-    model.sources.every((source) => { const path = sourcePath(source); return !path || !excluded(path, config); }) && model.related_paths.every((path) => !excluded(path, config)));
+  const worktree = await readWorktreeModels(files, knowledge);
+  const eligibleModels = worktree.models.filter(model => modelVisible(model, config));
   const evidence = new ModelEvidence(files, config, new Map(entries.map((entry) => [entry.path, entry])), map.repo_identity);
   const materialize = (model: typeof eligibleModels[number]) => materializeModel(model, evidence, eligibleModels);
   // 详情单独返回，容量由模型存储的 64 KiB 上限约束；不能借 ID 绕过来源排除规则。
   if (request.model_id) {
-    const model = eligibleModels.find((entry) => entry.id === request.model_id);
+    const selection = knowledge?.modules?.find(item => item.model_id === request.model_id);
+    const historical = !!request.model_snapshot_id;
+    const candidate = request.model_snapshot_id
+      ? await readModelSnapshot(await bindWorktree(files.root), request.model_id, request.model_snapshot_id) : undefined;
+    const model = candidate ? worktreeModel(files.root, candidate.content, request.model_id)
+      : eligibleModels.find(entry => entry.id === request.model_id);
+    if (!model && !historical && selection && selection.state !== "matched") {
+      return { state: "needs_review", files: [], models: [], modules: [], scan_id: map.scan_id,
+        model_selection: selection, next_step: "按 model_snapshot_id 查看候选，核对当前源码后再修订。" };
+    }
     if (!model) throw new AppError("PROJECT_MODEL_NOT_FOUND", "未找到可访问的业务模型，请重新查询当前模型列表");
+    if (!modelVisible(model, config)) throw new AppError("PROJECT_MODEL_NOT_FOUND", "该模型的来源不在当前项目查询范围内");
     if (request.model_revision !== undefined && model.revision !== request.model_revision) throw new AppError("PROJECT_MODEL_REVISION_CONFLICT", "模型已更新，请读取最新摘要后再获取详情");
-    const detail = selectModelRules(await materialize(model), request.rule_ids);
+    const materialized = await materialize(model);
+    const reviewOnly = historical || knowledge?.state === "unavailable";
+    const detail = selectModelRules(reviewOnly ? { ...materialized, status: "needs_review" } : materialized, request.rule_ids);
     const indexedVersions = new Map(entries.map((entry) => [entry.path, entry.sha256]));
     const pathStates = await Promise.all(model.related_paths.map(async (path) => {
       if (indexedVersions.has(path)) return evidence.pathState(path, indexedVersions.get(path)!);
@@ -87,16 +110,18 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head
       || await mapConfigHash(files, config) !== map.config_hash || pathStates.some((state) => state !== "current" && state !== "missing_after_scan");
     return { state: stale ? "needs_rescan" : detail.status === "needs_review" ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-      files: [], modules: [], models: [detail], models_truncated: detail.content_truncated, next_model_offset: null,
+      files: [], modules: [], models: [{ ...detail, ...(historical ? { historical_snapshot_id: request.model_snapshot_id } :
+        worktree.snapshotIds.has(model.id) ? { current_snapshot_id: worktree.snapshotIds.get(model.id) } : {}) }],
+      models_truncated: detail.content_truncated, next_model_offset: null,
       model_audit: auditModels(eligibleModels, new Set([model.id])),
       business_graph: businessGraph(eligibleModels, new Set([model.id]), request.relation_depth),
-      ...(request.rule_ids ? { business_checks: businessScenarios([detail]) } : {}),
+      ...(request.rule_ids && !reviewOnly ? { business_checks: businessScenarios([detail]) } : {}),
       report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
   }
   const modelCandidates = eligibleModels.filter((model) => !paths.length
     || [...model.scope, ...model.related_paths, ...model.sources.flatMap((source) => { const path = sourcePath(source); return path ? [path] : []; })].some((candidate) => paths.some((path) => intersects(candidate, path))));
   const directModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
-    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths, model.schema_version === 2 ? model.relations : []])) }))
+    .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths, model.schema_version !== 1 ? model.relations : []])) }))
     .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
     .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
   const directIds = new Set(directModels.map((item) => item.model.id));
@@ -108,7 +133,8 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
   let modelBytes = 2;
   const page = rankedModels.slice(request.model_offset, request.model_offset + 5);
   for (const { model } of page) {
-    const full = await materialize(model);
+    const view = await materialize(model);
+    const full = knowledge?.state === "unavailable" ? { ...view, status: "needs_review" } : view;
     const details_request = { model_id: model.id, model_revision: model.revision };
     // 给本页后续摘要预留容量，避免一个大模型截断整个列表，也不截掉业务流程的中间文本。
     const preview = modelPreview(full, request.query, paths);
@@ -116,9 +142,10 @@ export async function projectContext(files: ProjectFiles, input: unknown) {
     const remaining = page.length - modelResults.length - 1;
     const match_reason = directIds.has(model.id) ? "direct" : "business_relation";
     const detailResult = { ...detail, match_reason };
-    const result = model.schema_version !== 2 && modelBytes + 1 + Buffer.byteLength(JSON.stringify(detailResult)) + remaining * 4_500 <= 36_000
+    const result = model.schema_version === 1 && modelBytes + 1 + Buffer.byteLength(JSON.stringify(detailResult)) + remaining * 4_500 <= 36_000
       ? detailResult : { ...preview, match_reason };
-    modelResults.push(result); modelBytes += 1 + Buffer.byteLength(JSON.stringify(result));
+    const item = worktree.snapshotIds.has(model.id) ? { ...result, current_snapshot_id: worktree.snapshotIds.get(model.id) } : result;
+    modelResults.push(item); modelBytes += 1 + Buffer.byteLength(JSON.stringify(item));
   }
   const head = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout);
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");

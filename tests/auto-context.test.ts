@@ -69,6 +69,21 @@ test("自动钩子不扫描或修改业务文件，未扫描项目只提示受�
   assert.equal(await readFile(join(fixture.path, "src/account-policy.ts"), "utf8").catch(() => null), before);
 });
 
+test("输入钩子只读索引状态，完整 MCP 查询仍校验索引分块", async t => {
+  const { call, fixture, service, home } = await setup(t);
+  const directory = join(fixture.path, ".project-dev/local/understanding");
+  const chunk = (await readdir(join(directory, "chunks")))[0];
+  assert.ok(chunk);
+  await writeFile(join(directory, "chunks", chunk), "[]");
+  const prompt = context(await call());
+  assert.match(prompt, /索引和共享资料的状态/);
+  assert.match(prompt, /project_context/);
+  const events = (await new DiagnosticWriter(home).read()).events;
+  assert.equal(events.find(event => event.event_name === "context.lookup")?.context?.task_state, undefined);
+  const full = await service.context({ paths: ["src/auth.js"] });
+  assert.equal(full.code, "PROJECT_MAP_CORRUPT");
+});
+
 test("PRD/SDD 来源核对、任务幂等重试及归属保护共同生效，旧任务仍可显式使用", async t => {
   const { binding, fixture, call, mode } = await setup(t), tasks = new TaskService(binding);
   const input = { requirement: "按现有 SDD 扩展 account 状态", acceptance_criteria: [{ id: "behavior", description: "状态行为符合已有规则" }],

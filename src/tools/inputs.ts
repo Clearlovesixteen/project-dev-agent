@@ -12,6 +12,7 @@ import {
 } from "../quality/contracts.js";
 import { ImplementationBasisInputSchema } from "../quality/basis-contracts.js";
 import { ValidationPlanInputSchema } from "../quality/validation-contracts.js";
+import { BusinessPlanInput } from "../quality/business-plan-contracts.js";
 import {
   BusinessDeltaInputSchema,
   BusinessDeltaCheckSchema,
@@ -29,6 +30,7 @@ import {
   CorrectionSchema,
   ValidationRecordSchema,
 } from "../domain/task.js";
+import { RequirementTaskKind } from "../coordination/requirement-groups.js";
 
 // 工具只接收业务输入；任务 ID、Git 基线、时间和初始状态由服务生成，不能由调用方伪造。
 export const TaskOpenInputSchema = z
@@ -37,9 +39,14 @@ export const TaskOpenInputSchema = z
     task_kind: z.enum(["development", "merge_recovery"]).optional().describe("默认普通开发；用户明确要求解决当前 merge 冲突时使用 merge_recovery，服务限定原冲突文件"),
     resolution_source: z.string().min(1).max(500).optional().describe("仅当用户选择用某Git引用整文件替换冲突文件时填写；服务固定提交并核对整文件结果。手工结合双方修改时省略，不将优先参考一方理解为整文件覆盖"),
     spec_input: SpecificationInput.optional(),
+    requirement_group_id: IdSchema.optional().describe("同一需求的 UI/API/测试子任务共用的需求组 ID；省略时仅在唯一来源指纹匹配时自动关联"),
+    parent_task_id: IdSchema.optional().describe("同一需求组中的父任务；用于把 UI/API/测试子任务挂到同一需求"),
+    continuation_of_task_id: IdSchema.optional().describe("继续已有任务时传入；会保留原任务并在当前工作树建立续接任务"),
+    requirement_role: RequirementTaskKind.optional().describe("当前任务切片：full、ui、api、test、integration 或 review"),
     scope_paths: z.array(RelativePathSchema).max(30).optional(),
     feedback_review: FeedbackReviewSchema.optional(),
     business_assessment: BusinessAssessmentSchema.optional(),
+    business_model_policy: z.literal(1).optional().describe("业务实现任务启用结构化规则、精确修改范围与真实场景验收。保存后须在编码前建立业务计划"),
     requirement_sources: z.array(RequirementSourceInput).max(30).optional(),
     evaluation: EvaluationTagSchema.optional(),
     validation_plan: ValidationPlanInputSchema.optional(),
@@ -81,6 +88,7 @@ export const TaskUpdateInputSchema = z
     feedback_review: FeedbackReviewSchema.optional(),
     acceptance_revision:AcceptanceRevisionInput.optional(),
     business_assessment: BusinessAssessmentSchema.optional(),
+    business_plan: BusinessPlanInput.optional().describe("编码前保存原文条目、规则/草案、关联位置处理和场景到命名测试的映射"),
     requirement_sources: z.array(RequirementSourceInput).max(30).optional(),
     business_deltas: z
       .array(BusinessDeltaInputSchema)

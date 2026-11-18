@@ -10,6 +10,7 @@ export const ValidationPlanInputSchema = z.object({
     timeout_ms: z.number().int().min(100).max(120_000).default(60_000),
     acceptance_ids: z.array(IdSchema).min(1).max(100),
     source_paths: z.array(RelativePathSchema).max(10).default([]),
+    behavior_report: z.literal("node-test").optional(),
   }).strict()).max(20),
   not_applicable_reason: z.string().trim().min(10).max(2000).optional(),
 }).strict().superRefine((plan, ctx) => {
@@ -29,6 +30,11 @@ export const ValidationRunSchema = z.object({ schema_version: z.literal(1), id: 
   state: z.enum(["passed", "failed", "timed_out", "cancelled", "start_failed", "stale"]),
   output: z.string().max(20_000), output_sha256: ReviewSnapshotSchema, output_truncated: z.boolean(),
   error: z.string().max(1000).optional(),
+  behavior: z.object({ adapter: z.literal("node-test"), complete: z.boolean(),
+    business_plan_fingerprint: ReviewSnapshotSchema.optional(),
+    cases: z.array(z.object({ name: z.string().max(300), file: RelativePathSchema,
+      state: z.enum(["passed", "failed", "skipped", "todo"]) }).strict()).max(1000),
+  }).strict().optional(),
 }).strict();
 export type ValidationPlanInput = z.infer<typeof ValidationPlanInputSchema>;
 export type ValidationPlanRecord = z.infer<typeof ValidationPlanRecordSchema>;

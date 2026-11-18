@@ -103,6 +103,9 @@ async function readEntry(root: string, path: string, status: StatusKind[], total
   try {
     const before = await lstat(absolute);
     if (before.isSymbolicLink()) return SourceEntrySchema.parse({ path, kind: "symlink", sha256: null, bytes: 0, status, target: await readlink(absolute) });
+    // O_NOFOLLOW 只保护最后一段。父目录改成符号链接时也不能读取工作树外文件。
+    if (await realpath(absolute) !== absolute)
+      return SourceEntrySchema.parse({ path, kind: "symlink", sha256: null, bytes: 0, status });
     if (!before.isFile()) return SourceEntrySchema.parse({ path, kind: "unreadable", sha256: null, bytes: 0, status, error: "unsupported" });
     const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
@@ -117,7 +120,8 @@ async function readEntry(root: string, path: string, status: StatusKind[], total
         hash.update(buffer.subarray(0, result.bytesRead));
       }
       const after = await lstat(absolute);
-      if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new AppError("VIEW_CHANGED", "读取来源期间文件发生变化");
+      if (after.ino !== before.ino || after.dev !== before.dev || after.size !== before.size || after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs || await realpath(absolute) !== absolute) throw new AppError("VIEW_CHANGED", "读取来源期间文件发生变化");
       return SourceEntrySchema.parse({ path, kind: "file", sha256: hash.digest("hex"), bytes, status });
     } finally { await handle.close(); }
   } catch (error) {
@@ -131,9 +135,11 @@ async function readEntry(root: string, path: string, status: StatusKind[], total
 
 function configurationPath(path: string): boolean { return /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig(?:\.[^/]+)?\.json)$/.test(path); }
 
-async function capture(binding: WorktreeBinding): Promise<Capture> {
+async function capture(binding: WorktreeBinding, scope?: readonly string[]): Promise<Capture> {
   const beforeHead = gitLine((await readGit(binding.root, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout);
-  const candidates = await candidatePaths(binding), total = { bytes: 0 }, entries: SourceEntry[] = [];
+  const candidates = scope ? { paths: scope, statuses: new Map<string, StatusKind[]>(), statusRaw: Buffer.alloc(0), excludedCount: 0 }
+    : await candidatePaths(binding);
+  const total = { bytes: 0 }, entries: SourceEntry[] = [];
   for (const path of candidates.paths) entries.push(await readEntry(binding.root, path, candidates.statuses.get(path) ?? ["tracked"], total));
   const status = { staged: 0, unstaged: 0, untracked: 0, deleted: 0, renamed: 0 };
   for (const entry of entries) for (const kind of entry.status) if (kind in status) status[kind as keyof typeof status]++;
@@ -143,10 +149,15 @@ async function capture(binding: WorktreeBinding): Promise<Capture> {
   return { stamp: stampWithoutId, signature };
 }
 
-export async function collectSourceStamp(binding: WorktreeBinding, options: { onCaptured?: () => Promise<void> | void } = {}): Promise<SourceStamp> {
-  const first = await capture(binding);
+export async function collectSourceStamp(binding: WorktreeBinding, options: { onCaptured?: () => Promise<void> | void; paths?: readonly string[] } = {}): Promise<SourceStamp> {
+  // 已建模的工作树只为快照所依赖的路径做实时指纹，不因无关图片、构建物或单仓库总大小而判定规则过期。
+  const scoped = options.paths === undefined ? undefined : new Set<string>();
+  if (scoped) for (const path of options.paths!) if (!excluded(path)) addPath(scoped, path);
+  if (scoped && scoped.size > MAX_FILES) throw new AppError("SOURCE_STAMP_LIMIT", "当前模型依赖文件超过核对上限");
+  const paths = scoped ? [...scoped].sort() : undefined;
+  const first = await capture(binding, paths);
   await options.onCaptured?.();
-  const second = await capture(binding);
+  const second = await capture(binding, paths);
   if (first.signature !== second.signature || JSON.stringify(first.stamp.entries) !== JSON.stringify(second.stamp.entries)) throw new AppError("VIEW_CHANGED", "生成源码视图期间工作树发生变化，请重新读取");
   const stamp = { ...first.stamp, stamp_id: digest(JSON.stringify(first.stamp)) };
   return SourceStampSchema.parse(stamp);

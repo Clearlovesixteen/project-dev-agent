@@ -8,6 +8,8 @@
 
 同一分支独立需求可由所属会话显式挂起旧任务：`task_update` 只传 `task_id`、`expected_revision`、`phase:"suspended"`、`suspend_reason`。恢复只传最新修订号与 `phase:"active"`，须在原分支且没有其他活跃任务；中止仍用 `aborted` 和原因。生命周期操作不能同时改业务内容，历史只追加，原基线不重写。
 
+同一需求拆分到现有独立工作树时，通过 `requirement_group_id`、`parent_task_id` 或 `continuation_of_task_id` 关联同一需求，按实际分工填写可选 `requirement_role`（`full`、`ui`、`api`、`test`、`integration` 或 `review`）。普通任务省略分工字段。范围重叠时逐项核对两边的修改和验证；任务关闭只更新本任务状态。Git 冲突恢复仍使用独立的 `task_kind:merge_recovery`。
+
 需求来源为追加/按 ID 修订，不需回传全部历史。`task-request` 由服务保存；完整回传相同只读引用可接受，改变原文或类型仍拒绝。引用已保存需求/纠正时可省略 quote，服务补齐原文；提供 quote 时必须精确匹配，不能用摘要冒充原话。图片可放 `.project-dev/local/requirements/` 或兼容的 `reviews/`，保留格式、边界及版本校验。
 
 创建任务示例：

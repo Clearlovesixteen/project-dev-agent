@@ -108,6 +108,22 @@ test("自动登记的别名改指向B后必须拒绝，不能用prepare覆盖A�
   assert.equal(await readFile(s.config, "utf8"), saved);
 });
 
+test("显式范围可按修订号恢复逐项目接入，不扫描或自动登记旧目录", async t => {
+  const s = await setup(t);
+  await s.settings.configure({ workspace: s.fixture.path, apply: true, expected_revision: null });
+  const before = await readFile(s.config, "utf8");
+  const preview = await s.settings.configure({ scope_mode: "projects" });
+  const data = preview.data as { expected_revision: string; scope_mode: string };
+  assert.equal(data.scope_mode, "projects");
+  assert.equal(await readFile(s.config, "utf8"), before);
+  await assert.rejects(s.settings.configure({ scope_mode: "projects", apply: true, expected_revision: randomUUID() }), { code: "PLUGIN_SETTINGS_CHANGED" });
+  await s.settings.configure({ scope_mode: "projects", apply: true, expected_revision: data.expected_revision });
+  await assert.rejects(s.settings.bind(s.fixture.path), { code: "PROJECT_NOT_ENROLLED" });
+  await s.settings.prepare(s.second.path, { apply: true });
+  const saved = JSON.parse(await readFile(s.config, "utf8"));
+  assert.deepEqual(saved.projects.map((entry: { root: string }) => entry.root), [await realpath(s.second.path)]);
+});
+
 test("真实linked worktree可精确接入，Git公共目录的父项目和相邻项目不会因此授权", async t => {
   const s = await setup(t), linked = join(s.fixture.root, "linked B");
   git(s.fixture.path, ["worktree", "add", "-b", "parallel-requirement", linked]);

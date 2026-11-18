@@ -17,6 +17,7 @@ import { searchKnowledge } from "./search.js";
 import { KnowledgeSearchInputSchema } from "./search.js";
 import { searchHistoryHints } from "../history/search.js";
 import { projectContext } from "../understanding/context.js";
+import { readProjectKnowledge } from "../project-knowledge/service.js";
 import { loadConfig, matchesPath } from "./config.js";
 
 export const ExperienceProposeInputSchema = z
@@ -85,7 +86,7 @@ export class KnowledgeService {
           paths: paths.slice(0, 30),
           modules: request.modules.slice(0, 20),
           limit: Math.min(request.limit, 5),
-        });
+        }, await readProjectKnowledge(this.binding));
       } catch (error) {
         understanding = {
           state: "unavailable",

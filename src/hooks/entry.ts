@@ -8,13 +8,16 @@ import { bestEffort } from "../runtime/best-effort.js";
 import type { TelemetryAttributes } from "../observability/contracts.js";
 import { HookInput, denyWrite, type NativeHookInput } from "./contracts.js";
 import { writeKind } from "./tool-policy.js";
+import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 
 /** 独立于 MCP 协议；stdout 只输出一个合法 JSON，预算到期只停止项目辅助。 */
 let finished = false, expired = false;
 const invocation = randomUUID(), controller = new AbortController();
+const started = performance.now();
 let correlation: { session?: string; trace?: string } = { trace: invocation };
 let pendingInput: NativeHookInput | undefined;
 let activeMode: "manual" | "observe" | "auto" | undefined;
+let diagnostic: DiagnosticContext | undefined;
 const pluginRoot = process.env.PROJECT_DEV_PLUGIN_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** 内部预算到期时返回合法拒绝，不用空 JSON 把未完成的修改检查误当成功。 */
 function unavailable(reason: string) {
@@ -51,7 +54,13 @@ function budget(soft: number, hard: number) {
   hardTimer = setTimeout(() => { expired = true; controller.abort(); finish(unavailable("HOOK_DEADLINE")); }, hard);
   softTimer = setTimeout(async () => {
     expired = true; controller.abort();
-    await bestEffort(() => new DiagnosticWriter().record("telemetry.gap", { ...correlation, outcome: "degraded", reason: "HOOK_DEADLINE" }), 150);
+    // 仍使用接收端已支持的白名单，只记录钩子、阶段和耗时，不上传工具参数或提示词。
+    await bestEffort(() => new DiagnosticWriter().record("telemetry.gap", {
+      ...correlation, call: invocation, ...(pendingInput?.tool_use_id ? { operation: pendingInput.tool_use_id } : {}),
+      context: { version: 1, stage: "runtime", ...diagnostic, decision: "degraded" },
+      attributes: { transport: "hook", ...(pendingInput ? { event: pendingInput.hook_event_name } : {}) },
+      duration: performance.now() - started, outcome: "degraded", reason: "HOOK_DEADLINE",
+    }), 150);
     finish(unavailable("HOOK_DEADLINE"));
   }, soft);
 }
@@ -72,7 +81,8 @@ try {
     const turn = "turn_id" in input && typeof input.turn_id === "string" && input.turn_id.length <= 200 ? input.turn_id : undefined;
     correlation = { session: input.session_id, trace: turn ?? invocation };
   }
-  const output = await handleHook(input, pluginRoot, undefined, { trace: invocation, signal: controller.signal, onMode: mode => { activeMode = mode; } });
+  const output = await handleHook(input, pluginRoot, undefined, { trace: invocation, signal: controller.signal,
+    onMode: mode => { activeMode = mode; }, onDiagnostic: context => { diagnostic = context; } });
   if (!expired) finish(output);
 } catch { if (!expired) finish(unavailable("HOOK_RUNTIME_FAILED")); }
 finally { clearTimeout(softTimer!); if (!expired) clearTimeout(hardTimer!); }

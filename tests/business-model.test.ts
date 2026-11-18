@@ -46,6 +46,45 @@ async function setup(t: { after: (action: () => Promise<void>) => void }) {
   return { fixture, binding, files, service, tasks, task, put, source, rule, input, detail, patch };
 }
 
+test("显式迁移 v2 的单条规则保留其他条目，绑定引用必须指向真实声明", async t => {
+  const { service, files, input, source, detail, put } = await setup(t), model = await input();
+  assert.equal((await service.record(model)).outcome, "ok");
+  const before = (await models(files))[0] as ModelV2;
+  const rule = model.rules[0]!;
+  const patch = { schema_version: 3, id: model.id, scan_id: (await readMap(files))!.scan_id, expected_revision: 1,
+    revision_reason: "定位编辑资格的真实声明", patch: { upsert_rules: [{ ...rule, bindings: [{ id: "edit-declaration", path: "src/orders.ts", symbol: "editable", role: "enforces", source_ids: ["orders-source"] }] }] } };
+  assert.equal((await service.record(patch)).outcome, "ok");
+  const after = (await models(files))[0];
+  assert.equal(after?.schema_version, 3);
+  assert.deepEqual(after?.rules[1], before.rules[1]);
+  assert.deepEqual(after?.rules[2], before.rules[2]);
+  assert.equal((await detail()).rules[0].bindings[0].resolution, "resolved");
+  assert.equal((await service.record({ ...patch, schema_version: 2, expected_revision: 2, patch: { metadata: { summary: "不能降级" } } })).code, "PROJECT_MODEL_DOWNGRADE");
+  await put("src/orders.ts", "export const marker = false;\nexport const editable = (state: string) => state !== 'frozen';\n");
+  await service.scan({});
+  assert.equal((await service.record({ ...patch, scan_id: (await readMap(files))!.scan_id, expected_revision: 2,
+    patch: { ...patch.patch, upsert_sources: [await source("orders-source", "src/orders.ts")] } })).code, "PROJECT_MODEL_BINDING_SOURCE");
+});
+
+test("代码位置查询追踪显式导入和重导出，区分陈旧索引与歧义目标", async t => {
+  const { service, put } = await setup(t);
+  await put("src/public.ts", "export { editable as mayEdit } from './orders';\n");
+  await put("src/usage.ts", "import { mayEdit as eligible } from './public';\nexport const check = eligible;\n");
+  await service.scan({});
+  const request = { code_locations: [{ path: "src/usage.ts", symbol: "eligible" }] };
+  const locations = (await service.context(request)).data as any;
+  assert.equal(locations.state, "indexed");
+  assert.deepEqual(locations.code_locations[0].trace.map((item: any) => item.symbol), ["eligible", "mayEdit", "editable"]);
+  assert.equal(locations.code_locations[0].declaration.path, "src/orders.ts");
+  await put("src/public.ts", "export { editable as mayEdit } from './detail';\n");
+  assert.equal(((await service.context(request)).data as any).state, "needs_rescan");
+  await service.scan({});
+  assert.equal(((await service.context(request)).data as any).code_locations[0].state, "export_unresolved");
+  await put("src/public.js", "export const mayEdit = () => true;\n");
+  await service.scan({});
+  assert.equal(((await service.context(request)).data as any).code_locations[0].state, "ambiguous_import");
+});
+
 test("新版模型要求逐条依据、适用条件和有效关系，拒绝伪引用及错误分类", async (t) => {
   const { service, input, source, detail } = await setup(t), model = await input();
   for (const bad of [

@@ -44,6 +44,17 @@ export async function models(files: ProjectFiles): Promise<SavedModel[]> {
   }
   return result;
 }
+/** 将完整模型作为不可变文件落盘，再原子更新当前工作树的修订索引。调用方持有目录锁。 */
+export async function publishModel(files: ProjectFiles, model: SavedModel): Promise<void> {
+  const index = await modelIndex(files);
+  const raw = JSON.stringify(model) + "\n", hash = digest(raw), path = `${MAP_DIR}/models/${hash}.json`;
+  if (Buffer.byteLength(raw) > 65_536)
+    throw new AppError("FILE_LIMIT", "模型超过 64 KiB，请按业务能力拆分并通过 target_model_id 复用公共模型");
+  if (await optional(files, path) === undefined) await files.create(path, raw);
+  const updated = [...index.filter(item => item.id !== model.id), { id: model.id, revision: model.revision, hash }];
+  await save(files, `${MAP_DIR}/models.json`, updated);
+}
+
 export async function understandingStatus(files: ProjectFiles) {
   const map = await readMap(files);
   return { state: !map ? "not_scanned" : map.coverage.complete ? "indexed" : "partial", scan_id: map?.scan_id ?? null,

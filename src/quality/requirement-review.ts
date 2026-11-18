@@ -7,7 +7,7 @@ import { digest } from "../knowledge/document.js";
 import { safeSource } from "../understanding/scan.js";
 import { loadConfig } from "../knowledge/config.js";
 import { workspaceContent } from "../git/workspace-content.js";
-import { models } from "../understanding/store.js";
+import { loadWorktreeModels } from "../project-knowledge/worktree-models.js";
 import {
   RequirementSourceInput,
   RequirementSourceRecord,
@@ -152,6 +152,18 @@ async function available(binding: Pick<WorktreeBinding, "root">, task: Task, sou
   }
 }
 
+/** 需求条目引用实际原文，而非 Agent 重新写的摘要；无法读取的图片不伪装成文本证据。 */
+export async function requirementSourceText(binding: Pick<WorktreeBinding, "root">, task: Task, source: Record): Promise<string> {
+  if (!await available(binding, task, source)) throw new AppError("REQUIREMENT_SOURCE_STALE", "需求条目来源已变化或不可用，请重新读取原文");
+  const input = source.input;
+  if (input.kind === "request") return task.requirement;
+  if (input.kind === "correction") return task.corrections.find(item => item.id === input.correction_id)!.description;
+  if (input.kind !== "document" || !input.path) throw new AppError("BUSINESS_INPUT_TEXT_REQUIRED", "业务条目需要可核对的文本原文；原型继续作为独立视觉验收来源");
+  const files = new ProjectFiles(binding.root), { config } = await loadConfig(files);
+  const text = await (input.path.startsWith(".project-dev/local/requirements/") ? files.read(input.path, 65_536) : safeSource(files, input.path, config));
+  if (digest(text) !== input.sha256) throw new AppError("REQUIREMENT_SOURCE_STALE", "读取需求原文时内容变化，请重新核对");
+  return text;
+}
 /** 服务为本次实际复核的验收绑定当前来源版本，完整回传不会刷新其他项目的旧来源。 */
 export async function stampRequirementSources(
   binding: WorktreeBinding,
@@ -287,10 +299,11 @@ export async function businessAssessmentReview(
     )
   )
     return { state: "incomplete", required: true };
-  const all = await models(new ProjectFiles(binding.root));
+  const { models: all } = await loadWorktreeModels(binding);
   return {
     state: assessment.model_ids.every((id) =>
-      all.some((model) => model.id === id && model.schema_version === 2),
+      all.some((model) => model.id === id && model.schema_version !== 1)
+        || active.some(delta => delta.input.model_id === id && !!delta.input.new_model),
     )
       ? "checked"
       : "model_required",

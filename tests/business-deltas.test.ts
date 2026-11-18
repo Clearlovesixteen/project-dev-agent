@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { bindWorktree } from "../src/git/index.js";
@@ -290,4 +291,52 @@ test("未完成发布不能被新业务草案覆盖，模型标记被无关修�
   assert.equal(recovered.model_revision, 2); assert.equal((await models(s.files))[0]!.revision, 3);
   assert.equal((await models(s.files))[0]!.summary, "不能被恢复流程覆盖的新摘要");
   assert.equal((await modelIndex(s.files))[0]!.revision, 3);
+});
+
+
+// 与原生命周期用例共用真实代码和验收夹具，覆盖插件模式的目录选择与幂等发布。
+test("共享模型草案重复提交和模型发布使用同一仓库索引，原任务纠正仍可使回执过期", async t => {
+  const s = await setup(t); await s.record();
+  const before = s.task.business_deltas;
+  await s.record();
+  assert.deepEqual(s.task.business_deltas, before);
+  await s.implement(); await s.markChecked();
+  const input = await s.applyInput(), receipt = await applyBusinessDelta(s.binding, s.task, input);
+  assert.equal((await models(s.files))[0]!.revision, 2);
+  const repository = (await ProjectKnowledgeRepository.openExisting(s.binding.repo_identity))!;
+  const published = await Promise.all((await repository.currentObjectIds()).map(id => repository.readObject(id)));
+  assert.ok(published.some(object => object.object_type === "module_snapshot" &&
+    (object.content as { content: { revision: number } }).content.revision === 2));
+  assert.deepEqual(await applyBusinessDelta(s.binding, s.task, input), receipt);
+  s.task.requirement = "来源已经改为另一个需求";
+  assert.equal((await businessDeltaReview(s.binding, s.task, receipt.review_snapshot)).items[0]!.state, "stale");
+});
+
+test("新工作树可以直接沿用共享前镜像完成业务草案和验收回写", async t => {
+  const s = await setup(t);
+  const root = join(s.fixture.root, "api worktree");
+  execFileSync("git", ["worktree", "add", "-b", "business-api", root], { cwd: s.binding.root, stdio: "pipe" });
+  const binding = await bindWorktree(root), files = new ProjectFiles(binding.root), service = new UnderstandingService(binding);
+  const rules = join(root, "src/rules.ts");
+  await writeFile(rules, await readFile(join(s.binding.root, "src/rules.ts")));
+  assert.equal((await service.scan({})).outcome, "ok");
+  assert.deepEqual(await models(files), []);
+  const task = { ...s.task, worktree_path: binding.root, baseline_head: binding.head, baseline_branch: binding.branch };
+  task.business_deltas = await recordBusinessDeltas(binding, task, [s.draft()]);
+  const draft = task.business_deltas[0]!;
+  assert.match(draft.base_snapshot_id ?? "", /^[a-f0-9]{64}$/);
+  const quote = "export const editable = (state: string) => !['frozen', 'closed'].includes(state);";
+  await writeFile(rules, quote + "\nexport const detail = true;\n");
+  await service.scan({});
+  const review = (await reviewSnapshot(binding, task.baseline_head)).hash;
+  const scenarios = businessDeltaScenarios(draft);
+  task.acceptance_criteria = task.acceptance_criteria.map((item, index) => ({ ...item, status: "checked",
+    reviewed_by: "fixture", review_snapshot: review, evidence: [{ kind: "manual", reference: "src/rules.ts", summary: "核对状态规则" }],
+    business_delta_check: scenarios[index]!.business_delta_check }));
+  const observed_rule = { ...draft.input.proposed_rule!, basis: "observed" as const, source_ids: ["new-code"] };
+  const receipt = await applyBusinessDelta(binding, task, { delta_id: draft.input.id, observed_rule,
+    sources: [{ id: "new-code", kind: "code", path: "src/rules.ts", line: 1, quote, sha256: digest(await readFile(rules, "utf8")) }] });
+  assert.equal(receipt.model_revision, 2);
+  assert.equal((await businessDeltaReview(binding, task, review)).state, "checked");
+  assert.equal((await models(s.files))[0]!.revision, 1);
 });

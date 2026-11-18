@@ -1,6 +1,7 @@
 import { AppError } from "../domain/error.js";
 import { ModelEvidence, dependencyFingerprint, entityFingerprint, ruleFingerprint, sourceFingerprint } from "./model-evidence.js";
 import type { SavedModel } from "./model-contracts.js";
+import { SavedRuleV3 } from "./model-contracts.js";
 
 /** 逐条检查规则与关系；整个模型过期并不代表其中每条规则都需要重新分析。 */
 export async function materializeModel(model: SavedModel, evidence: ModelEvidence, visible: SavedModel[]) {
@@ -18,10 +19,19 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
     if (!source || !version || sourceFingerprint(source) !== version.fingerprint) return [{ source_id: id, state: "evidence_revised" }];
     return stateMap.get(id) === "current" ? [] : [{ source_id: id, state: stateMap.get(id) ?? "missing" }];
   });
-  const rules = model.rules.map((rule) => {
+  const rules = [];
+  for (const raw of model.rules) {
+    const rule = SavedRuleV3.parse(raw);
     const review_reasons = reasons(rule);
-    return { ...rule, freshness: review_reasons.length ? "needs_review" : "current", review_reasons };
-  });
+    const binding_states = [];
+    for (const binding of rule.bindings ?? []) {
+      const state = await evidence.bindingState(binding);
+      binding_states.push({ id: binding.id, state });
+      if (state !== "current") review_reasons.push({ source_id: binding.id, state: `binding_${state}` });
+    }
+    rules.push({ ...rule, ...(model.schema_version === 3 ? { rule_fingerprint: ruleFingerprint(rule) } : {}),
+      ...(rule.bindings ? { binding_states } : {}), freshness: review_reasons.length ? "needs_review" : "current", review_reasons });
+  }
   const relations = [];
   for (const relation of model.relations) {
     const review_reasons: { source_id?: string; rule_id?: string; state: string }[] = reasons(relation);
@@ -38,7 +48,7 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
     if (relation.target_model_id) {
       const target = visible.find((item) => item.id === relation.target_model_id);
       if (!target) review_reasons.push({ state: "target_model_missing_or_excluded" });
-      else if (relation.target_rule_ids && relation.target_rule_versions && target.schema_version === 2) {
+      else if (relation.target_rule_ids && relation.target_rule_versions && target.schema_version !== 1) {
         // 新关系只跟踪实际依赖规则；其他规则和摘要的修订不会触发无关扩散。
         for (const id of relation.target_rule_ids) {
           const rule = target.rules.find(item => item.id === id), version = relation.target_rule_versions.find(item => item.id === id);
@@ -59,13 +69,13 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
         // 只检查一层目标的原始依据，避免循环关系递归展开；不宣称覆盖跨系统调用图。
         const targetStates = await Promise.all(target.related_versions.map((item) => evidence.pathState(item.path, item.sha256)));
         const sourceStates = await Promise.all(target.sources.map((item) => evidence.sourceState(item)));
-        const staleRules = target.schema_version === 2 && target.rules.some((rule) => rule.source_ids.some((id) => {
+        const staleRules = target.schema_version !== 1 && target.rules.some((rule) => rule.source_ids.some((id) => {
           const source = target.sources.find((item) => item.id === id);
           return !source || rule.evidence_versions.find((item) => item.id === id)?.fingerprint !== sourceFingerprint(source);
         }));
         if (staleRules || [...targetStates, ...sourceStates].some((state) => state !== "current")) review_reasons.push({ state: "target_model_needs_review" });
       }
-      if (target?.schema_version === 2) for (const id of relation.target_entity_ids ?? []) {
+      if (target && target.schema_version !== 1) for (const id of relation.target_entity_ids ?? []) {
         const entity = target.entities.find(item => item.id === id);
         if (!entity || relation.target_entity_versions?.find(item => item.id === id)?.fingerprint !== entityFingerprint(entity, target.sources)) {
           review_reasons.push({ state: "target_entity_revised" }); continue;
@@ -82,13 +92,13 @@ export async function materializeModel(model: SavedModel, evidence: ModelEvidenc
     relation_ids: relations.filter((item) => item.freshness !== "current").map((item) => item.id), paths: stalePaths };
   const stale = Object.values(review_required).some((items) => items.length) || evidence_states.some((item) => item.state !== "current");
   return { ...model, rules, relations, evidence_states, source_states, review_required,
-    status: stale ? "needs_review" : "candidate", effective: false as const, model_capabilities: "rule_evidence_and_relations" };
+    status: stale ? "needs_review" : "candidate", effective: false as const, model_capabilities: model.schema_version === 3 ? "semantics_code_bindings_and_relations" : "rule_evidence_and_relations" };
 }
 
 /** 详情可按稳定规则 ID 裁剪；异常条件、关系与引用一起返回，不把摘要冒充完整模型。 */
 export function selectModelRules(model: Awaited<ReturnType<typeof materializeModel>>, ids: string[] | undefined) {
   if (!ids) return { ...model, content_truncated: false };
-  if (model.schema_version !== 2) throw new AppError("PROJECT_MODEL_MIGRATION_REQUIRED", "旧模型没有稳定规则 ID，请先读取完整详情");
+  if (model.schema_version === 1) throw new AppError("PROJECT_MODEL_MIGRATION_REQUIRED", "旧模型没有稳定规则 ID，请先读取完整详情");
   if (ids.some((id) => !model.rules.some((rule) => rule.id === id))) throw new AppError("PROJECT_MODEL_RULE_NOT_FOUND", "规则 ID 不存在，请读取最新模型摘要");
   const rules = model.rules.filter((rule) => ids.includes(rule.id));
   const relations = model.relations.filter((relation) => relation.rule_ids.some((id) => ids.includes(id)));
@@ -104,7 +114,7 @@ export function modelPreview(model: Awaited<ReturnType<typeof materializeModel>>
   const base = { id: model.id, revision: model.revision, schema_version: model.schema_version, module: model.module, title: model.title,
     summary: model.summary.slice(0, 200), status: model.status, effective: false, content_truncated: true,
     related_path_count: model.related_paths.length, details_request: { model_id: model.id, model_revision: model.revision } };
-  if (model.schema_version !== 2) return base;
+  if (model.schema_version === 1) return base;
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const intersects = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
   const matched = new Set(model.relations.filter((item) => paths.some((path) => intersects(path, item.target_path))).flatMap((item) => item.rule_ids));
@@ -126,7 +136,7 @@ export function modelPreview(model: Awaited<ReturnType<typeof materializeModel>>
 /** 在直接命中之外展开一层显式业务关系，支持无代码 import 的跨模块关联。 */
 export function relatedModelIds(models: SavedModel[], seedIds: Set<string>): Set<string> {
   const related = new Set<string>();
-  for (const model of models) if (model.schema_version === 2) for (const relation of model.relations) {
+  for (const model of models) if (model.schema_version !== 1) for (const relation of model.relations) {
     if (!relation.target_model_id) continue;
     if (seedIds.has(model.id)) related.add(relation.target_model_id);
     if (seedIds.has(relation.target_model_id)) related.add(model.id);

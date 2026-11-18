@@ -1,7 +1,13 @@
 {
-  "version": "0.13.7",
+  "version": "0.14.0",
   "node": ">=18.19.0",
+  "business_model_mode": "writer",
   "dependencies": [
+    {
+      "name": "@babel/parser",
+      "version": "7.29.13",
+      "license": "MIT"
+    },
     {
       "name": "@modelcontextprotocol/sdk",
       "version": "1.32.1",
@@ -87,7 +93,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "6edf8245068558af3e1c3afa05589004cd6e772dd3b3f0c6abed85e4cd1d3c96"
+      "sha256": "74c9d949864e23e0c1a41983339f1fd93e1b326d60ce2f54b7bf143030941e02"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -162,22 +168,32 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "a08fb229519efa9122911d7db2c401a674987d01cf0c39dc519bc96f35b3daf7"
+      "sha256": "289704b67311707d53c0b056be90008eacff2e09c1890a21860a6ab9125cbe37"
     },
     {
       "path": "README.md",
-      "bytes": 1747,
-      "sha256": "a5fd4bbeeb93c51c2a0b53eb4e73daaa573d96d0d4432d7320ca8f0db13eb37d"
+      "bytes": 1856,
+      "sha256": "0c88159cb0d5d51eb0dba69f784957b345ac58b43bfc3a65d1eab2e2338da0a2"
+    },
+    {
+      "path": "runtime/behavior-reporter.mjs",
+      "bytes": 516,
+      "sha256": "6a7d3c760b7bbb2aa10bde17a8a51830572cfa95f83457dd654fe7da89570f50"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1296555,
-      "sha256": "70a6e28e952a39b89d9459607c02b115240d958590c300420cf0f7c0ca46590f"
+      "bytes": 1365044,
+      "sha256": "bb35fa630eb14f461ff1cae4dcbc3f34ab13487649e0cc5053318a18815dbd26"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1263245,
-      "sha256": "e28ce1f09b691f9997880740795c377e67269d2a3f9d3a0db06d260a50151cd3"
+      "bytes": 1232312,
+      "sha256": "f076ecfdf2840773721d8e0c6aba5c685687978978f1c77db2bd1f750ecd9ca0"
+    },
+    {
+      "path": "runtime/symbol-index.mjs",
+      "bytes": 315696,
+      "sha256": "b444dfe37a2cabee39aba7a57d24c28577953910441e6ba2ad1fbc312f1176cb"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -196,28 +212,28 @@
     },
     {
       "path": "skills/project-dev/references/spec-and-interaction.md",
-      "bytes": 2134,
-      "sha256": "bfe1b8997fc99e437617fcd5c99bc680730bbbaf036418d0118fe01e97ad69c0"
+      "bytes": 2101,
+      "sha256": "3b33300c8233d9b0b3ec5c5b6a4ce041bcc4141ae825c98bf505bc114d26fd1f"
     },
     {
       "path": "skills/project-dev/references/task-inputs.md",
-      "bytes": 23297,
-      "sha256": "6b27f5242661ff14dcb1280d6d6828c245c4ed0f046d2ea1c872b78e4e61b82d"
+      "bytes": 23751,
+      "sha256": "40e067e1dcbd75bfd7d8010e8362d3dfa9130d852ef2057ca4ba227632638c37"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
-      "bytes": 13512,
-      "sha256": "3735dd9ca9a958f0dd662dc97b0b711198224ebabf7fb162e51418b7384927a9"
+      "bytes": 19616,
+      "sha256": "d4e26437cb5bdbfd600d164d4ee0530e88a7d8365c88c899ef4133ddcfc74730"
     },
     {
       "path": "skills/project-dev/references/workflow.md",
-      "bytes": 31167,
-      "sha256": "d3c136368af69aa97de09040a9aaafb4be57853c4b87428b911a2e54f466804c"
+      "bytes": 32388,
+      "sha256": "37b18acc420ba6b4423ef12e9f80aba4319641e308745d914cf8dc62dd961a59"
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 6009,
-      "sha256": "b1a150b12791d546ea8fa9358cfcb45ebddc5a03c1f4c7b17de1c42ca368d850"
+      "bytes": 6614,
+      "sha256": "dd3bc9c1140146548834af9552d3d0f047bd20dfe25ed354cb52bd0d9846d42e"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -226,8 +242,8 @@
     },
     {
       "path": "skills/project-dev-setup/SKILL.md",
-      "bytes": 7082,
-      "sha256": "ce57f618aeba4679ab05f7b512f7dacd8c7623e1d1012a437434c780a83a8999"
+      "bytes": 7296,
+      "sha256": "8a5961c7f919f1e12d5af9cc49144f25cc783e8be3ef045b8ac5da81920ab575"
     },
     {
       "path": "skills/project-dev-update/agents/openai.yaml",
@@ -611,8 +627,8 @@
     },
     {
       "path": "THIRD-PARTY-NOTICES.txt",
-      "bytes": 17392,
-      "sha256": "6199b21e1a5eedc6bc24535a93e1e3154440501b0b9d00d6692d44df92679216"
+      "bytes": 18518,
+      "sha256": "69d14e72db9df4267cbf2cde3db69ef37771acb55b3581dc135de0f0a1189532"
     }
   ]
 }

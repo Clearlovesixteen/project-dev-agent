@@ -10,8 +10,10 @@ import { DiagnosticWriter } from "../src/observability/writer.js";
 import type { TelemetryEvent } from "../src/observability/contracts.js";
 import { uploadDiagnostics } from "../src/observability/uploader.js";
 
-type Batch = { batch_id: string; events: TelemetryEvent[] };
-const acknowledge = (response: ServerResponse, batch: Batch) => response.end(JSON.stringify({ batch_id: batch.batch_id, acknowledged: batch.events.length }));
+type Batch = { schema_version: 1 | 2; batch_id: string; events: TelemetryEvent[] };
+const acknowledge = (response: ServerResponse, batch: Batch) => response.end(JSON.stringify(batch.schema_version === 2
+  ? { schema_version: 2, batch_id: batch.batch_id, accepted_indexes: batch.events.map((_, index) => index), rejected: [] }
+  : { batch_id: batch.batch_id, acknowledged: batch.events.length }));
 
 /** 所有收件、配置修改与重试均在独立用户目录和回环服务中，不触碰真实上报周期。 */
 async function receiver(t: test.TestContext, handle: (batch: Batch, response: ServerResponse, request: number) => Promise<void> | void) {
@@ -60,8 +62,9 @@ test("第二批确认失败后保留第一批游标，重试不重传已经确�
 });
 
 test("多批发送共用总时间预算，后批超时不影响前批进度或无限延长收尾", async t => {
+  let recovered = false;
   const fixture = await receiver(t, (batch, response, request) => {
-    if (request === 1) acknowledge(response, batch);
+    if (request === 1 || recovered) acknowledge(response, batch);
     // 第二批故意不返回确认，模拟真实接收端超时。
   });
   await fixture.record(101);
@@ -69,8 +72,37 @@ test("多批发送共用总时间预算，后批超时不影响前批进度或�
   assert.equal(result.state, "unavailable"); assert.equal(result.sent, 50);
   assert.ok(performance.now() - started < 1800, "两批不得各自占用一份完整预算");
   assert.equal(fixture.calls.length, 2);
-  assert.ok(Object.values(JSON.parse(await readFile(fixture.cursor, "utf8")).positions).includes(50));
-  assert.ok((await fixture.writer.read()).events.some(event => event.reason_code === "UPLOAD_TIMEOUT"));
+  const cursor = JSON.parse(await readFile(fixture.cursor, "utf8"));
+  assert.ok(Object.values(cursor.positions).includes(50));
+  const observed = (await fixture.writer.read()).events;
+  const timeout = observed.find(event => event.reason_code === "UPLOAD_TIMEOUT_RESPONSE");
+  const age = observed.find(event => event.reason_code === "UPLOAD_QUEUE_AGE");
+  assert.ok(timeout && age);
+  assert.equal(timeout.context?.stage, "upload");
+  assert.equal(timeout.attributes.selected_count, 50);
+  assert.equal(timeout.attributes.candidate_count, 51);
+  assert.equal(age.trace_id, timeout.trace_id);
+  assert.ok(age.duration_ms >= 0);
+  assert.equal((await uploadDiagnostics(fixture.home)).state, "backoff");
+  recovered = true;
+  await writeFile(fixture.cursor, JSON.stringify({ ...cursor, next_attempt: 0 }));
+  const retried = await uploadDiagnostics(fixture.home);
+  assert.equal(retried.state, "ok"); assert.equal(retried.sent, 53);
+  assert.deepEqual(fixture.calls.slice(2).map(batch => batch.events.length), [25, 25, 3]);
+  const confirmed = new Set(fixture.calls[0]!.events.map(event => event.event_id));
+  assert.ok(fixture.calls.slice(2).every(batch => batch.events.every(event => !confirmed.has(event.event_id))));
+});
+
+test("接收端返回响应头但回执正文未结束时，保留未确认事件并记录回执超时", async t => {
+  const fixture = await receiver(t, (_batch, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.write('{"batch_id":');
+  });
+  await fixture.record(1);
+  const result = await uploadDiagnostics(fixture.home, 500);
+  assert.equal(result.state, "unavailable"); assert.equal(result.sent, 0);
+  assert.deepEqual(JSON.parse(await readFile(fixture.cursor, "utf8")).positions, {});
+  assert.ok((await fixture.writer.read()).events.some(event => event.reason_code === "UPLOAD_TIMEOUT_ACK"));
 });
 
 test("第一批发送期间关闭上报后，不再启动下一批并保留关闭配置", async t => {

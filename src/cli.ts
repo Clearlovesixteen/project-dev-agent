@@ -51,7 +51,7 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
   plugin status
     查看插件版本，以及保存在插件缓存之外的工作目录配置。
   plugin configure --workspace <绝对目录> [--apply --expected-revision <uuid|null>]
-    预览或保存工作范围；expected-revision 必须使用预览返回的版本。
+    预览或保存工作范围；可用 --scope-mode projects|workspace，expected-revision 必须使用预览返回的版本。
   serve --plugin
     启动插件 MCP 服务；首次开发时由 project_prepare 自动初始化当前仓库。
   connect --workspace <绝对目录> [--codex <可执行文件>] [--apply]
@@ -81,6 +81,7 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
   project context --project <工作区绝对路径> [--query <关键词>] [--path <相对路径>]
     查询参考文件、直接导入和使用方，以及经过来源核验的模块理解候选。
     --model-id <模型 ID> [--model-revision <修订号>] 读取完整详情；--model-offset <起点> 翻页。
+    --model-snapshot-id <快照 ID> 配合 --model-id 核对历史候选。
   model record --project <工作区绝对路径> --file <模型 JSON 文件>
     保存有明确范围的业务模型候选，核验源码引用并保留修订版本。
   history scan --project <工作区绝对路径> [--refresh] [--codex-home <目录>]
@@ -146,6 +147,7 @@ async function main(): Promise<void> {
       file: { type: "string" },
       project: { type: "string" },
       workspace: { type: "string" },
+      "scope-mode": { type: "string" },
       plugin: { type: "boolean", default: false },
       "expected-revision": { type: "string" },
       codex: { type: "string", default: "codex" },
@@ -158,6 +160,7 @@ async function main(): Promise<void> {
       "check-id": { type: "string" },
       "batch-id": { type: "string" },
       "model-id": { type: "string" },
+      "model-snapshot-id": { type: "string" },
       "rule-id": { type: "string", multiple: true },
       "model-revision": { type: "string" },
       "model-offset": { type: "string" },
@@ -306,10 +309,11 @@ async function main(): Promise<void> {
   if (positionals.length === 2 && positionals[0] === "plugin") {
     const settings = new PluginSettings(values["codex-home"]);
     if (positionals[1] === "status") print(await settings.status());
-    else if (positionals[1] === "configure" && values.workspace) {
+    else if (positionals[1] === "configure" && (values.workspace || values["scope-mode"])) {
       print(
         await settings.configure({
-          workspace: values.workspace,
+          ...(values.workspace ? { workspace: values.workspace } : {}),
+          ...(values["scope-mode"] ? { scope_mode: values["scope-mode"] } : {}),
           apply: values.apply,
           expected_revision:
             values["expected-revision"] === "null"
@@ -318,7 +322,7 @@ async function main(): Promise<void> {
         }),
       );
     } else
-      throw new Error("请使用 plugin status 或 plugin configure --workspace");
+      throw new Error("请使用 plugin status 或 plugin configure --scope-mode projects，或 --workspace <绝对目录>");
     return;
   }
   if (
@@ -375,6 +379,7 @@ async function main(): Promise<void> {
         query: values.query ?? "",
         paths: values.path ? [values.path] : [],
         model_id: values["model-id"],
+        model_snapshot_id: values["model-snapshot-id"],
         model_revision:
           values["model-revision"] === undefined
             ? undefined

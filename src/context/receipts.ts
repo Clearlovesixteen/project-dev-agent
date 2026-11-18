@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { z } from "zod";
 import { RuntimeSettings, runtimeFiles } from "../runtime/config.js";
 import { DiagnosticWriter } from "../observability/writer.js";
@@ -15,7 +16,9 @@ export class ContextReceipts {
   private readonly settings: RuntimeSettings;
   constructor(home?: string) { this.settings = new RuntimeSettings(home); }
   private async path(project: string, interaction: InteractionContext) {
-    const id = await new DiagnosticWriter(this.settings.home).opaque(JSON.stringify([project, interaction.session_id, interaction.actor_id ?? "main"]));
+    // 会话钩子和 MCP 可能通过不同的系统目录别名访问同一个工作树。
+    const root = await realpath(project);
+    const id = await new DiagnosticWriter(this.settings.home).opaque(JSON.stringify([root, interaction.session_id, interaction.actor_id ?? "main"]));
     return `${ROOT}/${id}.json`;
   }
   async reset(project: string, interaction: InteractionContext) {

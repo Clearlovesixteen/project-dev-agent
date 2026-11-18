@@ -1,6 +1,7 @@
 import { AppError } from "../domain/error.js";
-import { ModelContentV2, type ModelV2, type RecordRequest, type SavedModel, type SourceV2 } from "./model-contracts.js";
+import { ModelContentV2, ModelContentV3, type ModernModel, type RecordRequest, type SavedModel, type SourceV2 } from "./model-contracts.js";
 import { sourcePath } from "./model-evidence.js";
+import { evaluateRule } from "./rule-predicates.js";
 
 /** 稳定 ID 保持引用一致；更新和删除必须明确，禁止静默丢弃未提交的规则。 */
 function mergeItems<T extends { id: string }>(prior: T[], upserts: T[] = [], removed: string[] = []): T[] {
@@ -18,23 +19,27 @@ function unique(ids: string[]): void {
 
 export function prepareModel(request: RecordRequest, prior: SavedModel | undefined) {
   const patch = request.patch;
-  if (patch && prior?.schema_version !== 2) throw new AppError("PROJECT_MODEL_MIGRATION_REQUIRED", "局部修订前需读取旧模型，补齐规则依据并完整迁移到 schema_version: 2");
-  if (!patch && prior?.schema_version === 2) throw new AppError("PROJECT_MODEL_PATCH_REQUIRED", "已有新版模型使用 patch 修订，以保留未复核条目及其证据");
-  const old = prior?.schema_version === 2 ? prior : undefined;
-  const { scan_id, expected_revision, schema_version, revision_reason, patch: ignored, ...body } = request;
-  const content = ModelContentV2.parse(patch && old ? {
+  if (patch && (!prior || prior.schema_version === 1)) throw new AppError("PROJECT_MODEL_MIGRATION_REQUIRED", "局部修订前需读取旧模型，补齐规则依据并完整迁移到 schema_version: 2 或 3");
+  if (!patch && prior && prior.schema_version !== 1) throw new AppError("PROJECT_MODEL_PATCH_REQUIRED", "已有新版模型使用 patch 修订，以保留未复核条目及其证据");
+  const old = prior && prior.schema_version !== 1 ? prior : undefined;
+  const { scan_id, expected_revision, schema_version, revision_reason, knowledge_view_token, base_snapshot_id, reviewed_snapshot_ids, patch: ignored, ...body } = request;
+  const raw = patch && old ? {
     id: old.id, module: old.module, title: old.title, scope: old.scope, summary: old.summary,
     entities: old.entities, flows: old.flows, related_paths: old.related_paths, questions: old.questions, ...patch.metadata,
     sources: mergeItems(old.sources, patch.upsert_sources, patch.remove_source_ids),
-    rules: mergeItems(old.rules.map(({ evidence_versions, ...rule }) => rule), patch.upsert_rules, patch.remove_rule_ids),
+    rules: mergeItems(old.rules.map(({ evidence_versions, ...rule }) => ({ ...rule, ...("bindings" in rule && rule.bindings ? { bindings: rule.bindings.map(({ resolution, target_sha256, symbol_sha256, start, end, ...input }) => input) } : {}) })), patch.upsert_rules, patch.remove_rule_ids),
     relations: mergeItems(old.relations.map(({ evidence_versions, rule_versions, target_sha256, target_model_revision, target_rule_versions, entity_versions, target_entity_versions, ...relation }) => relation), patch.upsert_relations, patch.remove_relation_ids),
-  } : body);
+  } : body;
+  if (request.schema_version !== 3) ModelContentV2.parse(raw);
+  const content = ModelContentV3.parse(raw);
   for (const values of [content.sources, content.rules, content.relations]) unique(values.map((item) => item.id));
   unique(content.entities.map((item) => item.name)); unique(content.flows.map((item) => item.name));
   if ([...content.entities, ...content.flows].some((item) => !item.name.trim())) throw new AppError("PROJECT_MODEL_NAME", "新版模型的术语和流程需要明确名称");
   unique(content.related_paths); unique(content.scope);
   const sourceMap = new Map(content.sources.map((source) => [source.id, source]));
   for (const source of content.sources) {
+    if (source.kind === "task" && source.requirement_source_id && request.schema_version !== 3)
+      throw new AppError("PROJECT_MODEL_SCHEMA", "关联任务中保存的需求文档需要 schema_version: 3");
     const path = sourcePath(source);
     if (path && !content.related_paths.includes(path)) throw new AppError("PROJECT_MODEL_SOURCE_SCOPE", "每个文件证据必须包含在 related_paths 中");
   }
@@ -53,6 +58,27 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
     const sources = requireSources(rule.source_ids);
     if (rule.basis === "observed" && !sources.some((source) => source.kind === "code")) throw new AppError("PROJECT_MODEL_BASIS", "代码当前行为至少需要一条代码依据");
     if (rule.basis === "intended" && !sources.some((source) => source.kind !== "code")) throw new AppError("PROJECT_MODEL_BASIS", "需求预期行为需要文档或本项目任务要求作为依据");
+    if (rule.semantics) {
+      const semantics = rule.semantics;
+      unique(semantics.preserves.map(item => item.id)); unique(semantics.cases.map(item => item.id));
+      for (const ids of [semantics.source_ids, ...semantics.preserves.map(item => item.source_ids), ...semantics.cases.map(item => item.source_ids)]) {
+        requireSources(ids);
+        if (ids.some(id => !rule.source_ids.includes(id))) throw new AppError("PROJECT_MODEL_SEMANTIC_SOURCE", "条件、保留行为和场景必须引用本规则的依据");
+      }
+      if (semantics.cases.some(item => evaluateRule(semantics.when, item.facts) !== item.expected))
+        throw new AppError("PROJECT_MODEL_CASE_CONTRADICTION", "场景期望与条件计算不一致；这项检查不代表代码已通过场景测试");
+    }
+    if (rule.bindings) {
+      unique(rule.bindings.map(item => item.id));
+      for (const binding of rule.bindings) {
+        const bindingSources = requireSources(binding.source_ids);
+        if (binding.source_ids.some(id => !rule.source_ids.includes(id))) throw new AppError("PROJECT_MODEL_BINDING_SOURCE", "代码位置必须引用本规则的依据");
+        if (!binding.planned && !content.related_paths.includes(binding.path)) throw new AppError("PROJECT_MODEL_SOURCE_SCOPE", "已实现代码位置必须包含在 related_paths 中");
+        if (!binding.planned && !bindingSources.some(source => source.kind === "code" && source.path === binding.path))
+          throw new AppError("PROJECT_MODEL_BINDING_SOURCE", "已实现代码位置需要该文件的代码原文依据");
+        if (rule.basis === "observed" && binding.planned) throw new AppError("PROJECT_MODEL_BINDING_PLANNED", "当前行为不能使用待创建的代码位置；请在预期草案中记录");
+      }
+    }
   }
   for (const relation of content.relations) {
     requireSources(relation.source_ids); unique(relation.rule_ids);
@@ -74,5 +100,5 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
 }
 
 /** 未重核的规则保持旧指纹；查询时逐条报告过期，不把局部修订伪装成整份已核验。 */
-export function priorRule(model: ModelV2 | undefined, id: string) { return model?.rules.find((rule) => rule.id === id); }
-export function priorRelation(model: ModelV2 | undefined, id: string) { return model?.relations.find((relation) => relation.id === id); }
+export function priorRule(model: ModernModel | undefined, id: string) { return model?.rules.find((rule) => rule.id === id); }
+export function priorRelation(model: ModernModel | undefined, id: string) { return model?.relations.find((relation) => relation.id === id); }

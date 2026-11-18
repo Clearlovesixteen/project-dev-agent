@@ -3,7 +3,7 @@ import type { SavedModel } from "./model-contracts.js";
 /** 每次从权威模型记录重建双向邻接索引；不维护容易失步的第二份图数据库。 */
 export function businessGraph(models: SavedModel[], seeds: Set<string>, depth = 1, budget = 30) {
   const byId = new Map(models.map(model => [model.id, model]));
-  const edges = models.flatMap(model => model.schema_version === 2 ? model.relations.flatMap(relation => {
+  const edges = models.flatMap(model => model.schema_version !== 1 ? model.relations.flatMap(relation => {
     if (!relation.target_model_id || !byId.has(relation.target_model_id)) return [];
     return [{ from_model: model.id, to_model: relation.target_model_id, relation_id: relation.id,
       kind: relation.kind, rule_ids: relation.rule_ids, target_rule_ids: relation.target_rule_ids ?? [],

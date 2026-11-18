@@ -65,12 +65,19 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
     pointer = await opened.current();
     if (!identity) throw new AppError("PROJECT_KNOWLEDGE_IDENTITY_MISSING", "项目知识库缺少身份记录");
     if (!pointer) return { state: "empty", project_id: identity.project_id, snapshot_count: 0 };
-    const source_stamp = await collectSourceStamp(binding);
-    const objectIds = await opened.currentObjectIds();
+    const objectIds = await opened.currentObjectIds(pointer);
     const objects = await Promise.all(objectIds.map((id) => opened.readObject(id)));
+    const paths = objects.flatMap(object => {
+      if (object.object_type !== "module_snapshot") return [];
+      const snapshot = ModuleSnapshotSchema.parse(object.content);
+      return [...snapshot.source_fingerprints, ...snapshot.dependency_fingerprints, ...snapshot.configuration_fingerprints].map(item => item.path);
+    });
+    const source_stamp = await collectSourceStamp(binding, { paths });
     const view = resolveKnowledgeView({ source_stamp, snapshots: objects });
     const state = view.modules.length === 0 ? "empty" : view.modules.some((item) => item.state === "partial") ? "partial" : view.unresolved.length ? "needs_review" : "matched";
-    const selected_models = view.selected_snapshot_ids.map((id) => {
+    // 覆盖不足时保留快照 ID 给排障工具，业务查询只接收已经完整核验的正文。
+    const matchedIds = view.modules.flatMap(item => item.state === "matched" && item.selected_snapshot_id ? [item.selected_snapshot_id] : []);
+    const selected_models = matchedIds.map((id) => {
       const object = objects.find((item) => item.object_id === id);
       if (!object || object.object_type !== "module_snapshot") return undefined;
       const snapshot = ModuleSnapshotSchema.parse(object.content);
@@ -85,6 +92,18 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
     };
     return { state: "unavailable", ...common, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** 只允许读取当前项目事务链中的指定候选，供人工核对歧义快照。 */
+export async function readModelSnapshot(binding: WorktreeBinding, modelId: string, snapshotId: string): Promise<ModuleSnapshot> {
+  const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
+  if (!repository || !(await repository.currentObjectIds()).includes(snapshotId))
+    throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "此快照不在当前项目知识库中");
+  const object = await repository.readObject(snapshotId);
+  const parsed = object.object_type === "module_snapshot" ? ModuleSnapshotSchema.safeParse(object.content) : undefined;
+  if (!parsed?.success || parsed.data.model_id !== modelId)
+    throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "此快照不属于指定业务模型");
+  return parsed.data;
 }
 
 /** 将当前工作树的已保存模型以不可变快照写入项目库；失败不回滚本地模型。 */
@@ -106,11 +125,9 @@ export interface ModelShadowReceiptInput {
 export async function publishModelShadow(
   binding: WorktreeBinding,
   model: Record<string, unknown>,
-  options: { receipt?: ModelShadowReceiptInput } = {},
+  options: { receipt?: ModelShadowReceiptInput; parent_snapshot_ids?: string[]; expected_transaction_id?: string | null; base_model?: Record<string, unknown> } = {},
 ): Promise<{ snapshot_id: string; receipt_id?: string; source_stamp_id: string }> {
   const repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
-  const source_stamp = await collectSourceStamp(binding);
-  const evidence_stamp_id = evidenceStampId(source_stamp);
   const modelId = typeof model.id === "string" ? model.id : "unknown";
   const revision = typeof model.revision === "number" ? model.revision : 0;
   const basis = (() => {
@@ -121,28 +138,39 @@ export async function publishModelShadow(
   })() as "observed" | "intended" | "inferred";
   const related = Array.isArray(model.related_versions) ? model.related_versions.filter((item): item is { path: string; sha256: string } => typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).path === "string" && typeof (item as Record<string, unknown>).sha256 === "string") : [];
   // 本地 SavedModel 带有工作树绝对路径，跨工作树共享时去掉它；工作树与 HEAD 由 provenance 提供。
-  const sharedModel = Object.fromEntries(Object.entries(model).filter(([key]) => key !== "project"));
+  const sharedContent = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => key !== "project"));
+  const sharedModel = sharedContent(model);
+  const currentIds = await repository.currentObjectIds();
+  const modelSnapshots = (await Promise.all(currentIds.map(async id => {
+    const object = await repository.readObject(id);
+    if (object.object_type !== "module_snapshot") return undefined;
+    const snapshot = ModuleSnapshotSchema.parse(object.content);
+    return snapshot.model_id === modelId ? { id, snapshot, object } : undefined;
+  }))).filter((item): item is { id: string; snapshot: ModuleSnapshot; object: ObjectEnvelope } => !!item);
+  // 重新准备旧工作树时，已有模型正文只引用原来的证据快照。无关提交或 staged 状态
+  // 变化不能把同一修订重新发布为另一个候选。
+  const published = modelSnapshots.find(item => JSON.stringify(item.snapshot.content) === JSON.stringify(sharedModel));
+  if (published && !options.receipt) return { snapshot_id: published.id, source_stamp_id: published.snapshot.provenance?.source_stamp_id ?? published.id };
+  // 文件内容变化的局部修订也属于同一条谱系。通过旧模型正文定位其原快照，
+  // 避免将普通修订误判为两个并行模型。
+  const base = options.base_model && JSON.stringify(sharedContent(options.base_model));
+  const anchor = base && modelSnapshots.find(item => JSON.stringify(item.snapshot.content) === base);
+  const source_stamp = await collectSourceStamp(binding, { paths: related.map(item => item.path) });
+  const evidence_stamp_id = evidenceStampId(source_stamp);
   // 同一业务模型修订在共享回执保存失败后会再次构造快照；使用模型自身的
   // immutable recorded_at 作为 provenance 时间，避免重试仅因当前时间变化而
   // 产生新的 snapshot_id。
   const recordedAt = typeof model.recorded_at === "string" ? model.recorded_at : new Date().toISOString();
-  const currentIds = await repository.currentObjectIds();
   const currentSources = new Map(related.map((item) => [item.path, item.sha256]));
-  const priorCandidates = (await Promise.all(currentIds.map(async (id) => {
-    try {
-      const object = await repository.readObject(id);
-      if (object.object_type !== "module_snapshot") return undefined;
-      const parsed = ModuleSnapshotSchema.safeParse(object.content);
-      if (!parsed.success || parsed.data.model_id !== modelId) return undefined;
-      const previousContent = parsed.data.content;
+  const priorCandidates = modelSnapshots.flatMap(({ id, snapshot }) => {
+      const previousContent = snapshot.content;
       const previousRevision = typeof previousContent === "object" && previousContent !== null && typeof (previousContent as Record<string, unknown>).revision === "number"
         ? (previousContent as Record<string, unknown>).revision as number : 0;
-      const lineage = parsed.data.source_fingerprints.every((item) => currentSources.get(item.path) === item.sha256);
+      const lineage = snapshot.source_fingerprints.every((item) => currentSources.get(item.path) === item.sha256);
       return previousRevision < revision && lineage
-        ? { id, revision: previousRevision, evidence: new Set(parsed.data.source_fingerprints.map(item => `${item.path}:${item.sha256}`)) }
-        : undefined;
-    } catch { return undefined; }
-  }))).filter((item): item is { id: string; revision: number; evidence: Set<string> } => Boolean(item));
+        ? [{ id, revision: previousRevision, evidence: new Set(snapshot.source_fingerprints.map(item => `${item.path}:${item.sha256}`)) }]
+        : [];
+  });
   // 组合当前源码时保留所有“最大父快照”：同一工作树的旧修订被更高修订
   // 支配，A/B 两个同级来源则同时保留，避免把分支整合误记成单父覆盖。
   const parents = priorCandidates.filter(candidate => !priorCandidates.some(other => {
@@ -150,13 +178,15 @@ export async function publishModelShadow(
     const superset = [...candidate.evidence].every(key => other.evidence.has(key));
     return superset && (other.revision > candidate.revision || other.evidence.size > candidate.evidence.size);
   })).sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id));
-  const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId, parent_snapshot_ids: parents.map(parent => parent.id), basis,
+  const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId,
+    parent_snapshot_ids: options.parent_snapshot_ids ?? (anchor ? [anchor.id] : parents.map(parent => parent.id)), basis,
     source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
     provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: evidence_stamp_id, recorded_at: recordedAt },
   } satisfies ModuleSnapshot;
-  const parsed = ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot", object_id: digest(JSON.stringify(snapshot)), content: snapshot });
+  const parsed = published?.object ?? ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot",
+    object_id: digest(JSON.stringify(snapshot)), content: snapshot });
   let objects = [parsed];
   let receipt_id: string | undefined;
   if (options.receipt) {
@@ -194,6 +224,6 @@ export async function publishModelShadow(
     objects = existingOperation.object_ids.map(id => objects.find(object => object.object_id === id) ?? existingObjects.find(object => object.object_id === id)!).filter((object): object is ObjectEnvelope => Boolean(object));
     receipt_id = existingObjects.find(object => object.object_type === "receipt")?.object_id ?? receipt_id;
   }
-  await repository.publish({ operation_id, objects });
+  await repository.publish({ operation_id, objects, ...(options.expected_transaction_id !== undefined ? { expected_transaction_id: options.expected_transaction_id } : {}) });
   return { snapshot_id: parsed.object_id, ...(receipt_id ? { receipt_id } : {}), source_stamp_id: source_stamp.stamp_id };
 }

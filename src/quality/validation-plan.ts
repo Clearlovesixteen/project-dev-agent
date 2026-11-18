@@ -6,15 +6,19 @@ import { digest } from "../knowledge/document.js";
 import { loadConfig } from "../knowledge/config.js";
 import { safeSource } from "../understanding/scan.js";
 import { ValidationPlanRecordSchema, type ValidationPlanInput, type ValidationPlanRecord } from "./validation-contracts.js";
+import { behaviorFiles } from "./behavior-execution.js";
+import { assertEnhancedModelWrites } from "../runtime/business-model-release.js";
 
 /** 计划与实际脚本/显式检查配置绑定；参数保持数组，不借 shell 解析用户文本。 */
 export async function recordValidationPlan(binding: WorktreeBinding, input: ValidationPlanInput, acceptanceIds: string[], previous?: ValidationPlanRecord) {
+  assertEnhancedModelWrites(input.checks.some(check => !!check.behavior_report));
   const ids = new Set(input.checks.map(item => item.id));
   if (previous?.plan.checks.some(item => !ids.has(item.id))) throw new AppError("VALIDATION_PLAN_REMOVAL", "已有必需检查不能通过删除计划规避；调整命令后须重新运行");
   if (input.checks.some(item => item.acceptance_ids.some(id => !acceptanceIds.includes(id)))) throw new AppError("VALIDATION_ACCEPTANCE_UNKNOWN", "检查计划只能关联本任务现有验收项");
   const files = new ProjectFiles(binding.root), { config } = await loadConfig(files);
   const paths = new Set<string>(), checksForPath = new Map<string, string[]>();
   for (const check of input.checks) {
+    for (const path of behaviorFiles(check)) { paths.add(path); checksForPath.set(path, [...checksForPath.get(path) ?? [], check.id]); }
     if (check.cwd !== ".") await files.path(check.cwd);
     for (const path of check.source_paths) { paths.add(path); checksForPath.set(path, [...checksForPath.get(path) ?? [], check.id]); }
     // 最近的包声明决定 npm/pnpm/yarn 脚本实际含义，直接 node 检查也保留项目执行声明。

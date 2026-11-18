@@ -7,6 +7,9 @@ import { TaskStore } from "../storage/task-store.js";
 import type { MapFile } from "./contracts.js";
 import type { SourceV2, SavedModel, RuleV2 } from "./model-contracts.js";
 import { excluded, safeSource } from "./scan.js";
+import { CodeBindingResolver } from "./code-bindings.js";
+import type { SavedBinding } from "./semantic-contracts.js";
+import { latestSources, requirementSourceText } from "../quality/requirement-review.js";
 
 type Source = SavedModel["sources"][number];
 export const sourcePath = (source: Source): string | undefined => "path" in source ? source.path : undefined;
@@ -14,7 +17,8 @@ export const sourcePath = (source: Source): string | undefined => "path" in sour
 /** 源码、文档原文及引用位置都参与指纹；只改证据说明也不能刷新未复核规则。 */
 export function sourceFingerprint(source: SourceV2): string {
   return digest(JSON.stringify(source.kind === "task"
-    ? [source.id, source.kind, source.task_id, source.correction_id ?? null, source.quote, source.sha256]
+    ? [source.id, source.kind, source.task_id, source.correction_id ?? null, source.quote, source.sha256,
+      ...(source.requirement_source_id ? [source.requirement_source_id] : [])]
     : [source.id, source.kind, source.path, source.line, source.quote, source.sha256]));
 }
 
@@ -22,12 +26,19 @@ export function ruleFingerprint(rule: RuleV2): string {
   const fields: unknown[] = [rule.id, rule.description, rule.responsibility, rule.basis, rule.conditions, rule.exceptions, rule.source_ids];
   // 未使用断言的旧规则保持原有指纹，避免升级本身使全部验收失效。
   if (rule.assertion) fields.push(rule.assertion);
+  if ("semantics" in rule && rule.semantics) {
+    // v3 的条件和事实可从 JSON 或 MCP 写入，键的提交顺序不属于业务规则。
+    fields.push(JSON.stringify(rule.semantics, (_key, value: unknown) => value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) : value));
+  }
   return digest(JSON.stringify(fields));
 }
 
 /** 关联方同时绑定规则内容及其实际核对过的依据版本，不因摘要修订而全部失效。 */
 export function dependencyFingerprint(rule: RuleV2 & { evidence_versions: { id: string; fingerprint: string }[] }) {
-  return digest(JSON.stringify([ruleFingerprint(rule), rule.evidence_versions]));
+  const fields: unknown[] = [ruleFingerprint(rule), rule.evidence_versions];
+  if ("bindings" in rule && rule.bindings) fields.push(rule.bindings);
+  return digest(JSON.stringify(fields));
 }
 
 export function entityFingerprint(entity: SavedModel["entities"][number], sources: SourceV2[]) {
@@ -40,7 +51,10 @@ export function entityFingerprint(entity: SavedModel["entities"][number], source
 export class ModelEvidence {
   private readonly fileCache = new Map<string, Promise<string>>();
   private readonly taskCache = new Map<string, Promise<string>>();
-  constructor(private readonly files: ProjectFiles, private readonly config: ProjectConfig, private readonly entries: Map<string, MapFile>, private readonly repoIdentity: string, private readonly taskOverrides?: ReadonlyMap<string, Task>) {}
+  private readonly bindings: CodeBindingResolver;
+  constructor(private readonly files: ProjectFiles, private readonly config: ProjectConfig, private readonly entries: Map<string, MapFile>, private readonly repoIdentity: string, private readonly taskOverrides?: ReadonlyMap<string, Task>) {
+    this.bindings = new CodeBindingResolver(files, config);
+  }
 
   private file(path: string): Promise<string> {
     let value = this.fileCache.get(path);
@@ -49,12 +63,17 @@ export class ModelEvidence {
   }
 
   private task(source: Extract<SourceV2, { kind: "task" }>): Promise<string> {
-    const key = JSON.stringify([source.task_id, source.correction_id ?? null]);
+    const key = JSON.stringify([source.task_id, source.correction_id ?? null, source.requirement_source_id ?? null]);
     let value = this.taskCache.get(key);
     if (!value) {
       value = (async () => {
         const task = this.taskOverrides?.get(source.task_id) ?? await new TaskStore(this.files.root).load(source.task_id);
         if (task.worktree_path !== this.files.root || task.repo_identity !== this.repoIdentity) throw new AppError("PROJECT_MODEL_TASK_SCOPE", "任务依据必须属于当前仓库及工作区");
+        if (source.requirement_source_id) {
+          const record = latestSources(task.requirement_sources ?? []).find(item => item.input.id === source.requirement_source_id);
+          if (!record) throw new AppError("PROJECT_MODEL_TASK_SOURCE", "未找到本任务保存的需求资料");
+          return requirementSourceText({ root: this.files.root }, task, record);
+        }
         if (!source.correction_id) return task.requirement;
         const correction = task.corrections.find((item) => item.id === source.correction_id);
         if (!correction) throw new AppError("PROJECT_MODEL_TASK_SOURCE", "未找到所引用的任务纠正记录");
@@ -76,6 +95,16 @@ export class ModelEvidence {
     if (excluded(path, this.config)) return "missing_or_excluded";
     try { return digest(await this.file(path)) === expected ? "current" : "changed"; }
     catch { return "missing_or_unreadable"; }
+  }
+
+  /** 保存的定位结果只是历史事实；查询时重新检查，不能把后来创建或移动的符号继续当作原位置。 */
+  async bindingState(binding: SavedBinding): Promise<string> {
+    try {
+      const { resolution, target_sha256, symbol_sha256, start, end, ...input } = binding;
+      const current = await this.bindings.resolve(input);
+      if (binding.resolution !== "resolved" || current.resolution !== "resolved") return current.resolution === "resolved" ? "needs_rebind" : current.resolution;
+      return (binding.symbol ? current.symbol_sha256 === binding.symbol_sha256 : current.target_sha256 === binding.target_sha256) ? "current" : "changed";
+    } catch { return "missing_or_unreadable"; }
   }
 
   async sourceState(source: Source): Promise<string> {

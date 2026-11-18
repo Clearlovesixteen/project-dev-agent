@@ -1,6 +1,24 @@
 # 精简、可追溯的业务建模
 
+## 结构化业务任务
+
+当 `plugin_status.capabilities.business_model_writes` 为 `true` 且需求新增或改变有明确条件的业务行为时，优先沿用此闭环。纯工程或版式任务按原流程核对。已有 PRD/SDD 和项目测试直接承接，以下记录由 Agent 维护。
+
+1. **取原文和代码。** 按原流程保存 `spec_input`、`requirement_sources` 和 `implementation_basis`。通过 `project_context` 读取相关模型、关联入口和复用线索，实际阅读代码。需要消解显式导入别名时查询 `code_locations:[{path,symbol}]`，使用返回的声明文件与符号；检查 `state` 与 `trace`。动态、通配和歧义位置需人工核对。库组件、项目组件、自己实现依次核对，新增共享封装须说明依据。
+2. **保存当前规则和预期。** `schema_version:3` 的规则可附 `semantics`（`subject`、`action`、`when`、`expected`、`source_ids`、`cases`、`preserves`）与 `bindings`（`id,path,symbol,role,source_ids`）。`when` 使用 `all/any/not` 或 `field,op,value`；事实以点分字段为键。用真实条件分别准备允许、拒绝、例外及保留行为。绑定指向真实声明或具体文件，并附该文件原文依据。导入声明使用 `import:模块标识`，例如 `import:./request.js`。有旧模型时从详情读取 `rule_fingerprint`。新业务以 `operation:add`、`base_revision:0`、`new_model` 保存首条预期规则及计划位置，待新增的绑定传 `planned:true`。附件可通过 `kind:task,task_id,requirement_source_id,quote` 引用本项目已保存的文本资料。
+3. **开工前固定范围。** 用 `task_open.business_model_policy:1` 建立增强任务。草案保存后，从 `task_check.quality.business_delta` 取结构化场景和 `business_delta_check`，挂到原验收项。用 `task_update.business_plan` 一次保存 `input_items`（原文、分类、验收）、`rules`（模型、规则、草案 ID）、`decisions`（每个代码绑定的 `modify/verify/protect/not_applicable`）、`related_checks`（没有绑定的关联只读入口）、`scenarios`（规则 `case_id` 或 `preserve_id`、验收、检查、测试文件、测试名）和必要的 `supporting_changes`。行为或约束应关联实际测试，设计条目对应实现依据。未决条目标为 `unresolved`，保留其来源。只修改确定的位置。遇到新影响先读代码，扩充未改位置的计划后继续。需要修订已改位置时，先处理本轮越界差异并重新核验，保留接入前已有改动。
+4. **跑命名场景。** 优先复用实际覆盖预期的项目测试。首版结构化场景支持 Node 内置测试，使用 `validation_plan.checks` 中的 `command:"node", args:["--test","test/behavior.test.mjs"], behavior_report:"node-test"`，加入对应 `acceptance_ids`。通过现有 `validation run` 从原终端执行。其他项目测试照常运行，并明确其报告粒度。跳过、待完成、重名、无运行事件或过期结果保持待核验。
+5. **核对和回写。** 查看 `task_check.quality.business_plan` 的 `issues`、`boundary.issues` 和 `scenarios`，复核本轮代码、关联入口和测试断言。准备新的源码原文、当前索引与真实代码绑定，再调用 `project_model_apply` 回写 observed 规则，按原流程关闭任务。运行结果通过只证明对应测试执行；实际业务语义由当前需求、代码和断言共同核对。
+
 每次 MCP 调用都传 `project`（当前 Git 工作树绝对路径）。模型是有依据的候选，不是团队已批准的规则。用户仍只需描述需求；下面的记录、查询和修订由 Codex 完成。
+
+## 仓库模型与当前工作树
+
+本节适用于 `0.14.0`。升级后可用 `plugin_status` 核对当前会话加载的版本。
+
+默认 `projects` 模式通过当前仓库的 `project_prepare(apply:true)` 登记；状态查询不登记，切换仓库无需更换全局目录。严格 `workspace` 范围仍可选。不同仓库各自保存模型；同一 Git common-dir 的工作树共享该公共目录下的 `project-dev-agent/`。结构扫描、任务、历史及验证仍分别属于各自工作树，不能共享任务基线或以另一工作树的测试代替当前验收。
+
+`project_context` 和 `knowledge_search` 优先返回与当前源码唯一匹配的共享版本。遇到歧义时用 `model_snapshot_id` 查看历史候选；人工核对后以 `base_snapshot_id` 及 `reviewed_snapshot_ids` 记录修订来源，携带当前 `knowledge_view_token`。修订号用于并发校验和追溯，不代表跨分支的适用顺序。来源保留仓库身份、来源工作树、提交与证据版本；查询仍读取当前工作树源码核对哈希、原文和代码绑定。分支不同本身不等于失效，提交相同也不证明未提交改动一致。`needs_review` 是当前证据需要核对，不能解释成模型不存在，也不能靠重新扫描或换哈希宣告适用。
 
 ## 先查相关内容
 
@@ -26,12 +44,12 @@
 来源在模型内按 ID 共用：
 
 - 文件来源：`{ id, kind: "code" | "document", path, sha256, line, quote }`。路径必须已索引并包含于 `related_paths`，Markdown 作为文档、程序源码作为代码，HTML/XML/配置按实际用途标注；引用行号、原文和当前文件哈希均需匹配。
-- 任务来源：`{ id, kind: "task", task_id, correction_id?, quote }`。引用本项目已保存的原始需求，或指定纠正记录的 `description + "\n" + rationale`。工具校验原文并保存其哈希；没有 `correction_id` 时引用原始需求。不能引用其他项目或助手虚构的用户确认。这里是任务中记录的要求，不是身份认证或团队审批。
+- 任务来源：`{ id, kind: "task", task_id, correction_id?, quote }`。引用当前工作树已保存的原始需求，或指定纠正记录的 `description + "\n" + rationale`。工具校验原文并保存其哈希；没有 `correction_id` 时引用原始需求。仓库共享模型保留经核验的受限任务原文快照及来源身份，供其他 linked worktree 读取；不要求把任务记录搬到共享目录，也不依赖另一工作树的任务存储来重建原文。不能引用其他仓库或助手虚构的用户确认。这里是任务中记录的要求，不是身份认证或团队审批。
 - 未落入上述可核对来源的 PRD 附件内容，先用于当前需求分析；需要长期记录时引用本次已保存的任务要求。不要为了建模要求用户另写说明文件。
 
 ## 新建与旧模型迁移
 
-新模型使用 `schema_version: 2`、`expected_revision: 0`。下面展示字段组合，文件、原文和哈希须从当前项目读取后替换，不能直接照抄：
+下面是兼容流程的 `schema_version: 2` 示例，`expected_revision: 0` 表示新建。增强流程使用上面的 v3 结构。文件、原文和哈希从当前项目读取后填写。
 
 ```json
 {
@@ -57,7 +75,9 @@
 
 业务关系结构：`{ id, rule_ids, kind, target_path, reason, source_ids, target_model_id? }`。`kind` 为 `enforced_by`（规则实施位置）、`used_by`（使用位置）或 `depends_on`（依赖位置）。目标文件需索引且属于 `related_paths`；引用的模型需存在。保存前先阅读目标实现，再说明关系依据。工具保存目标文件版本及被引用模型的修订号；它们变化、所关联规则变化或依据过期，都会提示复核关系。
 
-旧模型继续可读。首次需要增强或修订某个旧模型时，先读取完整内容，核对后补齐每条规则的来源、条件和例外，再用相同 ID、最新 `expected_revision` 和 `schema_version: 2` 完整迁移。保留有效发现及未知问题，旧修订不可变；不能批量自动补造规则依据。旧版没有明确规则时，先按实际需求读懂代码，再提炼有依据的规则。
+v1 模型按需完整迁移到 v2 或 v3，沿用 ID 和最新 `expected_revision`。v2 增强到 v3 时用 `patch` 补齐本次相关规则的结构化条件与代码绑定。保留旧修订、其余规则和待确认问题。旧版缺少规则时，先读相关实际代码，再提炼有依据的规则。
+
+从工作树 `.project-dev/local/understanding/` 迁入仓库侧车时保留旧模型和来源。多个工作树存在同 ID 的不同内容，或中心模型已被其他写入修订时，保留冲突候选及双方版本供人工核对，不按文件时间、较大修订号或所在分支自动覆盖。先核对当前源码和规则条件，明确候选取舍后再使用实际修订号更新；迁移不自动合并代码或业务规则。
 
 ## 已有新版模型只做局部修订
 
@@ -86,7 +106,9 @@
 
 仅更新来源或摘要不会刷新规则。规则引用同一个变化来源时，未实际复核的规则继续显示 `needs_review`；其他文件过期也不妨碍修订本次已核实的条目。调整了规则，相关关系可能需要一并核对；不能仅为了让状态变绿而提交全部规则和关系。
 
-模型更新使用预期修订号并保留不可变历史；冲突时重新读取、合并再试，不能覆盖他人修订。单模型最多 20 条规则、30 条关系、30 条来源，保存上限 64 KiB；超限按业务能力拆分，不能删掉必要异常来凑长度。标题、说明默认中文，原文引用不翻译。结构化内容、依据和异常均由 Agent 维护，用户无需填写这些参数。
+模型更新使用预期修订号、锁和不可变历史。修订冲突时保留候选，重新读取双方依据并人工核对后再试，不能自动合并规则或覆盖他人修订；读取最新修订不会刷新当前分支证据。单模型最多 20 条规则、30 条关系、30 条来源，保存上限 64 KiB；超限按业务能力拆分，不能删掉必要异常来凑长度。标题、说明默认中文，原文引用不翻译。结构化内容、依据和异常均由 Agent 维护，用户无需填写这些参数。
+
+项目模式下，服务补充 `repository_key` 与 `origin`（工作树、分支、提交及 Git 身份），任务来源另补 `snapshot_id`。这些字段用于追溯，不能由 Agent 伪造快照绕过当前任务校验。查询的 `model_storage.root` 是共享模型基目录；`model_migration.required` 为 true 时先扫描当前工作树。若 `model_migration.conflicts` 非空，读取对应候选并人工核对后，在 `project_model_record` 中附 `resolved_migration_ids`，与本次 patch 或旧模型完整升级一起记录处理结果。不能仅为消除提醒批量填写未审查 ID。普通查询不执行模型迁移。
 
 CLI 可用 `project context --project ... --model-id ... --rule-id edit` 查询；多个规则重复传 `--rule-id`。记录与修订继续使用 `model record --project ... --file ...`。扫描或模型不可用时说明限制，继续依据当前源码完成不受影响的工作。
 

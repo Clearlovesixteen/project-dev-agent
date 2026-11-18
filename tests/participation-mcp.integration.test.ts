@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
@@ -15,6 +16,8 @@ import { ToolResultSchema } from "../src/domain/result.js";
 import { ParticipationStore } from "../src/workflow/participation.js";
 import { DiagnosticWriter } from "../src/observability/writer.js";
 import { TaskStore } from "../src/storage/task-store.js";
+import { bindWorktree } from "../src/git/index.js";
+import { publishModelShadow } from "../src/project-knowledge/service.js";
 
 async function setup(t: test.TestContext) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -38,6 +41,85 @@ async function setup(t: test.TestContext) {
   };
   return { fixture, home, settings, plugin, hook, call, session };
 }
+
+/** 通过正常 MCP 入口为指定工作树准备实施依据和范围，钩子测试不伪造就绪记录。 */
+async function prepareAuthWrite(s: Awaited<ReturnType<typeof setup>>, project = s.fixture.path) {
+  assert.equal((await s.call("project_prepare", { project, apply: true })).outcome, "ok");
+  assert.equal((await s.call("project_scan", { project })).outcome, "ok");
+  assert.notEqual((await s.call("project_context", { project, paths: ["src/auth.js"] })).outcome, "error");
+  const opened = await s.call("task_open", { project, ...await withImplementationBasis(project, {
+    requirement: "在认证入口补充说明", acceptance_criteria: [{ id: "auth", description: "认证行为符合已有约定" }],
+  }) });
+  assert.equal(opened.code, "TASK_OPENED", JSON.stringify(opened));
+  const task = opened.data as { id: string; revision: number };
+  assert.equal((await s.call("task_update", { project, task_id: task.id, expected_revision: task.revision, change_items: [{
+    id: "auth", target_path: "src/auth.js", action: "modify", requirement: "补充认证入口说明", rationale: "沿用已有认证入口",
+    sources: [{ kind: "code", reference: "src/auth.js" }],
+  }] })).code, "TASK_UPDATED");
+}
+
+const patchFor = (...paths: string[]) => "*** Begin Patch\n" + paths.map(path => `*** Update File: ${path}\n@@\n+// 已计划的认证说明`).join("\n") + "\n*** End Patch";
+const denied = (result: Record<string, unknown>) => (result.hookSpecificOutput as { permissionDecision?: string } | undefined)?.permissionDecision === "deny";
+
+test("查看有歧义的无关模型和符号详情后，当前任务的已查实依据仍可用于写入", async t => {
+  const s = await setup(t);
+  const binding = await bindWorktree(s.fixture.path);
+  for (const sha256 of ["a".repeat(64), "b".repeat(64)]) await publishModelShadow(binding, {
+    id: "unrelated", module: "other", revision: 1, related_versions: [{ path: "src/service.js", sha256 }],
+  });
+  await prepareAuthWrite(s);
+  const store = new ParticipationStore(s.home);
+  const before = await store.read(binding.root, s.session, binding.branch);
+  assert.equal(before?.context_ready, true);
+  const lookup = await s.call("project_context", { model_id: "unrelated" });
+  assert.equal(lookup.outcome, "incomplete");
+  const bySymbol = await s.call("project_context", { code_locations: [{ path: "src/auth.js", symbol: "unknownSymbol" }] });
+  assert.notEqual(bySymbol.outcome, "error");
+  const after = await store.read(binding.root, s.session, binding.branch);
+  assert.equal(after?.context_id, before?.context_id);
+  const write = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "after-lookups", tool_input: { patch: patchFor("src/auth.js") } });
+  assert.equal(denied(write), false, JSON.stringify(write));
+});
+
+test("当前任务在同仓库工作树 B，前后钩子核对实际目标并拒绝混合工作树和链接跳转", async t => {
+  const s = await setup(t);
+  assert.equal((await s.call("project_prepare", { apply: true })).outcome, "ok");
+  const alias = join(s.fixture.root, "next-worktree");
+  execFileSync("git", ["worktree", "add", "-b", "next-worktree", alias], { cwd: s.fixture.path, stdio: "pipe" });
+  const project = await realpath(alias);
+  await prepareAuthWrite(s, project);
+
+  const input = { tool_name: "apply_patch", tool_use_id: "worktree-b", tool_input: { patch: patchFor(join(alias, "src/auth.js")) } };
+  const guard = await s.hook({ hook_event_name: "PreToolUse", ...input });
+  assert.equal(denied(guard), false, JSON.stringify(guard));
+  await s.hook({ hook_event_name: "PostToolUse", ...input, tool_response: "Success" });
+  const store = new ParticipationStore(s.home);
+  assert.equal((await store.status(project, s.session)).write_tool_calls, 1);
+  assert.equal((await store.status(s.fixture.path, s.session)).write_tool_calls, 0);
+  const withToolDirectory = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "tool-workdir",
+    tool_input: { workdir: project, patch: patchFor("src/auth.js") } });
+  assert.equal(denied(withToolDirectory), false, JSON.stringify(withToolDirectory));
+
+  const mixed = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "mixed",
+    tool_input: { patch: patchFor("src/auth.js", join(project, "src/auth.js")) } });
+  assert.equal(denied(mixed), true);
+  assert.match(JSON.stringify(mixed), /多个.*工作树/);
+  await symlink(project, join(s.fixture.path, "alias-inside"));
+  const linked = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "unsafe-link",
+    tool_input: { patch: patchFor("alias-inside/src/auth.js") } });
+  assert.equal(denied(linked), true);
+  // 即使链接绕回当前工作树，工作树内部的符号链接也不作为补丁别名。
+  await symlink(s.fixture.root, join(s.fixture.path, "parent-alias"));
+  const loop = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "same-worktree-link",
+    tool_input: { patch: patchFor(join("parent-alias", basename(s.fixture.path), "src/auth.js")) } });
+  assert.equal(denied(loop), true);
+  assert.match(JSON.stringify(loop), /符号链接/);
+  const other = await createGitFixture(); t.after(other.cleanup);
+  const outside = await s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_use_id: "different-repository",
+    tool_input: { patch: patchFor(join(other.path, "src/auth.js")) } });
+  assert.equal(denied(outside), true);
+  assert.match(JSON.stringify(outside), /仓库/);
+});
 
 test("原生身份 → 实际 MCP 上下文与任务 → 修改前检查 → 修改后检查完整贯通", async t => {
   const s = await setup(t);

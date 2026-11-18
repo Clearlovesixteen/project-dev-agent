@@ -1,5 +1,6 @@
 import { DiagnosticContext } from "./diagnostic-context.js";
 import type { InteractionContext } from "../workflow/interaction.js";
+import { implementationContextReady, isImplementationQuery } from "../context/implementation-status.js";
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const count = (value: unknown) => Array.isArray(value) ? Math.min(500, value.length) : undefined;
@@ -47,8 +48,8 @@ export function toolDiagnosticContext(tool: string, input: DiagnosticContext | u
   const lookup = ["not_scanned", "paths_excluded", "needs_rescan", "needs_review", "indexed", "partial"] as const;
   if (tool === "project_context" && lookup.includes(data.state as typeof lookup[number])) {
     value.lookup_state = data.state as typeof lookup[number];
-    // 与参与状态的准备判定一致；ready 不代表模型已复核，保留查询状态单独说明。
-    value.context_state = ["not_scanned", "needs_rescan"].includes(value.lookup_state) ? "not_ready" : "ready";
+    // 只读详情保留自己的查询状态，不记成写入准备成功或失败。
+    if (isImplementationQuery(data)) value.context_state = implementationContextReady(data) ? "ready" : "not_ready";
   }
   const merge = object(data.merge_recovery);
   if (merge.state === "committed" || merge.state === "resolved_uncommitted") value.merge_state = merge.state;
@@ -73,6 +74,13 @@ export function toolDiagnosticContext(tool: string, input: DiagnosticContext | u
     case "MERGE_RECOVERY_SOURCE_MISMATCH": value.recovery_source = "mismatch"; value.required_action = "review_source"; break;
     case "TASK_SESSION_MISMATCH": value.task_state = "other_owner"; value.required_action = "ask_owner"; break;
     case "IMPLEMENTATION_BASIS_REQUIRED": value.basis_state = "missing"; value.required_action = "review_basis"; break;
+    case "IMPLEMENTATION_BASIS_REVIEW_REQUIRED": {
+      const implementation = object(object(data.quality).implementation);
+      if (Array.isArray(implementation.references))
+        value.basis_state = implementation.references.some(item => object(item).state === "stale") ? "stale" : "ready";
+      value.required_action = "review_basis";
+      break;
+    }
   }
   // 只有成功的 prepare 才能说明已接入；异常不把初始推测当成已观测成功。
   if (tool === "project_prepare" && result.outcome === "error" && value.scope_state === "enrolled") delete value.scope_state;

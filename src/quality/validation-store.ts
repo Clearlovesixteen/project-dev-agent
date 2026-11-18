@@ -9,6 +9,11 @@ const Started = z.object({ id: IdSchema, task_id: IdSchema, check_id: IdSchema, 
   started_at: z.string().datetime({ offset: true }), pid: z.number().int().positive() }).strict();
 
 const directory = (taskId: string) => `.project-dev/local/validation/${IdSchema.parse(taskId)}`;
+export async function readValidationRun(files: ProjectFiles, taskId: string, runId: string): Promise<ValidationRun> {
+  const run = ValidationRunSchema.parse(JSON.parse(await files.read(`${directory(taskId)}/${IdSchema.parse(runId)}.json`, 1_048_576)));
+  if (run.id !== runId || run.task_id !== taskId) throw new Error("验证运行记录与路径不匹配");
+  return run;
+}
 /** 执行记录独立追加。MCP task_update 没有写入运行记录或退出码的入口。 */
 export async function saveValidationRun(files: ProjectFiles, run: ValidationRun): Promise<void> {
   await files.directory(directory(run.task_id));
@@ -33,8 +38,7 @@ export async function validationRuns(files: ProjectFiles, taskId: string) {
     if (!entry.name.endsWith(".json")) continue;
     const id = IdSchema.parse(entry.name.slice(0, -5));
     // 合法参数和输出经 JSON 转义后可能超过 256 KiB，读取上限覆盖契约允许的最坏情况。
-    const run = ValidationRunSchema.parse(JSON.parse(await files.read(`${directory(taskId)}/${id}.json`, 1_048_576)));
-    if (run.id !== id || run.task_id !== taskId) throw new Error("验证运行记录与路径不匹配");
+    const run = await readValidationRun(files, taskId, id);
     runs.push(run);
   }
   return { runs, unfinished: starts.filter(start => !runs.some(run => run.id === start.id)), truncated: false };

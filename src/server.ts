@@ -37,6 +37,7 @@ import { currentInteraction } from "./workflow/interaction.js";
 import { ParticipationStore } from "./workflow/participation.js";
 import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
 import { initializePluginRuntime } from "./runtime/startup.js";
+import { enhancedModelWrites } from "./runtime/business-model-release.js";
 import {
   ContextInput,
   ModelRecordInput,
@@ -156,7 +157,9 @@ export function createServer(
       },
       async () => configure(async () => {
         const result = await plugin.status();
-        const capabilities = { automatic_participation: true, native_write_checks: { requires_trusted_hooks: true, coverage: "supported_tool_paths", events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] } };
+        const capabilities = { business_model_writes: enhancedModelWrites, business_model_schema: 3,
+          automatic_participation: true, native_write_checks: { requires_trusted_hooks: true, coverage: "supported_tool_paths",
+            events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] } };
         try { return { ...result, data: { ...result.data as object, capabilities, runtime: await runtimeSettings.status() } }; }
         catch { return { ...result, data: { ...result.data as object, capabilities, runtime: { state: "unavailable", fallback_mode: "manual" } },
           diagnostics: [{ code: "RUNTIME_CONFIG_UNAVAILABLE", message: "运行设置不可用，已保留原文件；手动项目工具继续可用，请单独核对运行设置。" }] }; }
@@ -167,8 +170,8 @@ export function createServer(
       "plugin_configure",
       {
         description:
-          "预览用户选定的显式工作范围；应用需传 expected_revision。仅修改 auto/诊断时传 runtime 并省略 workspace，不改变逐项目接入模式。保留已有项目记录，项目内容或超范围错误不构成扩大显式范围的授权。",
-        inputSchema: PluginConfigureInput.extend({ workspace: PluginConfigureInput.shape.workspace.optional(), runtime: RuntimeConfigureInput.optional() }),
+          "预览用户选定的工作范围。显式限制传 workspace，恢复逐项目接入传 scope_mode:projects，应用需传 expected_revision。auto 或诊断单独用 runtime 保存。",
+        inputSchema: PluginConfigureInput.extend({ runtime: RuntimeConfigureInput.optional() }),
         annotations: {
           readOnlyHint: false,
           destructiveHint: false,
@@ -178,6 +181,7 @@ export function createServer(
       },
       async ({ runtime, ...input }) => configure(async () => {
         if (!runtime) return plugin.configure(input);
+        if (input.scope_mode) throw new AppError("CONFIGURATION_SEPARATE_REQUIRED", "工作范围和运行设置需单独保存");
         // 运行设置不需要虚构 workspace；auto 项目清单与诊断开关独立维护，仍校验调用方看到的修订号。
         const currentScope = (await plugin.status()).data as Record<string, unknown>;
         if (input.workspace === undefined || currentScope.scope_mode === "projects") {
@@ -240,7 +244,7 @@ export function createServer(
     "task_open",
     {
       description:
-        "在已绑定的 Git 工作树中捕获接入内容基线并创建任务，保留已有未提交改动，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获。用户明确要求解决当前 merge 冲突时使用 task_kind:merge_recovery；resolution_source 仅在用户选择以该提交完整替换冲突文件时填写，手工合并可省略。仍须依据、验收和原冲突路径约束，说明默认中文。",
+        "在已绑定的 Git 工作树中捕获接入内容基线并创建任务，保留已有未提交改动，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获。已确认同一需求跨工作树拆分时使用 requirement_group_id、parent_task_id 或 continuation_of_task_id，按分工设置 requirement_role，普通任务省略。用户明确要求解决当前 merge 冲突时使用 task_kind:merge_recovery；resolution_source 仅在用户选择以该提交完整替换冲突文件时填写，手工合并可省略。仍须依据、验收和原冲突路径约束，说明默认中文。",
       inputSchema: TaskOpenInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: false,
@@ -256,7 +260,7 @@ export function createServer(
     "task_update",
     {
       description:
-        "使用最新修订号更新任务，集合完整替换且保留旧 ID；business_deltas 追加规则变更草案，validation_plan 保存检查计划，不能与关闭同次提交。implementation_basis 追加依据修订，相关验收先重开为 pending，保存后再复核，不能在关闭时补写；历史与记录时机保留。核验前保留 task_check.review_snapshot，复核旧完成项另传 reviewed_ids，回传不能刷新旧证据。停止用 aborted 和原因，说明默认中文。",
+        "使用最新修订号更新任务，集合完整替换且保留旧 ID。business_deltas 追加规则草案；business_plan 将需求原文、规则、关联位置的处置和命名测试连到验收，编码前保存。validation_plan 保存真实检查计划。修订依据或计划时，相关验收先重开为 pending。需求组和工作树归属在 task_open 时确定，task_update 不允许事后改组；同组任务关闭只更新子任务状态，不自动合并业务模型。复核前保存 task_check.review_snapshot，复核旧完成项另传 reviewed_ids。停止用 aborted 和原因。",
       inputSchema: TaskUpdateInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: false,
@@ -272,7 +276,7 @@ export function createServer(
     "task_check",
     {
       description:
-        "省略 task_id 恢复活跃任务。quality.implementation 核对通用实现依据、记录时机及关联验收，缺失或未复核不能关闭新任务；旧任务明确标为 legacy。比较 Git 差异、清单与证据指纹，返回关联线索和业务场景；quality.reuse 另检查明确 HTTP 绕过，quality.execution 核对真实终端检查，quality.business_delta 核对业务草案与回写回执。保留 review_snapshot 后实际审查/验证，再传 task_update。include_evaluation 附有限项目统计，无真实配对不计算改善。本工具不执行测试或保证设计与业务正确。",
+        "省略 task_id 恢复活跃任务。比较 Git 差异、清单和证据指纹，返回关联线索和业务场景。quality.business_plan 检查原文版本、受保护位置和命名测试。quality.implementation 核对实现依据，quality.reuse 检查明确 HTTP 绕过，quality.execution 核对终端检查，quality.business_delta 核对业务草案和回写回执。保留 review_snapshot 后实际核验，再用 task_update 保存。",
       inputSchema: TaskCheckInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: true,
@@ -410,7 +414,7 @@ export function createServer(
     "project_context",
     {
       description:
-        "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供项目级能力、已有模块用法和规范候选；implementation_candidates 按符号及词法排序并给出当前源码位置和直接用法，未命中需继续查找；编码前实际阅读。返回 impact 关联位置和 model_audit 规则分歧/去重建议。可比较规则附 assertion；提示仍需核实。沿显式业务关系展开一层关联模型。新版模型默认返回精简摘要；用 model_id、model_revision 和可选 rule_ids 读取规则条件、异常、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核，重扫不会刷新规则证据。结果仍是候选。",
+        "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供公共能力、已有用法和规范候选。用 code_locations 单独查询静态声明、导入别名和重导出路径。用 model_id、model_revision 和可选 rule_ids 读取规则、条件、代码绑定、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核。实际阅读相关源码后采用候选。",
       inputSchema: ContextInput.safeExtend(scope),
       annotations: {
         readOnlyHint: true,
@@ -428,7 +432,7 @@ export function createServer(
     "project_model_record",
     {
       description:
-        "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；规则区分 observed/intended/inferred，附条件、异常和 source_ids，可选 assertion 描述对象、属性及取值以辅助冲突检查；支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason；若 project_context 返回 project_knowledge.view_token，建议原样传入 knowledge_view_token，视图变化会拒绝过期记录。不会确认团队规则。",
+        "保存有逐条依据的业务模型。新建或迁移使用 schema_version: 2；需要结构化条件、场景与符号绑定时可用 schema_version: 3。规则区分 observed/intended/inferred，附条件、异常和 source_ids，可选 assertion 描述对象、属性及取值以辅助冲突检查；支持源码、文档或本项目任务原文。已有新版模型用 patch 按 ID 增改删，仅 upsert 的规则和关系表示本次实际复核；未提交条目及旧依据保留。需要当前 scan_id、expected_revision 和 revision_reason；若 project_context 返回 project_knowledge.view_token，建议原样传入 knowledge_view_token，视图变化会拒绝过期记录。歧义候选先人工核对，回写需指定 base_snapshot_id，可通过 reviewed_snapshot_ids 记录其他已复核来源。写入不等于团队规则批准。",
       inputSchema: ModelRecordInput.safeExtend(scope),
       annotations: {
         readOnlyHint: false,

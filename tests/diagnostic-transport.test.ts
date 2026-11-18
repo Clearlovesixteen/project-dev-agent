@@ -3,7 +3,7 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { connect, type Socket } from "node:net";
 import { once } from "node:events";
-import { diagnosticProxy, sendDiagnosticBatch } from "../src/observability/transport.js";
+import { diagnosticProxy, DiagnosticTimeoutError, DiagnosticTransport, sendDiagnosticBatch } from "../src/observability/transport.js";
 
 const system = "  HTTPEnable : 1\n  HTTPProxy : 127.0.0.1\n  HTTPPort : 7897\n  HTTPSEnable : 1\n  HTTPSProxy : 127.0.0.1\n  HTTPSPort : 7898\n";
 const signal = () => AbortSignal.timeout(3000);
@@ -63,10 +63,30 @@ test("代理隧道真实传输批次并校验确认，凭证只交给接收端�
   const options = { env: { HTTP_PROXY: `http://127.0.0.1:${(proxy.address() as { port: number }).port}` }, platform: "linux" as const };
   const batch = { batch_id: "synthetic-batch", events: [1] };
   const input = { endpoint: "http://collector.test/events", token: "isolated-transport-token", body: JSON.stringify(batch), signal: signal() };
-  assert.deepEqual(await sendDiagnosticBatch(input, options), { batch_id: "synthetic-batch", acknowledged: 1 });
-  assert.equal(tunnels, 1); assert.equal(backendCalls, 1); assert.equal(globalThis.fetch, originalFetch);
+  const transport = new DiagnosticTransport(input.endpoint, options);
+  try {
+    assert.deepEqual(await transport.send(input), { batch_id: "synthetic-batch", acknowledged: 1 });
+    assert.deepEqual(await transport.send({ ...input, endpoint: "http://collector.test/events/v2" }), { batch_id: "synthetic-batch", acknowledged: 1 });
+  } finally { await transport.close(); }
+  assert.equal(tunnels, 1); assert.equal(backendCalls, 2); assert.equal(globalThis.fetch, originalFetch);
   // 代理已关闭时不回退到未经选择的直连路径，也不能留下无限存活的连接。
   await new Promise<void>(resolve => proxy.close(() => resolve()));
   await assert.rejects(sendDiagnosticBatch({ ...input, signal: AbortSignal.timeout(200) }, options));
-  assert.equal(backendCalls, 1);
+  assert.equal(backendCalls, 2);
+});
+
+test("代理已收到 CONNECT 但未建立隧道时，诊断归类为建连超时", async t => {
+  let connects = 0;
+  const proxy = createServer(), sockets = new Set<Socket>();
+  proxy.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
+  proxy.on("connect", () => { connects++; });
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening");
+  t.after(() => { for (const socket of sockets) socket.destroy(); proxy.close(); });
+  const options = { env: { HTTP_PROXY: `http://127.0.0.1:${(proxy.address() as { port: number }).port}` }, platform: "linux" as const };
+  const started = performance.now();
+  await assert.rejects(sendDiagnosticBatch({ endpoint: "http://collector.test/events", token: "isolated-transport-token",
+    body: "{}", signal: AbortSignal.timeout(400) }, options),
+  (error: unknown) => error instanceof DiagnosticTimeoutError && error.code === "UPLOAD_TIMEOUT_CONNECT");
+  assert.equal(connects, 1);
+  assert.ok(performance.now() - started < 1800, "关闭传输不得让未建立的代理隧道占用额外的宿主预算");
 });

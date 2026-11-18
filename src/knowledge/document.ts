@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
 import { parseDocument, stringify } from "yaml";
 import { AppError } from "../domain/error.js";
 import { KnowledgeSchema, type Knowledge } from "../domain/knowledge.js";
 
-export function digest(text: string): string { return createHash("sha256").update(text).digest("hex"); }
+export { digest } from "../domain/digest.js";
 
 export function parseYaml(text: string): unknown {
   const document = parseDocument(text, { uniqueKeys: true, stringKeys: true, schema: "core", version: "1.2", prettyErrors: false });

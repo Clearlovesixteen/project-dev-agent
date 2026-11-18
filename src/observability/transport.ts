@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { fetch as proxyFetch, ProxyAgent, type Response as ProxyResponse } from "undici";
+import { Agent, fetch, ProxyAgent, type Dispatcher, type Response } from "undici";
 import { z } from "zod";
 import { BatchAcknowledgementV2 } from "./batch.js";
 
@@ -63,7 +63,18 @@ export class DiagnosticHttpError extends Error {
   constructor(readonly status: number) { super(`UPLOAD_HTTP_${status}`); }
 }
 
-async function acknowledgement(response: Response | ProxyResponse, profile: 1 | 2) {
+type UploadStage = "connect" | "response" | "ack";
+const timeoutReasons = { connect: "UPLOAD_TIMEOUT_CONNECT", response: "UPLOAD_TIMEOUT_RESPONSE", ack: "UPLOAD_TIMEOUT_ACK" } as const;
+
+export class DiagnosticTimeoutError extends Error {
+  readonly code;
+  constructor(readonly stage: UploadStage) {
+    super(timeoutReasons[stage]);
+    this.code = timeoutReasons[stage];
+  }
+}
+
+async function acknowledgement(response: Response, profile: 1 | 2) {
   if (!response.ok) {
     await response.body?.getReader().cancel().catch(() => {});
     throw new DiagnosticHttpError(response.status);
@@ -84,13 +95,53 @@ async function acknowledgement(response: Response | ProxyResponse, profile: 1 | 
   } finally { await reader.cancel().catch(() => {}); }
 }
 
-/** 每次发送独立的代理连接，不重定向、不降低 TLS 校验、不把代理地址或凭证写进诊断。 */
-export async function sendDiagnosticBatch(input: { endpoint: string; token: string; body: string; signal: AbortSignal; profile?: 1 | 2 }, options: ProxyOptions = {}) {
-  const proxy = await diagnosticProxy(input.endpoint, input.signal, options), agent = proxy ? new ProxyAgent(proxy) : undefined;
-  const request = { method: "POST", redirect: "error" as const, signal: input.signal,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.token}` }, body: input.body };
+type DiagnosticRequest = { endpoint: string; token: string; body: string; signal: AbortSignal; profile?: 1 | 2 };
+
+/** 在同一次收尾内复用同源连接。代理选择、请求和回执读取共享已有发送预算。 */
+export class DiagnosticTransport {
+  private agent?: Dispatcher;
+  private readonly origin: string;
+
+  constructor(endpoint: string, private readonly options: ProxyOptions = {}) {
+    this.origin = new URL(endpoint).origin;
+  }
+
+  async send(input: DiagnosticRequest) {
+    if (new URL(input.endpoint).origin !== this.origin) throw new Error("UPLOAD_ORIGIN_CHANGED");
+    let stage: UploadStage = "connect";
+    try {
+      input.signal.throwIfAborted();
+      if (!this.agent) {
+        const proxy = await diagnosticProxy(input.endpoint, input.signal, this.options);
+        this.agent = proxy ? new ProxyAgent({ uri: proxy, connections: 1 }) : new Agent({ connections: 1 });
+      }
+      // onConnect 发生在连接可用且请求即将交给 socket 时，涵盖代理选择、隧道与 TLS 建连这段预算。
+      const dispatcher = this.agent.compose(dispatch => (options, handler) => dispatch(options, {
+        ...handler,
+        onConnect(abort) {
+          stage = "response";
+          handler.onConnect?.call(this, abort);
+        },
+      }));
+      const response = await fetch(input.endpoint, { method: "POST", redirect: "error", signal: input.signal,
+        dispatcher, headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.token}` }, body: input.body });
+      stage = "ack";
+      return await acknowledgement(response, input.profile ?? 1);
+    } catch (error) {
+      if (input.signal.aborted && !(error instanceof DiagnosticHttpError)) throw new DiagnosticTimeoutError(stage);
+      throw error;
+    }
+  }
+
+  async close() {
+    await this.agent?.destroy().catch(() => {});
+  }
+}
+
+/** 单批调用同样只使用局部连接，不改全局网络配置。 */
+export async function sendDiagnosticBatch(input: DiagnosticRequest, options: ProxyOptions = {}) {
+  const transport = new DiagnosticTransport(input.endpoint, options);
   try {
-    const response = agent ? await proxyFetch(input.endpoint, { ...request, dispatcher: agent }) : await fetch(input.endpoint, request);
-    return await acknowledgement(response, input.profile ?? 1);
-  } finally { await agent?.destroy().catch(() => {}); }
+    return await transport.send(input);
+  } finally { await transport.close(); }
 }

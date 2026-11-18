@@ -5,7 +5,7 @@ import { assertMergeRecovery, assertMergeResolved, resolveRecoverySource } from 
 import { reviewSnapshot } from "../git/review-snapshot.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import type { NativeHookInput } from "./contracts.js";
-import { patchPaths, toolArguments, toolWorkingDirectory, writeKind } from "./tool-policy.js";
+import { toolArguments, toolWorkingDirectory, writeKind } from "./tool-policy.js";
 import { singleCommand, shellDialect } from "./shell-policy.js";
 import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 import { diagnosticAction } from "./diagnostic-context.js";
@@ -25,7 +25,8 @@ function savedValidation(words: string[] | undefined, input: NativeHookInput, bi
 }
 
 /** 恢复任务不获得普通终端写权限，只识别精确文件补丁及不含组合语法的restore/add。 */
-export async function mergeRecoveryWrite(input: NativeHookInput, binding: WorktreeBinding, task: Task, pluginRoot?: string, diagnostic: DiagnosticContext = { version: 1 }): Promise<{ reason: string; instruction: string } | undefined> {
+export async function mergeRecoveryWrite(input: NativeHookInput, binding: WorktreeBinding, task: Task, pluginRoot: string,
+  diagnostic: DiagnosticContext, patchTargets: readonly string[]): Promise<{ reason: string; instruction: string } | undefined> {
   const recovery = task.workspace_baseline?.merge_recovery;
   if (!recovery) return;
   diagnostic.stage = "merge"; diagnostic.initial_conflict_count = Math.min(recovery.conflicts.length, 500); diagnostic.recovery_source = recovery.source ? "selected" : "not_selected";
@@ -41,13 +42,11 @@ export async function mergeRecoveryWrite(input: NativeHookInput, binding: Worktr
   const snapshot = await reviewSnapshot(binding, task.baseline_head, task.workspace_baseline, { allow_unmerged: true });
   const allowed = new Set(recovery.conflicts.map(item => item.path));
   if (snapshot.paths.some(path => !allowed.has(path))) { diagnostic.target_scope = "outside"; return stop("MERGE_RECOVERY_SCOPE", "检测到恢复范围外的新改动；先核对来源，不将其归入当前冲突任务。"); }
-  let targets: string[] = [];
+  let targets: readonly string[];
   const args = toolArguments(input);
-  if (writeKind(input) === "patch") {
-    targets = patchPaths(input);
-    // 宿主的结构化Edit/Write也必须给出一个明确路径；不从自由文本猜测。
-    if (!targets.length && ["Edit", "Write"].includes(input.tool_name ?? "") && typeof args?.file_path === "string") targets = [args.file_path];
-  } else {
+  const isPatch = writeKind(input) === "patch";
+  if (isPatch) targets = patchTargets;
+  else {
     const words = singleCommand(args?.command ?? args?.cmd, shellDialect(input.cwd, args?.shell));
     if (savedValidation(words, input, binding, task, pluginRoot)) { diagnostic.stage = "validation"; diagnostic.command_family = "validation"; await assertMergeResolved(binding, recovery); return; }
     if (!words || !["git", "git.exe"].includes(words[0] ?? ""))
@@ -77,8 +76,8 @@ export async function mergeRecoveryWrite(input: NativeHookInput, binding: Worktr
   for (const path of targets) {
     if (path.split(/[\\/]/).includes("..")) return stop("MERGE_RECOVERY_SCOPE", "冲突修复路径不能包含父目录跳转；使用任务记录的精确路径。");
     // Shell展开和Git pathspec都不是字面文件名；特殊名称需用结构化补丁处理。
-    if (writeKind(input) === "shell" && /[*?\[\]~:]|^\-/.test(path)) return stop("MERGE_RECOVERY_SCOPE", "恢复命令只接受字面文件路径，不接受pathspec、通配符或选项样式路径。");
-    const target = relative(binding.root, isAbsolute(path) ? path : resolve(toolWorkingDirectory(input), path)).split(sep).join("/");
+    if (!isPatch && /[*?\[\]~:]|^\-/.test(path)) return stop("MERGE_RECOVERY_SCOPE", "恢复命令只接受字面文件路径，不接受pathspec、通配符或选项样式路径。");
+    const target = isPatch ? path : relative(binding.root, isAbsolute(path) ? path : resolve(toolWorkingDirectory(input), path)).split(sep).join("/");
     if (!allowed.has(target)) { diagnostic.target_scope = "outside"; return stop("MERGE_RECOVERY_SCOPE", "只能修改任务捕获的原冲突文件，不能修改无关文件、目录或仓库外路径。"); }
     // 拒绝由外部并发替换的链接目录/文件，即使文本路径仍在允许集合中。
     await files.path(target, true);

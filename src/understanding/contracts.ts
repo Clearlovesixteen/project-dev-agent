@@ -32,7 +32,11 @@ export const ContextInput = z.object({ query: z.string().trim().max(2_000).defau
   relation_depth: z.number().int().min(1).max(2).default(1).describe("业务关系展开层数，默认一层，最多两层；超出预算会明确截断"),
   model_id: IdSchema.optional().describe("按 ID 单独读取一个模型的完整详情，仍执行来源排除和版本核验"),
   model_revision: z.number().int().positive().optional().describe("读取详情时核对摘要中的修订号，防止两次查询间内容变化"),
+  model_snapshot_id: HASH.optional().describe("只读查看指定共享候选，用于人工核对冲突，不作为当前适用模型"),
   rule_ids: z.array(IdSchema).min(1).max(20).optional().describe("配合 model_id 只读取所需规则、关联关系及证据；省略则返回完整详情"),
+  code_locations: z.array(z.object({ path: ConcretePath, symbol: z.string().trim().min(1).max(180) }).strict()).min(1).max(8).optional()
+    .describe("单独查询指定符号的声明或显式导入、重导出路径，修改时使用实际声明位置"),
 }).strict().superRefine((value, ctx) => {
-  if (value.rule_ids && !value.model_id) ctx.addIssue({ code: "custom", message: "按规则读取需要 model_id" });
+  if ((value.rule_ids || value.model_snapshot_id) && !value.model_id) ctx.addIssue({ code: "custom", message: "按规则或快照读取需要 model_id" });
+  if (value.code_locations && value.model_id) ctx.addIssue({ code: "custom", message: "代码位置查询与模型详情分开调用" });
 });

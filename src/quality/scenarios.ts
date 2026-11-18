@@ -9,7 +9,7 @@ export function businessScenarios(views: View[], task?: Task, snapshot?: string,
   const scenarios = [];
   let total = 0;
   const valid = new Set<string>(), selected = new Set(views.map(view => view.id));
-  for (const model of views) if (model.schema_version === 2) for (const rule of model.rules) {
+  for (const model of views) if (model.schema_version !== 1) for (const rule of model.rules) {
     const fingerprint = digest(JSON.stringify([ruleFingerprint(rule), rule.evidence_versions]));
     const definitions = [ { kind: "normal", text: rule.conditions.join("；") },
       ...rule.conditions.map(text => ({ kind: "boundary", text })), ...rule.exceptions.map(text => ({ kind: "exception", text })) ];

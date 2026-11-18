@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { DIAGNOSTIC_NOTICE, RuntimeSettings, runtimeFiles } from "../runtime/config.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
 import { DiagnosticWriter } from "./writer.js";
-import { DiagnosticHttpError, sendDiagnosticBatch } from "./transport.js";
-import { uploadQueue } from "./upload-queue.js";
+import { DiagnosticHttpError, DiagnosticTimeoutError, DiagnosticTransport } from "./transport.js";
+import { uploadQueue, type UploadPage } from "./upload-queue.js";
 import { assertAcknowledgementV2, hasDiagnosticDetail, legacyDiagnosticProjection, type BatchAcknowledgementV2 } from "./batch.js";
 import { saveUploadReceipt } from "./upload-receipts.js";
 import { bestEffort } from "../runtime/best-effort.js";
@@ -14,9 +14,24 @@ const CURSOR = "project-dev-agent/telemetry/upload.json";
 const Cursor = z.object({ epoch: z.uuid(), positions: z.record(z.string(), z.number().int().nonnegative()),
   failures: z.number().int().min(0).max(10).default(0), next_attempt: z.number().nonnegative().default(0) }).strict();
 
-/** 每批 50 条、最多四批共享发送预算；逐批确认后保存进度，不延长宿主收尾期限。 */
+/** 同一次失败上报共享追踪标识；积压只统计当前读取窗口内尚未确认的事件。 */
+async function recordTimeout(writer: DiagnosticWriter, reason: string, duration: number, pages: UploadPage[], pending: boolean, attempt: number) {
+  const oldest = Math.min(...pages.flatMap(page => page.events.map(event => Date.parse(event.occurred_at))));
+  const trace = randomUUID();
+  const attributes = { transport: "cli" as const, attempt, truncated: pending,
+    candidate_count: pages.reduce((total, page) => total + page.events.length, 0), selected_count: pages[0]?.events.length ?? 0 };
+  const context = { version: 1 as const, stage: "upload" as const };
+  await bestEffort(() => Promise.all([
+    writer.record("telemetry.gap", { trace, outcome: "degraded", reason, duration, attributes, context: { ...context, decision: "degraded" } }),
+    writer.record("health.checked", { trace, reason: "UPLOAD_QUEUE_AGE",
+      duration: Math.min(86_400_000, Math.max(0, Date.now() - oldest)), attributes, context }),
+  ]), 150);
+}
+
+/** 每批最多 50 条，确认后保存游标；退避重试缩小批次并沿用宿主收尾期限。 */
 export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
   let release: (() => Promise<void>) | undefined;
+  let transport: DiagnosticTransport | undefined;
   const deadline = performance.now() + (Number.isFinite(timeoutMs) ? Math.min(5000, Math.max(50, timeoutMs)) : 4000);
   let sent = 0, rejected = 0, omitted = 0, legacyOnly = false;
   const settings = new RuntimeSettings(home);
@@ -40,14 +55,18 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
       if (previous !== undefined) await files.replace(CURSOR, next, previous); else await files.create(CURSOR, next);
       previous = next;
     };
-    const queue = await uploadQueue(files, diagnostics.upload_epoch, positions);
+    // 复用已有失败计数，退避期间逐步减小批次，也能读取旧版保存的游标。
+    const batchSize = Math.max(10, Math.floor(50 / 2 ** failures));
+    const queue = await uploadQueue(files, diagnostics.upload_epoch, positions, batchSize);
+    transport = new DiagnosticTransport(diagnostics.endpoint);
+    const sender = transport;
     const unchanged = async () => {
       const current = (await settings.current()).diagnostics;
       return current.local && current.upload && current.upload_epoch === diagnostics.upload_epoch;
     };
-    for (const page of queue.pages) {
+    for (const [pageIndex, page] of queue.pages.entries()) {
       if (!await unchanged()) return { state: "configuration_changed", sent };
-      const remaining = deadline - performance.now();
+      const started = performance.now(), remaining = deadline - started;
       // 不在耗尽总预算时启动下一批，避免积压清理占用更长宿主时间。
       if (remaining < 100) return { state: "pending", sent, invalid: queue.invalid };
       const batch = page.events;
@@ -60,7 +79,7 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
           controller.signal.throwIfAborted();
           if (!await unchanged()) throw new Error("UPLOAD_CONFIGURATION_CHANGED");
           const events = batch.map(legacyDiagnosticProjection), projectedId = createHash("sha256").update(JSON.stringify(events)).digest("hex");
-          const ack = await sendDiagnosticBatch({ endpoint: diagnostics.endpoint!, token: diagnostics.write_token!, signal: controller.signal,
+          const ack = await sender.send({ endpoint: diagnostics.endpoint!, token: diagnostics.write_token!, signal: controller.signal,
             body: JSON.stringify({ schema_version: 1, batch_id: projectedId, events }) });
           if (!("acknowledged" in ack) || ack.batch_id !== projectedId || ack.acknowledged !== events.length) throw new Error("UPLOAD_ACK_MISMATCH");
           accepted = events.length; pageOmitted = detailed;
@@ -68,7 +87,7 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
         if (batch.length && detailed && !legacyOnly) {
           const endpoint = new URL(diagnostics.endpoint); endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/v2";
           try {
-            const ack = await sendDiagnosticBatch({ endpoint: endpoint.href, token: diagnostics.write_token, signal: controller.signal, profile: 2,
+            const ack = await sender.send({ endpoint: endpoint.href, token: diagnostics.write_token, signal: controller.signal, profile: 2,
               body: JSON.stringify({ schema_version: 2, batch_id: batchId, install_id: batch[0]!.install_id, events: batch }) });
             if (!("schema_version" in ack)) throw new Error("UPLOAD_ACK_MISMATCH");
             assertAcknowledgementV2(ack, batchId, batch.length);
@@ -95,10 +114,16 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
           await save({ epoch: diagnostics.upload_epoch, positions, failures,
             next_attempt: Date.now() + Math.min(3_600_000, 30_000 * 2 ** (failures - 1)) });
         }
-        const reason = error instanceof Error && (/^UPLOAD_HTTP_[1-5][0-9]{2}$/.test(error.message)
-          || ["UPLOAD_ACK_MISMATCH", "UPLOAD_RESPONSE_LIMIT", "UPLOAD_RESPONSE_INVALID", "UPLOAD_PROXY_INVALID"].includes(error.message)) ? error.message
-          : error instanceof Error && error.name === "AbortError" ? "UPLOAD_TIMEOUT" : "UPLOAD_NETWORK_OR_RESPONSE";
-        await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason });
+        const writer = new DiagnosticWriter(settings.home);
+        if (error instanceof DiagnosticTimeoutError || error instanceof Error && error.name === "AbortError") {
+          const reason = error instanceof DiagnosticTimeoutError ? error.code : "UPLOAD_TIMEOUT";
+          await recordTimeout(writer, reason, performance.now() - started, queue.pages.slice(pageIndex), queue.pending, failures);
+        } else {
+          const reason = error instanceof Error && (/^UPLOAD_HTTP_[1-5][0-9]{2}$/.test(error.message)
+            || ["UPLOAD_ACK_MISMATCH", "UPLOAD_RESPONSE_LIMIT", "UPLOAD_RESPONSE_INVALID", "UPLOAD_PROXY_INVALID"].includes(error.message))
+            ? error.message : "UPLOAD_NETWORK_OR_RESPONSE";
+          await writer.record("telemetry.gap", { outcome: "degraded", reason });
+        }
         return { state: "unavailable", sent };
       } finally { clearTimeout(timer); }
       if (!await unchanged()) return { state: "configuration_changed", sent };
@@ -116,5 +141,8 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
     return { state: "unavailable", sent };
   }
-  finally { await release?.().catch(() => {}); }
+  finally {
+    await transport?.close();
+    await release?.().catch(() => {});
+  }
 }

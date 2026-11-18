@@ -16,7 +16,7 @@ const overlapping = (a: SavedModel, b: SavedModel) => a.scope.some(path => b.sco
 export function auditModels(models: SavedModel[], selected: Set<string>) {
   const groups = new Map<string, RuleEntry[]>();
   let withAssertion = 0, ruleCount = 0;
-  for (const model of models) if (model.schema_version === 2) for (const rule of model.rules) {
+  for (const model of models) if (model.schema_version !== 1) for (const rule of model.rules) {
     ruleCount++; if (rule.assertion) withAssertion++;
     const key = rule.assertion ? JSON.stringify([normalizeTerm(rule.assertion.subject), normalizeTerm(rule.assertion.property), conditions(rule)])
       : JSON.stringify(["text", normalizeTerm(rule.description), conditions(rule)]);

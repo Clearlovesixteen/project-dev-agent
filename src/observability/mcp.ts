@@ -7,6 +7,7 @@ import { ContextReceipts } from "../context/receipts.js";
 import { bestEffort } from "../runtime/best-effort.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { bindWorktree } from "../git/index.js";
+import { implementationContextReady } from "../context/implementation-status.js";
 
 type Registration = (name: string, config: Record<string, unknown>, handler: (...input: unknown[]) => unknown) => unknown;
 
@@ -57,7 +58,8 @@ export function instrumentMcp(server: McpServer, home?: string) {
           const project = raw && typeof raw === "object" && "project" in raw && typeof raw.project === "string" ? raw.project : undefined;
           const envelope = result as { structuredContent?: { outcome?: string; data?: Record<string, unknown> } };
           const value = envelope.structuredContent;
-          if (project && interaction && name === "project_context" && typeof value?.data?.context_id === "string") {
+          if (project && interaction && name === "project_context" && value?.data
+            && typeof value.data.context_id === "string" && implementationContextReady(value.data)) {
             await new ContextReceipts(home).issue(project, interaction, value.data.context_id);
           }
           if (project && currentInteraction()?.context_id) {

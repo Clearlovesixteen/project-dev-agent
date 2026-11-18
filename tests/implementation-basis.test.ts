@@ -1,7 +1,7 @@
 import { runFixtureChecks } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TaskService } from "../src/task-service.js";
 import { TaskSchema } from "../src/domain/task.js";
@@ -32,6 +32,8 @@ test("通用约束：没有建立项目实现依据时，表面完整的清单�
   const service = new TaskService(await bindWorktree(fixture.path));
   const task = TaskSchema.parse((await service.open(request)).data);
   await writeFile(join(fixture.path, "src/new-business.js"), "export const entry = () => true;\n");
+  const missing = (await service.check({})).data as any;
+  assert.deepEqual(missing.next_actions.map((item: any) => item.action), ["record_implementation_basis"]);
   assert.equal((await finish(service, task)).code, "IMPLEMENTATION_BASIS_REQUIRED");
 });
 
@@ -50,6 +52,8 @@ test("非请求库任务同样记录实现选择，并复用现有验收完成�
   await writeFile(join(fixture.path, "src/new-business.js"), "// 业务入口依赖统一认证边界。\nexport const entry = auth => auth.validateSession;\n");
   const pending = (await service.check({})).data as any;
   assert.equal(pending.quality.implementation.state, "pending");
+  assert.deepEqual(pending.next_actions.map((item: any) => item.action), ["review_linked_acceptance"]);
+  assert.deepEqual(pending.next_actions[0].pending_acceptance_ids, ["conventions"]);
   assert.equal(pending.recorded_task.implementation_bases[0].basis.decisions[0].constraint, "鉴权判断集中在原有职责边界，业务入口复用它");
   const result = await finish(service, task);
   assert.equal(result.outcome, "ok", JSON.stringify(result));
@@ -101,6 +105,57 @@ test("原参考文件本身需要修改时保留基线依据，当前实现仍�
   assert.equal(check.quality.implementation.references[0].state, "task_baseline");
   assert.equal(check.quality.implementation.state, "pending");
   assert.equal((await finish(service, task)).outcome, "ok");
+});
+
+test("只重开实现依据实际改变的验收，未改引用可继续从任务基线核验", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path)), input = await basis(fixture.path);
+  const serviceText = await readFile(join(fixture.path, "src/service.js"), "utf8");
+  input.references.push({ id: "stable-service", path: "src/service.js", sha256: digest(serviceText), line: 1, quote: serviceText.split("\n")[0] });
+  input.decisions.push({ id: "service", constraint: "保留账户服务", implementation: "复用项目已有账户服务",
+    reference_ids: ["stable-service"], acceptance_id: "service" });
+  const criteria = [...request.acceptance_criteria, { id: "service", description: "确认账户服务已有调用有效" }];
+  let task = TaskSchema.parse((await service.open({ ...request, acceptance_criteria: criteria, implementation_basis: input })).data);
+  const review_snapshot = ((await service.check({})).data as any).review_snapshot;
+  task = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: task.revision, review_snapshot,
+    acceptance_criteria: task.acceptance_criteria.map(item => ({ ...item, status: "checked", reviewed_by: "fixture", evidence })) })).data);
+  const revised = { ...input, decisions: input.decisions.map(item => item.id === "boundary"
+    ? { ...item, implementation: "继续使用现有鉴权，明确由业务入口注入" } : item) };
+  const blocked = await service.update({ task_id: task.id, expected_revision: task.revision, implementation_basis: revised });
+  assert.equal(blocked.code, "IMPLEMENTATION_BASIS_REVIEW_REQUIRED");
+  assert.match(blocked.diagnostics[0]!.message, /conventions$/);
+  task = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: task.revision, implementation_basis: revised,
+    acceptance_criteria: task.acceptance_criteria.map(item => item.id === "conventions"
+      ? { id: item.id, description: item.description, status: "pending", evidence: [] } : item) })).data);
+  assert.equal(task.acceptance_criteria.find(item => item.id === "service")?.review_snapshot, review_snapshot);
+  const beforeCodeChanges = (await service.check({})).data as any;
+  assert.deepEqual(beforeCodeChanges.next_actions[0].pending_acceptance_ids, ["conventions"]);
+  assert.deepEqual(beforeCodeChanges.next_actions[0].stale_acceptance_ids, []);
+
+  await writeFile(join(fixture.path, "src/service.js"), serviceText + "\n// 保留服务调用契约。\n");
+  const further = { ...revised, decisions: revised.decisions.map(item => item.id === "boundary"
+    ? { ...item, implementation: "入口依赖现有鉴权并保持注入契约" } : item) };
+  const appended = TaskSchema.parse((await service.update({ task_id: task.id, expected_revision: task.revision, implementation_basis: further })).data);
+  assert.equal(appended.implementation_bases?.length, 3);
+  const now = (await service.check({})).data as any;
+  assert.equal(now.quality.implementation.references.find((item: any) => item.id === "stable-service").state, "task_baseline");
+  assert.deepEqual(now.next_actions[0].stale_acceptance_ids, ["service"]);
+  assert.ok(now.next_actions[0].fields.includes("reviewed_ids.acceptance_criteria"));
+});
+
+test("晚补引用丢失时返回具体引用和受影响验收，不把已有决策一律标作待重建", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const service = new TaskService(await bindWorktree(fixture.path)), task = TaskSchema.parse((await service.open(request)).data);
+  const input = await basis(fixture.path);
+  const path = "src/temp-reference.js", source = "// 本轮准备的边界示例。\n";
+  await writeFile(join(fixture.path, path), source);
+  input.references[0] = { id: "existing", path, sha256: digest(source), line: 1, quote: source.trim() };
+  assert.equal((await service.update({ task_id: task.id, expected_revision: 0, implementation_basis: input })).outcome, "ok");
+  await unlink(join(fixture.path, path));
+  const check = (await service.check({})).data as any;
+  assert.equal(check.next_actions[0].action, "refresh_implementation_references");
+  assert.deepEqual(check.next_actions[0].references, [{ id: "existing", path }]);
+  assert.deepEqual(check.next_actions[0].reopen_acceptance_ids, ["conventions"]);
 });
 
 test("不存在的验收关联与错误行文被拒绝，不把扫描路径当作阅读证明", async t => {

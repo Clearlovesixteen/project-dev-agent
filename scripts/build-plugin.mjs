@@ -5,7 +5,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const target = join(root, "plugins/project-dev-agent");
+const modelReader = process.argv.includes("--model-reader");
+const target = join(root, modelReader ? "work/release/model-reader/project-dev-agent" : "plugins/project-dev-agent");
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 // 完整源码依赖使用较新的 Node；同事运行的是仅包含 STDIO 所需依赖的预构建插件。
 // 单独维护插件运行门槛，并用同一个版本生成编译目标、安装元数据和说明。
@@ -21,6 +22,7 @@ const result = await build({
   absWorkingDir: root, entryPoints: ["src/cli.ts"], outfile: join(target, "runtime/cli.mjs"),
   bundle: true, platform: "node", target: `node${runtimeNodeMinimum}`, format: "esm", minify: true,
   sourcemap: false, legalComments: "eof", metafile: true,
+  define: { PROJECT_DEV_AGENT_MODEL_WRITES: String(!modelReader) },
   banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
 });
 const hookResult = await build({
@@ -29,6 +31,11 @@ const hookResult = await build({
   sourcemap: false, legalComments: "eof", metafile: true,
   banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
 });
+await build({ absWorkingDir: root, entryPoints: ["src/quality/behavior-reporter.ts"],
+  outfile: join(target, "runtime/behavior-reporter.mjs"), bundle: true, platform: "node", target: `node${runtimeNodeMinimum}`, format: "esm", minify: true, sourcemap: false });
+const symbolResult = await build({ absWorkingDir: root, entryPoints: ["src/understanding/symbol-index.ts"],
+  outfile: join(target, "runtime/symbol-index.mjs"), bundle: true, platform: "node", target: `node${runtimeNodeMinimum}`, format: "esm",
+  minify: true, sourcemap: false, legalComments: "eof", metafile: true });
 // Explicit assets only: never ship work/, personal records, local configuration, or node_modules.
 for (const name of ["mcp.json", "hooks", "skills", "templates", "fixtures"]) {
   await cp(join(root, name), join(target, name), { recursive: true, dereference: false });
@@ -45,10 +52,10 @@ await writeFile(join(target, "package.json"), JSON.stringify({
   name: pkg.name, version: pkg.version, private: true, type: "module", engines: runtimeEngines,
   description: pkg.description, bin: { "project-dev-agent": "runtime/cli.mjs" },
 }, null, 2) + "\n");
-await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js ${runtimeNodeMinimum}+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n新安装默认 auto，信任 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、Stop 五类钩子后可直接提交开发需求；首次或切换项目时逐个登记当前 Git 仓库，新版显式 workspace 限制保持。旧配置迁移为逐项目模式，不授权父目录。现存 Git merge 冲突使用受限恢复任务，解决后仍验收，不自动提交。确认只读的正则搜索、nl 行号读取、Windows 文件读取和静态读取管道不受其他会话任务阻挡；动态脚本与实际写入仍受控。支持的修改前会核对本轮任务、上下文、实现依据和目标范围；缺失时由 Agent 补齐后重试。仍可明确使用 \`project-dev\`；调整设置用 \`project-dev-setup\`。旧 manual 在新版首次运行时自动迁移为 auto，无需手动开启；迁移只执行一次，后续主动切回 manual 的设置保留，诊断开关不变，旧范围按逐项目策略迁移；安装不等于钩子已信任或本轮已参与。新安装首次运行默认向维护者发送不含代码、需求或对话正文的运行诊断，可通过项目设置关闭；已有关闭和自定义配置保持原样。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，项目记录在业务仓库的 \`.project-dev/local/\`，不会随插件升级被替换。\n`);
+await writeFile(join(target, "README.md"), `# Project Dev Agent ${pkg.version}\n\n此目录是 Codex 插件发布产物，由 \`npm run build:plugin\` 生成，请修改源码后重新构建。\n\n运行环境：Node.js ${runtimeNodeMinimum}+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。\n\n安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。\n\n新安装默认 auto，信任 SessionStart、UserPromptSubmit、PreToolUse、PostToolUse、Stop 五类钩子后可直接提交开发需求；首次或切换项目时逐个登记当前 Git 仓库，新版显式 workspace 限制保持。旧配置迁移为逐项目模式，不授权父目录。现存 Git merge 冲突使用受限恢复任务，解决后仍验收，不自动提交。确认只读的正则搜索、nl 行号读取、Windows 文件读取和静态读取管道不受其他会话任务阻挡；动态脚本与实际写入仍受控。支持的修改前会核对本轮任务、上下文、实现依据和目标范围；缺失时由 Agent 补齐后重试。仍可明确使用 \`project-dev\`；调整设置用 \`project-dev-setup\`。旧 manual 在新版首次运行时自动迁移为 auto，无需手动开启；迁移只执行一次，后续主动切回 manual 的设置保留，诊断开关不变，旧范围按逐项目策略迁移；安装不等于钩子已信任或本轮已参与。新安装首次运行默认向维护者发送不含代码、需求或对话正文的运行诊断，可通过项目设置关闭；已有关闭和自定义配置保持原样。\n个人设置在 Codex 用户目录的 \`project-dev-agent/settings.json\`，任务和验证在各工作树的 \`.project-dev/local/\`。同一 Git 仓库的业务模型快照放在 Git 公共目录下的 \`project-dev-agent/\`，每次查询按当前源码选择适用版本。\n`);
 
 const dependencyRoots = new Set();
-for (const input of new Set([...Object.keys(result.metafile.inputs), ...Object.keys(hookResult.metafile.inputs)])) {
+for (const input of new Set([...Object.keys(result.metafile.inputs), ...Object.keys(hookResult.metafile.inputs), ...Object.keys(symbolResult.metafile.inputs)])) {
   if (!input.includes("node_modules/")) continue;
   let directory = dirname(join(root, input));
   while (directory !== root) {
@@ -84,6 +91,7 @@ async function inventory(directory) {
   }
 }
 await inventory(target);
-await writeFile(join(target, "build-info.json"), JSON.stringify({ version: pkg.version, node: runtimeEngines.node, dependencies, files }, null, 2) + "\n");
+await writeFile(join(target, "build-info.json"), JSON.stringify({ version: pkg.version, node: runtimeEngines.node,
+  business_model_mode: modelReader ? "reader" : "writer", dependencies, files }, null, 2) + "\n");
 console.log(JSON.stringify({ version: pkg.version, directory: relative(root, target), files: files.length + 1,
   bytes: files.reduce((sum, file) => sum + file.bytes, 0), bundled_dependencies: dependencies.length }));

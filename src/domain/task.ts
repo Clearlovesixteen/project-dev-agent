@@ -14,6 +14,8 @@ import {
 } from "../quality/contracts.js";
 import { ImplementationBasisRecordSchema } from "../quality/basis-contracts.js";
 import { ValidationPlanRecordSchema } from "../quality/validation-contracts.js";
+import { BusinessPlanRecord } from "../quality/business-plan-contracts.js";
+import { RequirementTaskKind } from "../coordination/requirement-groups.js";
 import {
   BusinessDeltaRecordSchema,
   BusinessDeltaCheckSchema,
@@ -156,6 +158,15 @@ export const TaskSchema = z
     requirement: TextSchema,
     spec_input: SpecificationInput.optional(),
     owner: z.object({ session_id: z.string().min(1).max(200), actor_id: z.string().min(1).max(200) }).strict().optional(),
+    /** 需求组是跨工作树的中心谱系；任务本身仍由当前工作树独立保存。 */
+    requirement_group_id: IdSchema.optional(),
+    parent_task_id: IdSchema.optional(),
+    continuation_of_task_id: IdSchema.optional(),
+    requirement_role: RequirementTaskKind.optional(),
+    requirement_group_relationship: z.enum(["new_requirement", "same_requirement_child", "continuation"]).optional(),
+    requirement_fingerprint: ReviewSnapshotSchema.optional(),
+    parallel_state: z.enum(["standalone", "parallel_allowed", "scope_overlap_review"]).optional(),
+    related_task_ids: z.array(IdSchema).max(100).optional(),
     operation_key: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     operation_fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     scope_paths: z.array(RelativePathSchema).max(30).optional(),
@@ -175,6 +186,8 @@ export const TaskSchema = z
     validation_policy: z.literal(1).optional(),
     validation_plans: z.array(ValidationPlanRecordSchema).max(10).optional(),
     business_deltas: z.array(BusinessDeltaRecordSchema).max(20).optional(),
+    business_model_policy: z.literal(1).optional(),
+    business_plans: z.array(BusinessPlanRecord).max(6).optional(),
     acceptance_criteria: z.array(AcceptanceCriterionSchema).min(1).max(100),
     knowledge_versions: z
       .array(z.object({ id: IdSchema, version: TextSchema }).strict())

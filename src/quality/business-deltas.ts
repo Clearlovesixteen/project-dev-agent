@@ -19,9 +19,12 @@ import {
   sourcePath,
 } from "../understanding/model-evidence.js";
 import { recordModel } from "../understanding/model-record.js";
+import { CodeBindingResolver } from "../understanding/code-bindings.js";
+import { assertEnhancedModelWrites } from "../runtime/business-model-release.js";
+import { evaluateRule } from "../understanding/rule-predicates.js";
 import {
   SavedModelSchema,
-  type ModelV2,
+  type ModernModel,
   type SavedModel,
 } from "../understanding/model-contracts.js";
 import {
@@ -37,11 +40,13 @@ import {
   BusinessDeltaInputSchema,
   BusinessDeltaApplyInputSchema,
   BusinessDeltaReceiptSchema,
+  enhancedBusinessDelta,
   type BusinessDeltaInput,
   type BusinessDeltaRecord,
   type BusinessDeltaReceipt,
 } from "./business-delta-contracts.js";
-import { publishModelShadow } from "../project-knowledge/service.js";
+import { publishModelShadow, readModelSnapshot, readProjectKnowledge } from "../project-knowledge/service.js";
+import { loadWorktreeModels, modelVisible, worktreeModel } from "../project-knowledge/worktree-models.js";
 
 export type BusinessDeltaTask = Pick<
   Task,
@@ -60,7 +65,8 @@ const same = (left: unknown, right: unknown) =>
 const fingerprint = (
   input: BusinessDeltaInput,
   before: BusinessDeltaRecord["before_rule"],
-) => digest(JSON.stringify([input, before]));
+  base?: string,
+) => digest(JSON.stringify(base ? [input, before, base] : [input, before]));
 const activeDeltas = (task: BusinessDeltaTask) =>
   (task.business_deltas ?? []).filter(
     (record) =>
@@ -105,16 +111,16 @@ function assertBinding(
       "业务草案必须属于当前项目及工作区",
     );
 }
-function requireModel(all: SavedModel[], id: string): ModelV2 {
+function requireModel(all: SavedModel[], id: string): ModernModel {
   const model = all.find((item) => item.id === id);
-  if (!model || model.schema_version !== 2)
+  if (!model || model.schema_version === 1)
     throw new AppError(
       "BUSINESS_DELTA_MODEL",
       "业务变更需要当前项目已有的新版模型",
     );
   return model;
 }
-function assertUnchanged(model: ModelV2, record: BusinessDeltaRecord): void {
+function assertUnchanged(model: ModernModel, record: BusinessDeltaRecord): void {
   const current = model.rules.find((rule) => rule.id === record.input.rule_id);
   if (
     record.input.operation === "add"
@@ -129,9 +135,14 @@ function assertUnchanged(model: ModelV2, record: BusinessDeltaRecord): void {
 /** 预期变更有独立场景标识，不能拿当前模型的 observed 场景替代。结果不截断。 */
 export function businessDeltaScenarios(record: BusinessDeltaRecord) {
   const rule = record.input.proposed_rule ?? record.before_rule;
-  const definitions =
+  const semantic = record.input.proposed_rule?.semantics;
+  const definitions: { kind: string; text: string; case_id?: string; preserve_id?: string }[] =
     record.input.operation === "remove"
       ? [{ kind: "retirement", text: `停用规则：${rule!.description}` }]
+      : semantic ? [
+        ...semantic.cases.map(item => ({ kind: item.expected, text: item.description, case_id: item.id })),
+        ...semantic.preserves.map(item => ({ kind: "preserve", text: item.description, preserve_id: item.id })),
+      ]
       : [
           { kind: "normal", text: rule!.conditions.join("；") },
           ...rule!.conditions.map((text) => ({ kind: "boundary", text })),
@@ -139,6 +150,8 @@ export function businessDeltaScenarios(record: BusinessDeltaRecord) {
         ];
   return definitions.map((definition, index) => ({
     kind: definition.kind,
+    ...(definition.case_id ? { case_id: definition.case_id } : {}),
+    ...(definition.preserve_id ? { preserve_id: definition.preserve_id } : {}),
     description: definition.text,
     expected_rule:
       record.input.operation === "remove"
@@ -211,11 +224,13 @@ export async function recordBusinessDeltas(
 ): Promise<BusinessDeltaRecord[]> {
   assertBinding(binding, task);
   const inputs = values.map((value) => BusinessDeltaInputSchema.parse(value));
+  assertEnhancedModelWrites(inputs.some(enhancedBusinessDelta));
   if (new Set(inputs.map((input) => input.id)).size !== inputs.length)
     throw new AppError("BUSINESS_DELTA_DUPLICATE", "本次草案 ID 不能重复");
-  const files = new ProjectFiles(binding.root),
-    all = await models(files),
-    evidence = await evidenceFor(files, binding, task);
+  const files = new ProjectFiles(binding.root);
+  const { knowledge, models: all, snapshotIds } = await loadWorktreeModels(binding, files);
+  if (knowledge.state === "unavailable") throw new AppError("PROJECT_KNOWLEDGE_UNAVAILABLE", "共享业务模型暂无法核验，请重新查询当前项目");
+  const evidence = await evidenceFor(files, binding, task);
   const history = [...(task.business_deltas ?? [])];
   for (const raw of inputs) {
     const old = history.find((record) => record.input.id === raw.id);
@@ -254,10 +269,17 @@ export async function recordBusinessDeltas(
         "BUSINESS_DELTA_ACCEPTANCE",
         "保存新草案前须将关联验收重开为 pending，绑定草案场景后重新核验",
       );
-    const model = requireModel(all, raw.model_id),
-      before = model.rules.find((rule) => rule.id === raw.rule_id) ?? null;
+    const newModel = raw.base_revision === 0;
+    const selection = knowledge.modules?.find(item => item.model_id === raw.model_id);
+    if (selection?.state === "ambiguous" || selection?.state === "partial")
+      throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "草案使用的模型在当前工作树尚无唯一适用版本，请先核对候选");
+    if (newModel && all.some(model => model.id === raw.model_id))
+      throw new AppError("BUSINESS_DELTA_CONFLICT", "新业务模型 ID 已存在，请读取后按已有模型建立草案");
+    const model = newModel ? undefined : requireModel(all, raw.model_id);
+    assertEnhancedModelWrites(model?.schema_version === 3);
+    const before = model?.rules.find((rule) => rule.id === raw.rule_id) ?? null;
     if (
-      model.revision !== raw.base_revision ||
+      (model?.revision ?? 0) !== raw.base_revision ||
       (raw.operation === "add"
         ? !!before
         : !before || ruleFingerprint(before) !== raw.expected_rule_fingerprint)
@@ -266,6 +288,16 @@ export async function recordBusinessDeltas(
         "BUSINESS_DELTA_CONFLICT",
         "草案基准修订或规则指纹不一致，请重新读取当前模型",
       );
+    if (raw.proposed_rule?.semantics) {
+      const semantics = raw.proposed_rule.semantics;
+      const references = [semantics, ...semantics.cases, ...semantics.preserves, ...(raw.proposed_rule.bindings ?? [])];
+      if (references.some(item => item.source_ids.some(id => !raw.proposed_rule!.source_ids.includes(id)))
+        || semantics.cases.some(item => evaluateRule(semantics.when, item.facts) !== item.expected))
+        throw new AppError("BUSINESS_DELTA_SEMANTICS", "草案的条件、场景和代码位置须引用本规则来源，场景期望须与结构化条件一致");
+      for (const items of [semantics.cases, semantics.preserves, raw.proposed_rule.bindings ?? []]) {
+        if (new Set(items.map(item => item.id)).size !== items.length) throw new AppError("BUSINESS_DELTA_SEMANTICS", "场景、保留行为和绑定 ID 不能重复");
+      }
+    }
     if (raw.supersedes_id) {
       const replaced = history.find(
         (record) => record.input.id === raw.supersedes_id,
@@ -312,14 +344,18 @@ export async function recordBusinessDeltas(
         "同一目标已有草案，修订时请明确 supersedes_id",
       );
     }
+    if (newModel && activeDeltas({ ...task, business_deltas: history }).some(other => other.input.model_id === raw.model_id && other.input.id !== raw.supersedes_id))
+      throw new AppError("BUSINESS_DELTA_CONFLICT", "新模型先用一条业务规则建立首版，验证发布后再追加其它规则");
     const sources = [];
     for (const source of raw.sources)
       sources.push(await evidence.validate(source));
     const input = { ...raw, sources };
+    const base_snapshot_id = snapshotIds.get(raw.model_id);
     const record = {
       input,
       before_rule: before,
-      fingerprint: fingerprint(input, before),
+      ...(base_snapshot_id ? { base_snapshot_id } : {}),
+      fingerprint: fingerprint(input, before, base_snapshot_id),
       recorded_at: new Date().toISOString(),
     };
     if (raw.acceptance_ids.length < businessDeltaScenarios(record).length)
@@ -329,13 +365,9 @@ export async function recordBusinessDeltas(
       );
     history.push(record);
   }
-  const latest = await models(files);
+  const latest = await readProjectKnowledge(binding);
   if (
-    all.some(
-      (model) =>
-        latest.find((item) => item.id === model.id)?.revision !==
-        model.revision,
-    )
+    latest.view_token !== knowledge.view_token || latest.transaction_id !== knowledge.transaction_id || latest.state !== knowledge.state
   )
     throw new AppError(
       "BUSINESS_DELTA_CONFLICT",
@@ -363,17 +395,16 @@ export async function businessDeltaReview(
       items: [],
       limitation: "本任务没有业务变更草案。",
     };
-  const files = new ProjectFiles(binding.root),
-    all = await models(files),
-    items = [],
-    evidence = await evidenceFor(files, binding, task);
+  const files = new ProjectFiles(binding.root);
+  const { models: all } = await loadWorktreeModels(binding, files);
+  const items = [], evidence = await evidenceFor(files, binding, task);
   for (const record of active) {
     const raw = await optional(files, receiptPath(task, record)),
       journal = raw ? JournalSchema.parse(JSON.parse(raw)) : undefined;
     const receipt = journal?.receipt,
       model = all.find((item) => item.id === record.input.model_id);
     const rule =
-      model?.schema_version === 2
+      model && model.schema_version !== 1
         ? model.rules.find((item) => item.id === record.input.rule_id)
         : undefined;
     let state: "pending" | "conflict" | "stale" | "applied" = "pending";
@@ -394,7 +425,7 @@ export async function businessDeltaReview(
           : receipt.review_snapshot !== snapshot
           ? "stale"
           : "applied";
-      if (state === "applied" && rule && model?.schema_version === 2) {
+      if (state === "applied" && rule && model && model.schema_version !== 1) {
         for (const version of rule.evidence_versions) {
           const source = model.sources.find((item) => item.id === version.id);
           if (
@@ -420,7 +451,7 @@ export async function businessDeltaReview(
         }
       }
     } else if (
-      model?.schema_version !== 2 ||
+      model?.schema_version === 1 ||
       (record.input.operation === "add"
         ? !!rule
         : !same(rule, record.before_rule))
@@ -463,11 +494,11 @@ export function assertBusinessDeltas(
 /** 只在发布中断时查找不可变模型修订；先用checkpoint，缺失时有界扫描marker，不凭语义相似认领发布。 */
 async function recoverPublication(
   files: ProjectFiles,
-  model: ModelV2,
+  model: ModernModel,
   pending: z.infer<typeof AttemptSchema>,
-): Promise<ModelV2 | undefined> {
+): Promise<ModernModel | undefined> {
   const accept = (candidate: SavedModel) =>
-    candidate.schema_version === 2 &&
+    candidate.schema_version !== 1 &&
     candidate.id === model.id &&
     candidate.project === files.root &&
     candidate.revision === pending.expected_revision &&
@@ -489,7 +520,7 @@ async function recoverPublication(
         "BUSINESS_DELTA_RECOVERY_CORRUPT",
         "业务发布checkpoint的模型身份不一致",
       );
-    return candidate as ModelV2;
+    return candidate as ModernModel;
   }
   if (accept(model)) return model;
   if (model.revision < pending.expected_revision) return undefined;
@@ -499,7 +530,7 @@ async function recoverPublication(
       "BUSINESS_DELTA_RECOVERY_LIMIT",
       "模型历史超过中断恢复扫描上限，请核对发布checkpoint，不能盲目重放",
     );
-  let found: ModelV2 | undefined;
+  let found: ModernModel | undefined;
   for (const name of names) {
     if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
     const raw = await files.read(`${MAP_DIR}/models/${name}`, 65_536);
@@ -515,7 +546,7 @@ async function recoverPublication(
         "BUSINESS_DELTA_RECOVERY_CONFLICT",
         "同一发布标记对应多个模型修订，请先核对历史",
       );
-    found = candidate as ModelV2;
+    found = candidate as ModernModel;
   }
   return found;
 }
@@ -535,7 +566,7 @@ export async function applyBusinessDelta(
     );
   if (
     !record ||
-    record.fingerprint !== fingerprint(record.input, record.before_rule)
+    record.fingerprint !== fingerprint(record.input, record.before_rule, record.base_snapshot_id)
   )
     throw new AppError(
       "BUSINESS_DELTA_UNKNOWN",
@@ -548,19 +579,30 @@ export async function applyBusinessDelta(
   );
   assertAcceptance(task, record, snapshot.hash);
   const files = new ProjectFiles(binding.root);
-  return locked(files, async () => {
-    const all = await models(files),
-      model = requireModel(all, record.input.model_id),
-      path = receiptPath(task, record);
+  const apply = async () => {
+    const path = receiptPath(task, record);
+    const raw = await optional(files, path), journal = raw ? JournalSchema.parse(JSON.parse(raw)) : JournalSchema.parse({});
+    const { knowledge, config, models: visible } = await loadWorktreeModels(binding, files);
+    if (knowledge.state === "unavailable") throw new AppError("PROJECT_KNOWLEDGE_UNAVAILABLE", "共享业务模型暂无法核验，请重新查询当前项目");
+    const selection = knowledge.modules?.find(item => item.model_id === record.input.model_id);
+    if (selection?.state === "ambiguous" || selection?.state === "partial")
+      throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次规则回写涉及未解决的模型候选，请先复核");
+    const local = (await models(files)).find(item => item.id === record.input.model_id);
+    const chosen = visible.find(item => item.id === record.input.model_id);
+    // Codex 修改代码后，原规则自然不再匹配。用任务开工时保存的只读快照恢复实际前镜像。
+    const pinned = !chosen && record.base_snapshot_id
+      ? await readModelSnapshot(binding, record.input.model_id, record.base_snapshot_id) : undefined;
+    const pinnedModel = pinned ? worktreeModel(binding.root, pinned.content, record.input.model_id) : undefined;
+    const existing = journal.pending && local ? local : chosen ?? pinnedModel;
+    const all = [...visible.filter(item => item.id !== record.input.model_id), ...(existing && modelVisible(existing, config) ? [existing] : [])];
+    const initialModel = record.input.new_model;
+    const model = existing || !initialModel ? requireModel(all, record.input.model_id) : undefined;
+    assertEnhancedModelWrites(model?.schema_version === 3 || enhancedBusinessDelta(record.input));
     const inputHash = digest(JSON.stringify(input));
     const marker = `business-delta:${digest(
       JSON.stringify([task.id, record.fingerprint, snapshot.hash, inputHash]),
     )}`;
-    const raw = await optional(files, path),
-      journal = raw
-        ? JournalSchema.parse(JSON.parse(raw))
-        : JournalSchema.parse({});
-    const currentRule = model.rules.find(
+    const currentRule = model?.rules.find(
         (rule) => rule.id === record.input.rule_id,
       ),
       removing = record.input.operation === "remove";
@@ -571,7 +613,7 @@ export async function applyBusinessDelta(
           "BUSINESS_DELTA_SOURCE_STALE",
           "草案需求来源已变化，请先追加修订草案并重新核验预期",
         );
-    const makeReceipt = (published: ModelV2, token: string) =>
+    const makeReceipt = (published: ModernModel, token: string) =>
       BusinessDeltaReceiptSchema.parse({
         task_id: task.id,
         delta_id: record.input.id,
@@ -590,7 +632,7 @@ export async function applyBusinessDelta(
         review_snapshot: token,
         applied_at: new Date().toISOString(),
       });
-    const publishSharedApply = async (published: ModelV2, reviewToken = snapshot.hash) => {
+    const publishSharedApply = async (published: ModernModel, reviewToken = snapshot.hash) => {
       // 共享快照和应用回执必须使用同一 operation_id；失败时保留本地 pending，
       // 下一次调用会先恢复并重试这一事务，不能把本地模型当成已同步。
       return publishModelShadow(binding, published as unknown as Record<string, unknown>, {
@@ -601,6 +643,7 @@ export async function applyBusinessDelta(
           delta_fingerprint: record.fingerprint,
           review_snapshot: reviewToken,
         },
+        ...(model && model.revision < published.revision ? { base_model: model as unknown as Record<string, unknown> } : {}),
       });
     };
     const preserveReceipt = (receipt: BusinessDeltaReceipt) => {
@@ -614,7 +657,7 @@ export async function applyBusinessDelta(
       delete journal.pending;
     };
     // 模型已发布而回执尚未保存：marker证明该次发布；先保留原快照回执，再处理新的代码复核。
-    if (journal.pending) {
+    if (journal.pending && model) {
       if (journal.pending.review_snapshot !== snapshot.hash)
         throw new AppError(
           "BUSINESS_DELTA_RECOVERY_STALE",
@@ -651,7 +694,8 @@ export async function applyBusinessDelta(
         "当前规则不同于原发布规则，请建立新的业务变更，不能只刷新回执",
       );
     if (prior?.review_snapshot === snapshot.hash) return prior;
-    if (!prior) assertUnchanged(model, record);
+    if (!prior && initialModel && model) throw new AppError("BUSINESS_DELTA_CONFLICT", "验证期间已建立同 ID 模型，不能覆盖，请读取当前版本并更新草案");
+    if (!prior && model) assertUnchanged(model, record);
     if (
       journal.pending &&
       (journal.pending.input_hash !== inputHash ||
@@ -684,6 +728,11 @@ export async function applyBusinessDelta(
       rule.conditions,
       rule.exceptions,
       rule.assertion ?? null,
+      rule.semantics ? {
+        subject: rule.semantics.subject, action: rule.semantics.action, when: rule.semantics.when, expected: rule.semantics.expected,
+        preserves: rule.semantics.preserves.map(({ source_ids, ...item }) => item),
+        cases: rule.semantics.cases.map(({ source_ids, ...item }) => item),
+      } : null,
     ];
     if (
       input.observed_rule &&
@@ -707,14 +756,28 @@ export async function applyBusinessDelta(
         "回写须引用本次实际核对的代码来源",
       );
     for (const source of input.sources) await evidence.validate(source);
-    if (removing && !prior && model.rules.length === 1)
+    if (input.observed_rule?.semantics) {
+      const observed = input.observed_rule;
+      const expected = [...(record.before_rule && "bindings" in record.before_rule ? record.before_rule.bindings ?? [] : []),
+        ...(record.input.proposed_rule?.bindings ?? [])];
+      const { config } = await loadConfig(files);
+      const resolver = new CodeBindingResolver(files, config);
+      if (!observed.bindings?.length || expected.some(bound => !observed.bindings?.some(current => current.id === bound.id
+        && current.path === bound.path && current.symbol === bound.symbol && current.role === bound.role)))
+        throw new AppError("BUSINESS_DELTA_BINDINGS", "回写须保留已核对的代码位置，并解析草案中的新增位置");
+      for (const bound of observed.bindings) {
+        if (bound.planned || (await resolver.resolve(bound)).resolution !== "resolved")
+          throw new AppError("BUSINESS_DELTA_BINDINGS", "业务模型回写需要当前代码中真实且唯一的符号");
+      }
+    }
+    if (removing && !prior && model?.rules.length === 1)
       throw new AppError(
         "BUSINESS_DELTA_LAST_RULE",
         "不能通过规则草案删除模型最后一条规则，请另行明确模型退役范围",
       );
     if (
       removing &&
-      model.relations.some((relation) =>
+      model?.relations.some((relation) =>
         relation.rule_ids.includes(record.input.rule_id),
       )
     )
@@ -724,16 +787,16 @@ export async function applyBusinessDelta(
       );
     // 不重写其他规则共用的来源，避免局部回写改变其解释或偷偷刷新依据。
     for (const source of input.sources) {
-      const previous = model.sources.find((item) => item.id === source.id);
+      const previous = model?.sources.find((item) => item.id === source.id);
       if (
         previous &&
         !same(previous, source) &&
-        (model.rules.some(
+        (model?.rules.some(
           (rule) =>
             rule.id !== record.input.rule_id &&
             rule.source_ids.includes(source.id),
         ) ||
-          model.relations.some((relation) =>
+          model?.relations.some((relation) =>
             relation.source_ids.includes(source.id),
           ))
       )
@@ -763,37 +826,34 @@ export async function applyBusinessDelta(
       marker,
       review_snapshot: snapshot.hash,
       expected_revision:
-        removing && prior ? model.revision : model.revision + 1,
+        removing && prior && model ? model.revision : (model?.revision ?? 0) + 1,
       ...(removing && prior ? { revalidation_only: true } : {}),
     };
     await save(files, path, journal);
     // 删除后的复核只重新核对停用证据；不再次删除规则，也不扩大到模型退役。
-    const published =
-      removing && prior
-        ? model
-        : ((await recordModel(files, binding, {
-            id: model.id,
-            schema_version: 2,
+    const sourcePaths = input.sources.flatMap(source => sourcePath(source) ? [sourcePath(source)!] : []);
+    const published = removing && prior && model ? model : ((await recordModel(files, binding, {
+            id: record.input.model_id,
+            schema_version: initialModel || input.observed_rule?.semantics || input.observed_rule?.bindings?.length ? 3 : model?.schema_version ?? 2,
             scan_id: map.scan_id,
-            expected_revision: model.revision,
+            expected_revision: model?.revision ?? 0,
             revision_reason: marker,
-            patch: removing
+            ...(!model && initialModel ? { ...initialModel, related_paths: [...new Set(sourcePaths)], sources: input.sources,
+              rules: [input.observed_rule!], relations: [] } : { patch: removing
               ? { remove_rule_ids: [record.input.rule_id] }
               : {
                   metadata: {
                     related_paths: [
                       ...new Set([
-                        ...model.related_paths,
-                        ...input.sources.flatMap((source) =>
-                          sourcePath(source) ? [sourcePath(source)!] : [],
-                        ),
+                        ...(model?.related_paths ?? []),
+                        ...sourcePaths,
                       ]),
                     ],
                   },
                   upsert_sources: input.sources,
                   upsert_rules: [input.observed_rule!],
-                },
-          })) as ModelV2);
+                } }),
+          }, all)) as ModernModel);
     const publishedIndex = (await modelIndex(files)).find(
       (item) =>
         item.id === published.id && item.revision === published.revision,
@@ -823,5 +883,6 @@ export async function applyBusinessDelta(
         "发布期间代码变化，原快照回执已保留；请在当前代码上重新核验后追加复核回执",
       );
     return receipt;
-  });
+  };
+  return locked(files, apply);
 }

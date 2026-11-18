@@ -39,9 +39,9 @@ export function toolCommandDecision(input: NativeHookInput, pluginRoot?: string)
   return classified;
 }
 
-/** 终端可能在另一个工作目录执行；用实际工具目录找项目，避免把临时检查归到聊天目录。 */
+/** 工具可以在另一个目录执行。相对路径按工具目录解释，缺省才用聊天目录。 */
 export function toolWorkingDirectory(input: NativeHookInput): string {
-  if (!["Bash", "exec_command", "shell_command", "shell"].includes(input.tool_name ?? "")) return input.cwd;
+  if (!["Bash", "exec_command", "shell_command", "shell", "apply_patch", "Edit", "Write"].includes(input.tool_name ?? "")) return input.cwd;
   const args = toolArguments(input), directory = args?.workdir ?? args?.cwd;
   return typeof directory === "string" ? resolve(input.cwd, directory) : input.cwd;
 }
@@ -54,7 +54,10 @@ export function writeKind(input: NativeHookInput, pluginRoot?: string): "patch" 
 }
 
 export function patchPaths(input: NativeHookInput): string[] {
-  const args = toolArguments(input), patch = args?.command ?? args?.patch ?? (typeof input.tool_input === "string" ? input.tool_input : undefined);
+  const args = toolArguments(input);
+  if (["Edit", "Write"].includes(input.tool_name ?? "") && typeof args?.file_path === "string" && args.file_path.length)
+    return [args.file_path];
+  const patch = args?.command ?? args?.patch ?? (typeof input.tool_input === "string" ? input.tool_input : undefined);
   if (typeof patch !== "string") return [];
-  return [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)].map(match => match[1]!);
+  return [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): ([^\r\n]+)\r?$/gm)].map(match => match[1]!);
 }

@@ -19,9 +19,13 @@ import {
 import {
   recordImplementationBasis,
   implementationBasisReview,
+  implementationAcceptanceToReopen,
+  implementationReviewActions,
   assertImplementationBasis,
 } from "./quality/implementation-basis.js";
 import { recordValidationPlan } from "./quality/validation-plan.js";
+import { recordBusinessPlan } from "./quality/business-plan.js";
+import { assertBusinessPlan, businessPlanReview } from "./quality/business-plan-review.js";
 import {
   validationReview,
   assertValidationReview,
@@ -32,7 +36,8 @@ import {
   assertBusinessDeltas,
   applyBusinessDelta,
 } from "./quality/business-deltas.js";
-import { BusinessDeltaApplyInputSchema } from "./quality/business-delta-contracts.js";
+import { BusinessDeltaApplyInputSchema, enhancedBusinessDelta } from "./quality/business-delta-contracts.js";
+import { assertEnhancedModelWrites } from "./runtime/business-model-release.js";
 import { IdSchema } from "./domain/common.js";
 import { validationRuns } from "./quality/validation-store.js";
 import {
@@ -64,6 +69,7 @@ import { ProjectFiles } from "./storage/project-files.js";
 import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
 import { reviewSnapshot } from "./git/review-snapshot.js";
 import { captureMergeRecovery, assertMergeResolved, assertMergeRecovery } from "./git/merge-recovery.js";
+import { RequirementGroupStore } from "./coordination/requirement-groups.js";
 
 /** 完整集合的回传不是全量复核；已有完成项只有被显式选中后才能刷新指纹。 */
 function stampReviews<
@@ -137,11 +143,35 @@ function staleReviews(task: Task, snapshot: string) {
   };
 }
 
+/** 需求组是协同索引，不能让侧车暂时不可写把已经落盘的核心任务伪装成失败。 */
+function requirementGroupSyncDiagnostic(action: "register" | "update", error: unknown) {
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    code: "REQUIREMENT_GROUP_SYNC_PENDING",
+    message: action === "register"
+      ? `任务已经保存，但需求组登记暂未完成：${detail}。后续打开或更新任务时会继续尝试补登记。`
+      : `任务状态已经保存，但需求组状态同步暂未完成：${detail}。后续更新任务时会继续尝试补同步。`,
+  };
+}
+
 /** 维护任务生命周期，将 Git 实际改动与显式记录的验收和审查证据关联。 */
 export class TaskService {
   private readonly store: TaskStore;
+  private readonly groups: RequirementGroupStore;
   constructor(private readonly binding: WorktreeBinding) {
     this.store = new TaskStore(binding.root);
+    this.groups = new RequirementGroupStore(binding.repo_identity);
+  }
+
+  /** 工作树任务是回放依据。登记中断后，重试打开或任一更新可恢复需求组索引。 */
+  private async syncRequirementGroup(task: Task, action: "register" | "update") {
+    if (!task.requirement_group_id) return [];
+    try {
+      await this.groups.register({ group_id: task.requirement_group_id, task_id: task.id, worktree_path: task.worktree_path,
+        branch: task.baseline_branch, requirement_role: task.requirement_role ?? "full", scope_paths: task.scope_paths ?? [],
+        relationship: task.requirement_group_relationship ?? "new_requirement", phase: task.phase });
+      return [];
+    } catch (error) { return [requirementGroupSyncDiagnostic(action, error)]; }
   }
 
   /** CLI 与 MCP 共用错误约定，协议适配层无需识别存储或 Git 的具体异常。 */
@@ -166,6 +196,7 @@ export class TaskService {
   async open(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = TaskOpenInputSchema.parse(input);
+      assertEnhancedModelWrites(!!request.business_model_policy);
       const current = await bindWorktree(this.binding.root);
       if (current.repo_identity !== this.binding.repo_identity)
         throw new AppError("REPOSITORY_CHANGED", "当前绑定的仓库标识已变化");
@@ -201,10 +232,63 @@ export class TaskService {
         );
       const now = new Date().toISOString();
       const interaction = currentInteraction();
+      // 先处理宿主重试幂等性，再进入需求组解析；否则同一操作重试会被
+      // “当前工作树已有活跃任务”规则误判成并发新需求。
+      const operationKey = interaction?.operation_id
+        ? createHash("sha256")
+            .update(
+              JSON.stringify([
+                interaction.session_id,
+                interaction.actor_id ?? "main",
+                interaction.operation_id,
+              ]),
+            )
+            .digest("hex")
+        : undefined;
+      const operationFingerprint = interaction?.operation_id
+        ? createHash("sha256").update(JSON.stringify(request)).digest("hex")
+        : undefined;
+      if (operationKey) {
+        const existing = await this.store.findByOperationKey(operationKey);
+        if (existing) {
+          assertTaskOwner(existing);
+          if (existing.operation_fingerprint !== operationFingerprint)
+            throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
+          return {
+            outcome: "ok",
+            code: "TASK_REUSED",
+            data: existing,
+            diagnostics: await this.syncRequirementGroup(existing, "register"),
+          };
+        }
+      }
       const spec = request.spec_input ? validateSpecification(request.spec_input, ["task-request", ...(request.requirement_sources ?? []).map(source => source.id)]) : undefined;
+      const taskId = randomUUID();
+      const requirementSources = await recordRequirementSources(
+        current,
+        { requirement: request.requirement, corrections: [] },
+        [],
+        [
+          { id: "task-request", kind: "request", quote: request.requirement },
+          ...references,
+        ],
+      );
+      // 需求组先按来源指纹做保守关联；没有唯一证据时宁可创建新组，也不把两个需求串起来。
+      const grouping = request.requirement_role || request.requirement_group_id || request.parent_task_id || request.continuation_of_task_id;
+      const group = !recovery && grouping ? await this.groups.resolve({
+        requirement: request.requirement,
+        sources: requirementSources,
+        acceptance: request.acceptance_criteria,
+        worktree_path: current.root,
+        branch: current.branch,
+        scope_paths: request.scope_paths ?? [],
+        ...(request.requirement_group_id ? { requested_group_id: request.requirement_group_id } : {}),
+        ...(request.parent_task_id ? { parent_task_id: request.parent_task_id } : {}),
+        ...(request.continuation_of_task_id ? { continuation_of_task_id: request.continuation_of_task_id } : {}),
+      }) : undefined;
       const task = TaskSchema.parse({
         schema_version: 1,
-        id: randomUUID(),
+        id: taskId,
         revision: 0,
         repo_identity: current.repo_identity,
         worktree_path: current.root,
@@ -213,27 +297,25 @@ export class TaskService {
         workspace_baseline: workspaceBaseline,
         phase: "active",
         requirement: request.requirement,
+        ...(group ? { requirement_group_id: group.group_id, requirement_role: request.requirement_role ?? "full",
+          requirement_group_relationship: group.relationship,
+          requirement_fingerprint: group.requirement_fingerprint, parallel_state: group.scope_state,
+          ...(request.parent_task_id ? { parent_task_id: request.parent_task_id } : {}),
+          ...(request.continuation_of_task_id ? { continuation_of_task_id: request.continuation_of_task_id } : {}),
+          ...(group.related_task_ids.length ? { related_task_ids: group.related_task_ids } : {}),
+        } : {}),
         ...(spec ? { spec_input: spec } : {}),
         ...(interaction ? { owner: interactionOwner(interaction) } : {}),
-        ...(interaction?.operation_id ? {
-          operation_key: createHash("sha256").update(JSON.stringify([interaction.session_id, interaction.actor_id ?? "main", interaction.operation_id])).digest("hex"),
-          operation_fingerprint: createHash("sha256").update(JSON.stringify(request)).digest("hex"),
-        } : {}),
+        ...(operationKey ? { operation_key: operationKey } : {}),
+        ...(operationFingerprint ? { operation_fingerprint: operationFingerprint } : {}),
         ...(request.evaluation ? { evaluation: request.evaluation } : {}),
         implementation_baseline: await captureImplementationBaseline(current),
         development_policy: 1,
-        requirement_sources: await recordRequirementSources(
-          current,
-          { requirement: request.requirement, corrections: [] },
-          [],
-          [
-            { id: "task-request", kind: "request", quote: request.requirement },
-            ...references,
-          ],
-        ),
+        requirement_sources: requirementSources,
         ...(request.business_assessment
           ? { business_assessment: request.business_assessment }
           : {}),
+        ...(request.business_model_policy ? { business_model_policy: request.business_model_policy } : {}),
         scope_paths: recovery ? recovery.conflicts.map(item => item.path) : request.scope_paths ?? [],
         feedback_policy: 1,
         ...(request.feedback_review
@@ -270,12 +352,25 @@ export class TaskService {
         created_at: now,
         updated_at: now,
       });
-      const saved = await this.store.create(task);
+      let saved: Task;
+      try {
+        saved = await this.store.create(task);
+      } catch (error) {
+        // 先解析需求组再写本地任务时，互斥失败不能留下没有子任务的“幽灵组”。
+        if (group?.link === "new") await this.groups.discardIfEmpty(group.group_id).catch(() => {});
+        throw error;
+      }
+      const diagnostics = group?.scope_state === "scope_overlap_review"
+        ? [{ code: "REQUIREMENT_SCOPE_OVERLAP_REVIEW", message: `同一需求组已有相关工作树 ${group.related_task_ids.join(", ")} 使用重叠范围；任务已建立，但集成前必须人工审查。` }]
+        : group?.link === "auto_source_match"
+        ? [{ code: "REQUIREMENT_GROUP_AUTO_LINKED", message: `已按唯一 PRD/SDD 来源指纹关联需求组 ${group.group_id}；如实际不是同一需求，请重新建立独立需求组。` }]
+        : [];
+      diagnostics.push(...await this.syncRequirementGroup(saved, "register"));
       return {
         outcome: "ok",
         code: saved.id === task.id ? "TASK_OPENED" : "TASK_REUSED",
         data: saved,
-        diagnostics: [],
+        diagnostics,
       };
     });
   }
@@ -312,7 +407,8 @@ export class TaskService {
             reason: request.suspend_reason ?? request.abort_reason ?? `恢复挂起任务，原挂起原因：${current.suspend_reason}`,
             recorded_at: new Date().toISOString() }],
         }));
-        return { outcome: "ok", code: saved.phase === "suspended" ? "TASK_SUSPENDED" : saved.phase === "active" ? "TASK_RESUMED" : "TASK_UPDATED", data: saved, diagnostics: [] };
+        const diagnostics = await this.syncRequirementGroup(saved, "update");
+        return { outcome: "ok", code: saved.phase === "suspended" ? "TASK_SUSPENDED" : saved.phase === "active" ? "TASK_RESUMED" : "TASK_UPDATED", data: saved, diagnostics };
       }
       if (request.knowledge_versions?.length) {
         const files = new ProjectFiles(this.binding.root);
@@ -373,6 +469,8 @@ export class TaskService {
         request.task_id,
         request.expected_revision,
         async (current) => {
+          if (request.phase !== "aborted") assertEnhancedModelWrites(!!request.business_plan || !!current.business_model_policy
+            || !!current.business_plans?.length || !!current.business_deltas?.some(delta => enhancedBusinessDelta(delta.input)));
           // 在存储锁内基于最新记录检查集合，防止替换时抹去此前的验收或纠正记录。
           const collections = [
             "change_items",
@@ -452,6 +550,7 @@ export class TaskService {
           let bases = current.implementation_bases;
           let plans = current.validation_plans;
           let deltas = current.business_deltas;
+          const requirementUpdate = await prepareRequirementUpdate(this.binding, current, request);
           if (request.business_deltas) {
             if (!snapshot || request.phase === "closed")
               throw new AppError(
@@ -462,6 +561,7 @@ export class TaskService {
               this.binding,
               {
                 ...current,
+                ...requirementUpdate,
                 corrections: request.corrections ?? current.corrections,
                 acceptance_criteria:
                   request.acceptance_criteria ?? current.acceptance_criteria,
@@ -491,7 +591,8 @@ export class TaskService {
             if (plans?.at(-1)?.version !== plan.version)
               plans = [...(plans ?? []), plan];
           }
-          if (request.implementation_basis) {
+          const previousBasis = bases?.at(-1)?.basis;
+          if (request.implementation_basis && JSON.stringify(request.implementation_basis) !== JSON.stringify(previousBasis)) {
             if (!snapshot || request.phase === "closed")
               throw new AppError(
                 "IMPLEMENTATION_BASIS_REVIEW_REQUIRED",
@@ -499,18 +600,12 @@ export class TaskService {
               );
             const acceptance =
               request.acceptance_criteria ?? current.acceptance_criteria;
-            if (
-              request.implementation_basis.decisions.some((decision) =>
-                acceptance.some(
-                  (item) =>
-                    item.id === decision.acceptance_id &&
-                    item.status !== "pending",
-                ),
-              )
-            ) {
+            const reopen = implementationAcceptanceToReopen(previousBasis, request.implementation_basis);
+            const blocking = acceptance.filter(item => reopen.has(item.id) && item.status !== "pending");
+            if (blocking.length) {
               throw new AppError(
                 "IMPLEMENTATION_BASIS_REVIEW_REQUIRED",
-                "依据修订后须将相关验收项重开为 pending，保存后重新核验",
+                `请在本次 task_update 将受影响的验收项重开为 pending，再保存依据并复核：${blocking.map(item => item.id).join("、")}`,
               );
             }
             if ((bases?.length ?? 0) >= 10)
@@ -524,6 +619,7 @@ export class TaskService {
               request.implementation_basis,
               acceptance.map((item) => item.id),
               current.workspace_baseline,
+              previousBasis,
             );
             if (record.review_snapshot !== snapshot.hash)
               throw new AppError(
@@ -532,11 +628,6 @@ export class TaskService {
               );
             bases = [...(bases ?? []), record];
           }
-          const requirementUpdate = await prepareRequirementUpdate(
-            this.binding,
-            current,
-            request,
-          );
           let next = TaskSchema.parse({
             ...current,
             ...requirementUpdate,
@@ -578,6 +669,16 @@ export class TaskService {
               ? { abort_reason: request.abort_reason }
               : {}),
           });
+          if (request.business_plan) {
+            if (!snapshot || next.phase !== "active") throw new AppError("BUSINESS_PLAN_REQUIRED", "业务计划须在活跃任务中单独保存，不能在关闭时补写");
+            const priorPlans = next.business_plans ?? [];
+            if (priorPlans.length >= 6) throw new AppError("BUSINESS_PLAN_LIMIT", "本任务已保存六次业务计划，请缩小任务范围");
+            const changedAcceptance = new Set([...request.business_plan.input_items.flatMap(item => item.acceptance_ids), ...request.business_plan.scenarios.map(item => item.acceptance_id)]);
+            if (next.acceptance_criteria.some(item => changedAcceptance.has(item.id) && item.status !== "pending"))
+              throw new AppError("BUSINESS_PLAN_ACCEPTANCE", "保存或修订业务计划前须重开相关验收，保存后再复核");
+            const plan = await recordBusinessPlan(this.binding, next, request.business_plan, snapshot);
+            next = TaskSchema.parse({ ...next, business_plans: [...priorPlans, plan] });
+          }
           const actuallyReviewed = (request.acceptance_criteria ?? [])
             .filter(
               (item) =>
@@ -629,25 +730,21 @@ export class TaskService {
                 error instanceof Error ? error.message : String(error),
               );
             }
-            assertValidationReview(
-              await validationReview(
-                this.binding,
-                next,
-                snapshot.hash,
-                snapshot.paths,
-              ),
-            );
+            const execution = await validationReview(this.binding, next, snapshot.hash, snapshot.paths);
+            assertValidationReview(execution);
+            assertBusinessPlan(await businessPlanReview(this.binding, next, snapshot.hash, snapshot.paths, execution));
             await assertFeedback(this.binding, next, snapshot.hash);
             await assertRequirementReview(this.binding, next);
           }
           return next;
         },
       );
+      const diagnostics = await this.syncRequirementGroup(saved, "update");
       return {
         outcome: "ok",
         code: "TASK_UPDATED",
         data: saved,
-        diagnostics: [],
+        diagnostics,
       };
     });
   }
@@ -664,20 +761,16 @@ export class TaskService {
         request.task_id,
         request.expected_revision,
         async (current) => {
+          assertEnhancedModelWrites(!!current.business_model_policy || !!current.business_plans?.length);
           await assertBaseline(this.binding, current);
           const snapshot = await reviewSnapshot(
             this.binding,
             current.baseline_head,
             current.workspace_baseline,
           );
-          assertValidationReview(
-            await validationReview(
-              this.binding,
-              current,
-              snapshot.hash,
-              snapshot.paths,
-            ),
-          );
+          const execution = await validationReview(this.binding, current, snapshot.hash, snapshot.paths);
+          assertValidationReview(execution);
+          assertBusinessPlan(await businessPlanReview(this.binding, current, snapshot.hash, snapshot.paths, execution));
           const {
             task_id: _taskId,
             expected_revision: _revision,
@@ -791,12 +884,14 @@ export class TaskService {
         task,
         snapshot,
       );
+      const nextActions = implementationReviewActions(implementation);
       const execution = await validationReview(
         this.binding,
         task,
         snapshot,
         changed,
       );
+      const businessPlan = await businessPlanReview(this.binding, task, snapshot, changed, execution);
       const businessDelta = await businessDeltaReview(
         this.binding,
         task,
@@ -823,6 +918,7 @@ export class TaskService {
           business_assessment.state === "checked") &&
         (!feedback.required || feedback.state === "checked") &&
         deltaReviewed &&
+        (!businessPlan.required || businessPlan.state === "checked") &&
         executionReviewed &&
         basisReviewed &&
         reuse.state === "checked" &&
@@ -851,6 +947,12 @@ export class TaskService {
       const deltaCode = deltaReviewed
         ? undefined
         : "BUSINESS_DELTA_REVIEW_REQUIRED";
+      const businessPlanCode = businessPlan.required && businessPlan.state !== "checked"
+        ? businessPlan.state === "missing" ? "BUSINESS_PLAN_REQUIRED"
+          : "boundary" in businessPlan && businessPlan.boundary?.issues.length ? "BUSINESS_BOUNDARY_VIOLATION"
+          : "issues" in businessPlan && businessPlan.issues?.length ? "BUSINESS_PLAN_INPUT_PENDING"
+          : "BUSINESS_SCENARIO_REQUIRED"
+        : undefined;
       const policyCode =
         feedback.required && feedback.state !== "checked"
           ? "FEEDBACK_REVIEW_REQUIRED"
@@ -868,6 +970,7 @@ export class TaskService {
         ? basisCode
         : reuseCode ??
           basisCode ??
+          businessPlanCode ??
           executionCode ??
           deltaCode ??
           policyCode ??
@@ -894,11 +997,13 @@ export class TaskService {
           unresolved_validations: validations,
           review_snapshot: snapshot,
           stale_evidence: stale,
+          next_actions: nextActions,
           quality: {
             ...(await qualityReview(this.binding, task, changed, snapshot)),
             reuse,
             implementation,
             execution,
+            business_plan: businessPlan,
             business_delta: businessDelta,
             feedback,
             requirements,
@@ -926,9 +1031,11 @@ export class TaskService {
                   executionCode === checkCode
                     ? "请核对 quality.execution：保存检查计划，用原终端运行 validation run，采用当前代码上的真实执行记录。"
                     : basisCode === checkCode
-                    ? "请核对 quality.implementation：先建立项目实现依据，再逐项复核所关联的验收。依据与实现选择由 Agent 维护，无需用户额外填写。"
+                    ? "请按 next_actions 核对具体实现依据和关联验收项。由 Agent 完成当前快照验证并提交实际证据。"
                     : reuseCode === checkCode
                     ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。"
+                    : businessPlanCode === checkCode
+                    ? "请核对 quality.business_plan 中的原文、受保护位置和命名场景结果，处理未决问题后再验收。"
                     : policyCode === checkCode
                     ? "请核对 quality.feedback、quality.requirements 和 quality.business_assessment：更新纠正选择、来源版本或业务判断，保存后重新验收。"
                     : outdated

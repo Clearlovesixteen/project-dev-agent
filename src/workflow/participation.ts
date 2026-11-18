@@ -7,6 +7,7 @@ import { hasCode } from "../storage/project-files.js";
 import { interactionOwner, type InteractionContext } from "./interaction.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { bindWorktree } from "../git/index.js";
+import { implementationContextReady, isImplementationQuery } from "../context/implementation-status.js";
 
 const ROOT = "project-dev-agent/participation";
 const State = z.object({
@@ -70,6 +71,8 @@ export class ParticipationStore {
     value: { outcome?: string; data?: Record<string, unknown> }) {
     if (!value.data || value.outcome === "error" || !["project_context", "task_open", "task_update", "task_check"].includes(tool)) return;
     const data = value.data;
+    // 模型详情和符号定位是只读补充。即使结果需要复核，也不能覆盖已经查实的开发依据或本轮确认。
+    if (tool === "project_context" && !isImplementationQuery(data)) return;
     // 历史查询与跨会话只读查看不属于当前任务接续，不能覆盖当前任务或清零待检查记录。
     if ((tool === "task_check" || tool === "task_open") && data.phase !== "active") return;
     const savedTask = (tool === "task_check" ? data.recorded_task : data) as { owner?: { session_id: string; actor_id: string } } | undefined;
@@ -79,12 +82,8 @@ export class ParticipationStore {
       if (tool === "project_context" && typeof data.context_id === "string") {
         state.context_id = data.context_id; state.context_at = Date.now();
         state.context_turn = interaction.turn_id ?? null;
-        const localReady = !["not_scanned", "needs_rescan"].includes(String(data.state));
-        const shared = data.project_knowledge && typeof data.project_knowledge === "object" ? data.project_knowledge as { state?: unknown } : undefined;
-        // 共享知识库是同一项目跨工作树的模型来源。匹配失败时可以继续排查，但不能把旧分支
-        // 的业务结论当作修改依据；empty/not_initialized 表示项目尚无可复用模型，仍可建模。
-        const sharedReady = !shared || ["empty", "not_initialized", "matched"].includes(String(shared.state));
-        state.context_ready = localReady && sharedReady;
+        // 真实的实现依据才能放行写入。业务模型歧义留给相关模型的开发与验收检查处理。
+        state.context_ready = implementationContextReady(data);
       }
       const taskId = typeof data.id === "string" ? data.id : typeof data.task_id === "string" ? data.task_id : undefined;
       if (tool.startsWith("task_") && taskId) {

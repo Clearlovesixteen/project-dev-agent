@@ -12,7 +12,7 @@ import { FileSchema, MAP_DIR, MapSchema, type MapFile, type ProjectMap } from ".
 import { mapFiles, optional, save } from "./store.js";
 
 export const MAX_SOURCE = 512_000;
-const EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".css", ".less", ".scss", ".json", ".yaml", ".yml", ".md", ".mdx", ".html", ".py", ".go", ".java", ".kt", ".cs", ".rs", ".sql", ".toml", ".xml", ".graphql", ".gql"]);
+const EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".css", ".less", ".scss", ".json", ".yaml", ".yml", ".md", ".mdx", ".html", ".py", ".go", ".java", ".kt", ".cs", ".rs", ".sql", ".toml", ".xml", ".graphql", ".gql"]);
 const SKIP = new Set([".git", "node_modules", "dist", "build", "coverage", "vendor", ".next", ".nuxt", ".cache", ".project-dev", ".codex", ".agents", "__pycache__"]);
 export function excluded(path: string, config: ProjectConfig): boolean {
   return path.split("/").some((part) => SKIP.has(part) || /^\.env(?:\.|$)/i.test(part) || /^(?:credentials|secrets?)(?:\.|$)/i.test(part))
@@ -98,21 +98,23 @@ function literalImports(text: string): { specifier: string; line: number }[] {
   }
   return result;
 }
-function resolveImport(path: string, specifier: string, all: Set<string>, mappings: Alias[]): string | null {
+export function importCandidates(path: string, specifier: string, all: Set<string>, mappings: Alias[]): string[] {
   const bases = specifier.startsWith(".") ? [posix.join(posix.dirname(path), specifier)] : mappings.flatMap((alias) => {
     if (!alias.wildcard) return specifier === alias.prefix ? alias.targets : [];
     if (!specifier.startsWith(alias.prefix) || !specifier.endsWith(alias.suffix)) return [];
     const middle = specifier.slice(alias.prefix.length, alias.suffix ? -alias.suffix.length : undefined);
     return alias.targets.map((target) => target.replace("*", middle));
   });
+  const matches = new Set<string>();
   for (const base of bases) {
     const normalized = posix.normalize(base);
     if (!RelativePathSchema.safeParse(normalized).success) continue;
-    const alternatives = [normalized, ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".json"].flatMap((ext) => [normalized + ext, `${normalized}/index${ext}`])];
+    const alternatives = [normalized, ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".json", ".mts", ".cts"].flatMap((ext) => [normalized + ext, `${normalized}/index${ext}`])];
     if (/\.[cm]?js$/.test(normalized)) alternatives.push(normalized.replace(/\.[cm]?js$/, ".ts"), normalized.replace(/\.[cm]?js$/, ".tsx"));
-    const found = alternatives.find((candidate) => all.has(candidate)); if (found) return found;
+    if (/\.[cm]js$/.test(normalized)) alternatives.push(normalized.replace(/js$/, "ts"));
+    for (const candidate of alternatives) if (all.has(candidate)) matches.add(candidate);
   }
-  return null;
+  return [...matches];
 }
 export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap> {
   const files = new ProjectFiles(binding.root), { config } = await loadConfig(files);
@@ -158,7 +160,7 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
         } catch { diagnostic("PROJECT_PACKAGE_INVALID", `${path}：无法解析依赖声明`); }
       }
       records.push(FileSchema.parse({ path, sha256, bytes, stat_signature, ...(content === null ? { symbols: prior!.symbols, identifiers: prior!.identifiers, identifiers_truncated: prior!.identifiers_truncated } : lexicalReferences(content)), module: moduleFor(path, config), role: roleFor(path),
-        imports: imports.slice(0, 40).map((entry) => ({ specifier: entry.specifier, line: entry.line, target: resolveImport(path, entry.specifier, all, mappings) })),
+        imports: imports.slice(0, 40).map((entry) => ({ specifier: entry.specifier, line: entry.line, target: importCandidates(path, entry.specifier, all, mappings)[0] ?? null })),
         imports_truncated: prior?.sha256 === sha256 ? prior.imports_truncated : imports.length > 40, ...(pkg ? { package: pkg } : {}) }));
     } catch (error) { coverage.unreadable++; diagnostic("PROJECT_FILE_UNREADABLE", `${path}: ${error instanceof Error ? error.message : String(error)}`); }
   }

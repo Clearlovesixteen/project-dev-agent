@@ -23,7 +23,7 @@ const LegacySettings = z.object({
 const WorkspaceSettings = LegacySettings.extend({ schema_version: z.literal(2), mode: z.literal("workspace") });
 const ProjectsSettings = z.object({
   schema_version: z.literal(2), revision: z.uuid(), mode: z.literal("projects"),
-  projects: z.array(ProjectEntry).min(1).max(1_000),
+  projects: z.array(ProjectEntry).max(1_000),
   // 旧配置无法区分自动/显式来源。按已确认升级策略迁移，仅保留历史，不把旧父目录当成授权。
   migration: z.object({ from_schema: z.literal(1), workspace: AbsolutePath, requested_workspace: AbsolutePath }).strict().optional(),
 }).strict();
@@ -33,7 +33,8 @@ type Entry = z.infer<typeof ProjectEntry>;
 const configuredWorkspace = (value?: SettingsValue) => value && "workspace" in value ? value.workspace : null;
 
 export const PluginConfigureInput = z.object({
-  workspace: z.string().min(1).max(4096).describe("用户明确选择的绝对目录，其中包含允许使用的 Git 项目"),
+  workspace: z.string().min(1).max(4096).optional().describe("用户明确选择的绝对目录，其中包含允许使用的 Git 项目"),
+  scope_mode: z.enum(["projects", "workspace"]).optional().describe("仅用户明确切换时设置。projects 逐项目接入，workspace 使用显式范围"),
   apply: z.boolean().default(false),
   expected_revision: z.uuid().nullable().optional().describe("应用设置时传入状态或预览的修订号；null 表示尚无配置"),
 }).strict();
@@ -78,14 +79,20 @@ export class PluginSettings {
   /** 预览只读；应用时用文件锁加预期修订号，避免多个会话覆盖彼此的目录选择。 */
   async configure(raw: unknown): Promise<ToolResult> {
     const input = PluginConfigureInput.parse(raw);
-    const workspace = await Workspace.open(input.workspace);
+    if (input.scope_mode === "projects" && input.workspace)
+      throw new AppError("PLUGIN_SCOPE_INPUT_INVALID", "恢复逐项目接入时省略 workspace");
+    if (input.scope_mode !== "projects" && !input.workspace)
+      throw new AppError("PLUGIN_SCOPE_INPUT_INVALID", "显式工作范围需要用户选择的绝对目录");
+    const workspace = input.workspace ? await Workspace.open(input.workspace) : undefined;
     const files = await this.files();
     if (!input.apply) {
       const current = await this.read(files);
       return { outcome: "ok", code: "PLUGIN_CONFIGURE_PREVIEW", diagnostics: [], data: {
-        workspace: workspace.root, previous_workspace: configuredWorkspace(current?.value),
+        scope_mode: workspace ? "workspace" : "projects", workspace: workspace?.root ?? null,
+        previous_workspace: configuredWorkspace(current?.value),
         expected_revision: current?.value.revision ?? null, settings_path: join(files.root, FILE),
-        changes: ["将该目录保存为项目工具的工作范围，并保留全部项目记录"],
+        changes: [workspace ? "将该目录保存为项目工具的工作范围，并保留全部项目记录"
+          : "恢复逐项目接入；下次开发只登记当前工作树，已有项目记录仍保留"],
       } };
     }
     if (input.expected_revision === undefined) throw new AppError("PLUGIN_REVISION_REQUIRED", "请先预览，再传入 expected_revision；首次设置传 null");
@@ -97,13 +104,17 @@ export class PluginSettings {
       if ((current?.value.revision ?? null) !== input.expected_revision) {
         throw new AppError("PLUGIN_SETTINGS_CHANGED", "预览后配置发生变化，请核对新的工作范围后再重试");
       }
-      if (!current || !("workspace" in current.value) || current.value.schema_version !== 2
-        || current.value.workspace !== workspace.root || current.value.requested_workspace !== resolve(input.workspace)) {
+      const next = workspace
+        ? { schema_version: 2, mode: "workspace", revision: randomUUID(), workspace: workspace.root, requested_workspace: resolve(input.workspace!) }
+        : { schema_version: 2, mode: "projects", revision: randomUUID(), projects: [] };
+      const unchanged = current?.value.schema_version === 2 && (workspace
+        ? current.value.mode === "workspace" && current.value.workspace === workspace.root && current.value.requested_workspace === resolve(input.workspace!)
+        : current.value.mode === "projects");
+      if (!unchanged) {
         // 同时保留规范路径与用户原路径，后续可发现路径别名被改指向其他目录的情况。
-        const next = JSON.stringify({ schema_version: 2, mode: "workspace", revision: randomUUID(), workspace: workspace.root,
-          requested_workspace: resolve(input.workspace) }, null, 2) + "\n";
-        if (current) await files.replace(FILE, next, current.raw);
-        else await files.create(FILE, next);
+        const content = JSON.stringify(next, null, 2) + "\n";
+        if (current) await files.replace(FILE, content, current.raw);
+        else await files.create(FILE, content);
       }
       return await this.status();
     } finally { await release(); }

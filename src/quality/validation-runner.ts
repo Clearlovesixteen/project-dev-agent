@@ -13,6 +13,8 @@ import { reviewSnapshot } from "../git/review-snapshot.js";
 import { ValidationRunSchema } from "./validation-contracts.js";
 import { validationPlanCurrent } from "./validation-plan.js";
 import { saveValidationRun, validationRuns } from "./validation-store.js";
+import { behaviorArguments, BehaviorCapture } from "./behavior-execution.js";
+import { assertEnhancedModelWrites } from "../runtime/business-model-release.js";
 
 /** 只能由 Codex 的原终端执行本 CLI 入口；MCP 查询与更新不会执行项目脚本。 */
 export async function runValidation(
@@ -33,6 +35,7 @@ export async function runValidation(
       "VALIDATION_PLAN_REQUIRED",
       "先保存真实检查计划，再选择其中的检查执行",
     );
+  assertEnhancedModelWrites(!!check.behavior_report || !!task.business_model_policy || !!task.business_plans?.length);
   if (!(await validationPlanCurrent(binding, plan)))
     throw new AppError(
       "VALIDATION_PLAN_STALE",
@@ -46,6 +49,8 @@ export async function runValidation(
       "本任务已达100次检查运行，请缩小任务范围后继续",
     );
   const cwd = check.cwd === "." ? binding.root : await files.path(check.cwd);
+  const args = behaviorArguments(check), behavior = check.behavior_report ? new BehaviorCapture(binding.root) : undefined;
+  const businessPlanFingerprint = task.business_plans?.at(-1)?.fingerprint;
   const snapshot = await reviewSnapshot(
       binding,
       task.baseline_head,
@@ -90,9 +95,10 @@ export async function runValidation(
       settled = false;
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
+    if (behavior) delete env.NODE_OPTIONS;
     const child = spawn(
       check.command === "node" ? process.execPath : check.command,
-      check.args,
+      args,
       {
         cwd,
         shell: false,
@@ -136,7 +142,8 @@ export async function runValidation(
       timedOut = true;
       stop();
     }, check.timeout_ms);
-    child.stdout?.on("data", capture);
+    const captureStdout = (chunk: Buffer) => { capture(chunk); behavior?.push(chunk); };
+    child.stdout?.on("data", captureStdout);
     child.stderr?.on("data", capture);
     child.once("error", (error) => {
       launchError = error.message.slice(0, 1000);
@@ -147,7 +154,7 @@ export async function runValidation(
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
       if (hardTimer) clearTimeout(hardTimer);
-      child.stdout?.removeListener("data", capture);
+      child.stdout?.removeListener("data", captureStdout);
       child.stderr?.removeListener("data", capture);
       process.removeListener("SIGINT", cancel);
       process.removeListener("SIGTERM", cancel);
@@ -179,6 +186,7 @@ export async function runValidation(
     current =
       latest.phase === "active" &&
       latest.validation_plans?.at(-1)?.version === plan.version &&
+      (!behavior || latest.business_plans?.at(-1)?.fingerprint === businessPlanFingerprint) &&
       (await validationPlanCurrent(binding, plan));
   } catch {
     /* 快照不可读取或任务被中止时，不能认定运行结果可用于当前验收。 */
@@ -207,6 +215,7 @@ export async function runValidation(
     output,
     output_sha256: outputHash.digest("hex"),
     output_truncated,
+    ...(behavior ? { behavior: { ...behavior.finish(), ...(businessPlanFingerprint ? { business_plan_fingerprint: businessPlanFingerprint } : {}) } } : {}),
   });
   await saveValidationRun(files, run);
   // 仅上报已保存的真实执行状态，不上报命令、输出、路径或错误消息。

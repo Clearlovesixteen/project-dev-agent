@@ -53,20 +53,6 @@ function compareFingerprints(expected: Array<{ path: string; sha256: string | nu
   return reasons;
 }
 
-function evidenceKeys(snapshot: ModuleSnapshot): Set<string> {
-  return new Set([
-    ...snapshot.source_fingerprints.map((item) => `source:${item.path}:${item.sha256 ?? "null"}`),
-    ...snapshot.dependency_fingerprints.map((item) => `dependency:${item.path}:${item.sha256 ?? "null"}`),
-    ...snapshot.configuration_fingerprints.map((item) => `config:${item.path}:${item.sha256 ?? "null"}`),
-  ]);
-}
-
-function dominates(a: { id: string; value: ModuleSnapshot }, b: { id: string; value: ModuleSnapshot }): boolean {
-  if (a.value.parent_snapshot_ids.includes(b.id)) return true;
-  const aKeys = evidenceKeys(a.value), bKeys = evidenceKeys(b.value);
-  return aKeys.size > bKeys.size && [...bKeys].every((key) => aKeys.has(key));
-}
-
 function parseSnapshots(objects: ObjectEnvelope[]): Array<{ id: string; value: ModuleSnapshot }> {
   return objects.filter((object) => object.object_type === "module_snapshot").map((object) => {
     try { return { id: object.object_id, value: ModuleSnapshotSchema.parse(object.content) }; }
@@ -92,6 +78,9 @@ export function resolveKnowledgeView(input: { source_stamp: SourceStamp; snapsho
   const selected_snapshot_ids: string[] = [];
   const unresolved: string[] = [];
   for (const [model_id, values] of [...byModel.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const parents = new Map(values.map(item => [item.id, item.value.parent_snapshot_ids]));
+    const superseded = new Set(values.flatMap(item => item.value.parent_snapshot_ids));
+    const heads = values.filter(item => !superseded.has(item.id));
     const evaluated = values.map((candidate) => {
       const reasons = [
         ...compareFingerprints(candidate.value.source_fingerprints, sources),
@@ -107,7 +96,17 @@ export function resolveKnowledgeView(input: { source_stamp: SourceStamp; snapsho
       state = source_stamp.coverage.complete ? "matched" : "partial";
       selected = exact[0]!.id; reasons = source_stamp.coverage.complete ? [] : ["source_coverage_incomplete"];
     } else if (exact.length > 1) {
-      const undominated = exact.filter((candidate) => !exact.some((other) => other.id !== candidate.id && dominates(other, candidate)));
+      // 文件更多不能证明理解更准确。只有显式父链可以替代已复核的祖先快照，
+      // 中间修订源码不匹配时也要沿父链继续检查。
+      const pending = exact.flatMap(item => item.value.parent_snapshot_ids);
+      const ancestors = new Set<string>();
+      while (pending.length) {
+        const id = pending.pop()!;
+        if (ancestors.has(id)) continue;
+        ancestors.add(id);
+        pending.push(...parents.get(id) ?? []);
+      }
+      const undominated = exact.filter(candidate => !ancestors.has(candidate.id));
       if (undominated.length === 1) {
         state = source_stamp.coverage.complete ? "matched" : "partial"; selected = undominated[0]!.id;
         reasons = source_stamp.coverage.complete ? [] : ["source_coverage_incomplete"];
@@ -116,13 +115,17 @@ export function resolveKnowledgeView(input: { source_stamp: SourceStamp; snapsho
         reasons = [source_stamp.coverage.complete ? "multiple_exact_snapshots" : "source_coverage_incomplete"];
       }
     } else {
-      state = source_stamp.coverage.complete ? (values.length > 1 ? "ambiguous" : "needs_review") : "partial";
+      state = source_stamp.coverage.complete ? (heads.length === 1 ? "needs_review" : "ambiguous") : "partial";
       reasons = [...new Set(evaluated.flatMap((candidate) => candidate.reasons).slice(0, 20))];
       if (!reasons.length) reasons = ["no_matching_snapshot"];
     }
     if (selected) selected_snapshot_ids.push(selected);
     if (state !== "matched") unresolved.push(`${model_id}:${state}`);
-    modules.push(ViewModuleSchema.parse({ model_id, state, ...(selected ? { selected_snapshot_id: selected } : {}), candidate_snapshot_ids: values.map((item) => item.id), reasons }));
+    // 优先显示实际适用项和各谱系末端，防止长历史把当前候选挤出查询预算。
+    const candidate_snapshot_ids = [...new Set([...(selected ? [selected] : []), ...heads.map(item => item.id),
+      ...exact.map(item => item.id), ...values.map(item => item.id)])].slice(0, 100);
+    modules.push(ViewModuleSchema.parse({ model_id, state, ...(selected ? { selected_snapshot_id: selected } : {}),
+      candidate_snapshot_ids, reasons: reasons.map(reason => reason.slice(0, 200)) }));
   }
   const readset = { source_stamp_id: source_stamp.stamp_id, snapshot_ids: [...selected_snapshot_ids].sort() };
   const view_token = digest(JSON.stringify({ schema_version: 1, source_stamp_id: source_stamp.stamp_id, modules, unresolved, readset }));

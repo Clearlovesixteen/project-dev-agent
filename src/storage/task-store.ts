@@ -33,6 +33,15 @@ const IMMUTABLE_FIELDS = [
   "scope_paths",
   "feedback_policy",
   "development_policy",
+  "business_model_policy",
+  "requirement_group_id",
+  "parent_task_id",
+  "continuation_of_task_id",
+  "requirement_role",
+  "requirement_group_relationship",
+  "requirement_fingerprint",
+  "parallel_state",
+  "related_task_ids",
   "spec_input", "owner", "operation_key", "operation_fingerprint",
 ] as const;
 
@@ -170,7 +179,19 @@ export class TaskStore {
     return { tasks, truncated: false };
   }
 
-  async active(currentBranch?: string | null): Promise<Task | undefined> {
+  /**
+   * 按宿主操作标识查找已有任务。
+   *
+   * 这个查询必须发生在需求组解析之前：同一次 MCP/钩子重试应直接复用
+   * 原任务，不能因为当前工作树已登记为活跃任务而被并发规则误判为新任务。
+   */
+  async findByOperationKey(operationKey: string): Promise<Task | undefined> {
+    const { tasks } = await this.list(MAX_TASK_ENTRIES);
+    return tasks.find((task) => task.operation_key === operationKey);
+  }
+
+  async active(currentBranch?: string | null, signal?: AbortSignal): Promise<Task | undefined> {
+    signal?.throwIfAborted();
     let paths: StatePaths;
     try {
       paths = await this.prepare(false);
@@ -184,6 +205,8 @@ export class TaskStore {
     let count = 0;
     let active: Task | undefined;
     for await (const entry of directory) {
+      // 启动提示可以有界停止阅读任务历史；写入门禁仍使用完整检查。
+      signal?.throwIfAborted();
       if (++count > MAX_TASK_ENTRIES)
         throw new AppError("STATE_LIMIT", "任务目录中的记录数量超过限制");
       if (!entry.name.endsWith(".json")) continue;
@@ -328,6 +351,9 @@ export class TaskStore {
           "业务变化草案只能追加，旧依据和已发布回执须保留",
         );
       }
+      const oldBusinessPlans = current.business_plans ?? [], nextBusinessPlans = candidate.business_plans ?? [];
+      if (nextBusinessPlans.length < oldBusinessPlans.length || oldBusinessPlans.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(nextBusinessPlans[index])))
+        throw new AppError("IMMUTABLE_TASK_FIELD", "业务计划只能追加修订，不能覆盖历史或移除验收门槛");
       const next = parseTask({
         ...candidate,
         revision: current.revision + 1,

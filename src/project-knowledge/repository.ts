@@ -8,6 +8,7 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 export interface PublishInput {
   operation_id: string;
   objects: ObjectEnvelope[];
+  expected_transaction_id?: string | null;
 }
 
 /** 项目库事务门面；调用者在这里提交不可变对象，不能直接改写另一个工作树的模型。 */
@@ -71,6 +72,9 @@ export class ProjectKnowledgeRepository {
         return { transaction: recovered, pointer: recovered.pointer };
       }
       const parent = await this.files.readCurrent();
+      // 写入前的知识视图与实际提交使用同一事务基线；不同工作树不能用一份旧视图相互覆盖。
+      if (input.expected_transaction_id !== undefined && (parent?.transaction_id ?? null) !== input.expected_transaction_id)
+        throw new AppError("PROJECT_KNOWLEDGE_VIEW_STALE", "项目知识库已更新，请重新读取当前工作树的模型后再提交");
       if (parent) {
         const parentTransaction = await this.files.read(`transactions/${parent.transaction_id}.json`).catch((error) => {
           if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "ENOENT") return undefined;
@@ -193,8 +197,8 @@ export class ProjectKnowledgeRepository {
   }
 
   /** 按父事务从当前状态读取完整对象链；不把 CURRENT 的单批对象误当作全项目模型。 */
-  async currentObjectIds(): Promise<string[]> {
-    const pointer = await this.current();
+  async currentObjectIds(current?: SnapshotPointer): Promise<string[]> {
+    const pointer = current ?? await this.current();
     if (!pointer) return [];
     const ids: string[] = [];
     const visited = new Set<string>();

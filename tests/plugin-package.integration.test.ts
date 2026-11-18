@@ -16,6 +16,7 @@ import { createGitFixture } from "./helpers/create-git-fixture.js";
 
 const execute = promisify(execFile);
 const packageRoot = fileURLToPath(new URL("../../plugins/project-dev-agent/", import.meta.url));
+const previousPackage = process.env.PDA_UPGRADE_BASELINE ?? packageRoot;
 
 test("release inventory matches bundled assets and carries no external dependency installation", async () => {
   const info = JSON.parse(await readFile(join(packageRoot, "build-info.json"), "utf8")) as { version: string; files: { path: string; sha256: string }[] };
@@ -42,10 +43,11 @@ test("release inventory matches bundled assets and carries no external dependenc
 test("standalone plugin runs without source or node_modules and preserves task/configuration across relocation", { timeout: 120_000 }, async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "codex"); await mkdir(home);
-  const installed = join(fixture.root, "plugin v1"); await cp(packageRoot, installed, { recursive: true });
+  const installed = join(fixture.root, "plugin v1"); await cp(previousPackage, installed, { recursive: true });
   const env = { PATH: process.env.PATH ?? "", HOME: home, CODEX_HOME: home };
+  const previousManifest = JSON.parse(await readFile(join(installed, ".codex-plugin/plugin.json"), "utf8")) as { version: string };
   const doctor = JSON.parse((await execute(process.execPath, [join(installed, "runtime/cli.mjs"), "doctor"], { cwd: home, env })).stdout);
-  assert.equal(doctor.version, VERSION);
+  assert.equal(doctor.version, previousManifest.version);
   assert.equal(doctor.mcp_sdk_initialization, "ok");
   const sample = JSON.parse((await execute(process.execPath, [join(installed, "runtime/cli.mjs"), "sample", "create", "--destination", join(fixture.root, "bundled sample")], { cwd: home, env })).stdout);
   assert.equal(sample.outcome, "ok");
@@ -115,9 +117,12 @@ test("standalone plugin runs without source or node_modules and preserves task/c
     acceptance_criteria: [{ id: "persist", description: "Keep the same active task after restart" }] });
   const task = TaskSchema.parse(opened.data);
   await first.close();
-  const secondPath = join(fixture.root, "plugin v2"); await cp(installed, secondPath, { recursive: true });
+  // 可用已发布插件生成旧数据，重启后只替换程序，测试与真实升级完全一致的迁移路径。
+  const secondPath = join(fixture.root, "plugin v2"); await cp(packageRoot, secondPath, { recursive: true });
   const second = await connect(secondPath);
-  assert.equal(((await call(second, "plugin_status")).data as { configured: boolean }).configured, true);
+  const updated = (await call(second, "plugin_status")).data as { configured: boolean; version: string };
+  assert.equal(updated.configured, true);
+  assert.equal(updated.version, VERSION);
   await call(second, "project_prepare", { project: fixture.path, apply: true });
   assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), savedSettings);
   const restored = (await call(second, "project_context", { project: fixture.path, paths: [source.path] })).data as {

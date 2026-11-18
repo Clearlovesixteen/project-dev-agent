@@ -16,14 +16,34 @@ import {
 } from "../understanding/scan.js";
 import type { ImplementationBasisInput } from "./basis-contracts.js";
 
+type BasisReference = ImplementationBasisInput["references"][number];
+
 function matchesReference(
   text: string,
-  reference: ImplementationBasisInput["references"][number],
+  reference: BasisReference,
 ): boolean {
   return (
     digest(text) === reference.sha256 &&
     (text.split(/\r?\n/)[reference.line - 1] ?? "").includes(reference.quote)
   );
+}
+
+/** 已保存的引用可继续核对任务基线，新引用必须以当前工作树原文为准。 */
+async function referenceState(files: ProjectFiles, config: Awaited<ReturnType<typeof loadConfig>>["config"],
+  reference: BasisReference, baseline?: { binding: WorktreeBinding; head: string; workspace: WorkspaceBaseline | undefined }) {
+  if (excluded(reference.path, config)) return "stale";
+  try {
+    if (matchesReference(await safeSource(files, reference.path, config), reference)) return "current";
+  } catch { /* 文件变化时，已保存的引用仍可尝试核对任务基线。 */ }
+  if (baseline) {
+    try {
+      await files.path(reference.path, true);
+      await sourceBoundary(files, reference.path, config);
+      const text = await baselineContent(baseline.binding, baseline.head, reference.path, baseline.workspace);
+      if (matchesReference(text, reference)) return "task_baseline";
+    } catch { /* 路径不安全或找不到旧原文时，保留待更新状态。 */ }
+  }
+  return "stale";
 }
 
 /** 这里只核验引用原文，不把文件名、相似度或引用格式有效当作理解了项目。 */
@@ -33,6 +53,7 @@ export async function recordImplementationBasis(
   basis: ImplementationBasisInput,
   acceptanceIds: string[],
   initial?: WorkspaceBaseline,
+  previous?: ImplementationBasisInput,
 ) {
   if (
     basis.decisions.some((item) => !acceptanceIds.includes(item.acceptance_id))
@@ -47,15 +68,9 @@ export async function recordImplementationBasis(
     files = new ProjectFiles(binding.root),
     { config } = await loadConfig(files);
   for (const reference of basis.references) {
-    try {
-      if (
-        !matchesReference(
-          await safeSource(files, reference.path, config),
-          reference,
-        )
-      )
-        throw new Error("原文或哈希不一致");
-    } catch {
+    const prior = previous?.references.find(item => item.id === reference.id);
+    const baseline = prior && JSON.stringify(prior) === JSON.stringify(reference) ? { binding, head, workspace: initial } : undefined;
+    if (await referenceState(files, config, reference, baseline) === "stale") {
       throw new AppError(
         "IMPLEMENTATION_REFERENCE_INVALID",
         `请实际读取并核对实现依据的路径、哈希及行文：${reference.path}`,
@@ -76,6 +91,23 @@ export async function recordImplementationBasis(
       ? ("after_changes" as const)
       : ("before_changes" as const),
   };
+}
+
+/** 约束、实施选择或引用发生变化时只重开对应验收，移除决策也要复核其原验收。 */
+export function implementationAcceptanceToReopen(previous: ImplementationBasisInput | undefined, next: ImplementationBasisInput) {
+  const before = new Map(previous?.decisions.map(decision => [decision.id, decision]));
+  const after = new Map(next.decisions.map(decision => [decision.id, decision]));
+  const oldRefs = new Map(previous?.references.map(reference => [reference.id, reference]));
+  const newRefs = new Map(next.references.map(reference => [reference.id, reference]));
+  const reopen = new Set<string>();
+  for (const id of new Set([...before.keys(), ...after.keys()])) {
+    const original = before.get(id), updated = after.get(id);
+    if (original && updated && previous?.absence_reason === next.absence_reason && JSON.stringify(original) === JSON.stringify(updated)
+      && updated.reference_ids.every(ref => JSON.stringify(oldRefs.get(ref)) === JSON.stringify(newRefs.get(ref)))) continue;
+    if (original) reopen.add(original.acceptance_id);
+    if (updated) reopen.add(updated.acceptance_id);
+  }
+  return reopen;
 }
 
 /** 所有实现决策共用这条复核路径；不针对某一种库、语言或设计模式设专用表单。 */
@@ -102,41 +134,9 @@ export async function implementationBasisReview(
     { config } = await loadConfig(files),
     references = [];
   for (const reference of record.basis.references) {
-    let state: "current" | "task_baseline" | "stale" = "stale";
-    if (!excluded(reference.path, config)) {
-      try {
-        if (
-          matchesReference(
-            await safeSource(files, reference.path, config),
-            reference,
-          )
-        )
-          state = "current";
-      } catch {
-        /* 删除或改写的原依据仍可核对任务基线。 */
-      }
-      if (state === "stale") {
-        try {
-          // 引用路径仍经过安全边界核验；不跟随链接，不执行项目代码。基线只读固定对象的普通文件。
-          await files.path(reference.path, true);
-          await sourceBoundary(files, reference.path, config);
-          if (
-            matchesReference(
-              await baselineContent(
-                binding,
-                task.baseline_head,
-                reference.path,
-                task.workspace_baseline,
-              ),
-              reference,
-            )
-          )
-            state = "task_baseline";
-        } catch {
-          /* 无法核验不能当作依据有效。 */
-        }
-      }
-    }
+    const state = await referenceState(files, config, reference, {
+      binding, head: task.baseline_head, workspace: task.workspace_baseline,
+    });
     references.push({ id: reference.id, path: reference.path, state });
   }
   const decisions = record.basis.decisions.map((decision) => {
@@ -186,6 +186,37 @@ export function assertImplementationBasis(
     review.state === "missing"
       ? "IMPLEMENTATION_BASIS_REQUIRED"
       : "IMPLEMENTATION_BASIS_REVIEW_REQUIRED",
-    "先建立并核对项目实现依据，将实际适用的约束和实现选择关联到验收；逐项复核后再关闭任务",
+    "先调用 task_check 查看 next_actions，在当前代码快照上完成列出的核对，再关闭任务",
   );
+}
+
+/**
+ * 给调用者一次返回所有实现依据待办。更新引用与复核验收是不同动作，已有有效依据可以直接沿用。
+ * 这里不生成证据，也不调整关闭任务所需的真实验收。
+ */
+export function implementationReviewActions(review: Awaited<ReturnType<typeof implementationBasisReview>>) {
+  if (review.state === "missing") return [{
+    action: "record_implementation_basis", tool: "task_update", fields: ["implementation_basis"],
+    instruction: "读取项目约束和同类实现，记录本次实施选择并关联实际验收项。",
+  }];
+  const references = review.references.filter(item => item.state === "stale").map(({ id, path }) => ({ id, path }));
+  const staleReferences = new Set(references.map(item => item.id));
+  const affected = review.decisions.filter(item => item.reference_ids.some(id => staleReferences.has(id)));
+  const pending = review.decisions.filter(item => item.state === "pending");
+  const stale = review.decisions.filter(item => item.state === "stale");
+  return [
+    ...(references.length ? [{
+      action: "refresh_implementation_references", tool: "task_update", fields: ["implementation_basis", "acceptance_criteria"],
+      references, reopen_acceptance_ids: [...new Set(affected.map(item => item.acceptance_id))],
+      instruction: "重新核对列出的引用并追加依据修订，将受影响的验收项重开为 pending，再通过 task_check 获取当前复核项。",
+    }] : []),
+    ...(pending.length || stale.length ? [{
+      action: "review_linked_acceptance", tool: "task_update",
+      fields: ["acceptance_criteria", "review_snapshot", ...(stale.length ? ["reviewed_ids.acceptance_criteria"] : [])],
+      decision_ids: [...pending, ...stale].map(item => item.id),
+      pending_acceptance_ids: [...new Set(pending.map(item => item.acceptance_id))],
+      stale_acceptance_ids: [...new Set(stale.map(item => item.acceptance_id))],
+      instruction: "在当前快照实际验证列出的验收项，再提交对应证据。已有完成项只在实际重核后列入 reviewed_ids。",
+    }] : []),
+  ];
 }

@@ -222,8 +222,8 @@ export async function prepareProject(
           }
         : null,
       next_step: active
-        ? owned ? "继续相关需求前调用 task_check 恢复当前分支任务；新需求可显式挂起原任务后建立新任务，不自动中止。"
-          : "当前分支活跃任务属于另一会话。保留原任务，使用独立工作树，或由原会话显式挂起；不能自动接管。"
+        ? owned ? "继续相关需求前调用 task_check 恢复当前分支任务；同一需求拆分 UI/API 时切到独立工作树并复用 requirement_group_id，新需求可显式挂起原任务后建立新任务，不自动中止。"
+          : "当前工作树活跃任务属于另一会话。保留原任务；同一需求的 UI/API 子任务请使用独立工作树并传入同一 requirement_group_id，不同需求由原会话显式挂起或使用独立工作树，不能自动接管。"
         : unmerged
         ? "读取冲突文件及双方修改后，以 task_open(task_kind:'merge_recovery') 建立仅覆盖当前冲突文件的恢复任务。仅用户明确要求用某来源整文件替换时传 resolution_source；手工结合双方修改时省略，不能把“以某分支为主”当成整文件覆盖授权。保留已有普通改动，不自动选择 ours/theirs。"
         : !clean && ignored

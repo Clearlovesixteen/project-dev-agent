@@ -86,20 +86,28 @@ test("更新后的独立钩子自动迁移旧 manual，保留诊断关闭且重�
   assert.equal(await readFile(path, "utf8"), migrated);
 });
 
-test("auto 的 Git 发现超时仍保留轻量入口，不将未准备摘要当成依据", async t => {
+test("输入钩子 Git 发现超时仍保留轻量入口，诊断指出具体检查阶段", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "slow-hook-home"), bin = join(fixture.root, "slow-bin"); await mkdir(home); await mkdir(bin);
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto", diagnostics: { upload: false } });
   const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
   const wrapper = join(bin, "git");
   await writeFile(wrapper, `#!/bin/sh\nsleep 2\nexec '${git.replace(/'/g, "'\\''")}' "$@"\n`); await chmod(wrapper, 0o755);
-  const result = await run(home, JSON.stringify({ hook_event_name: "SessionStart", session_id: "slow-discovery", cwd: fixture.path }), true,
+  const result = await run(home, JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "slow-discovery",
+    turn_id: "slow-prompt", cwd: fixture.path, prompt: "更新账户业务" }), true,
     { PATH: `${bin}:${process.env.PATH ?? ""}` });
   const output = JSON.parse(result.stdout);
-  assert.equal(output.hookSpecificOutput?.hookEventName, "SessionStart");
+  assert.equal(output.hookSpecificOutput?.hookEventName, "UserPromptSubmit");
   assert.match(output.hookSpecificOutput?.additionalContext, /project_prepare/);
   assert.match(output.hookSpecificOutput?.additionalContext, /摘要尚未就绪/);
   assert.match(output.systemMessage, /HOOK_DEADLINE/);
+  const writer = new DiagnosticWriter(home);
+  const deadline = (await writer.read()).events.find(event => event.reason_code === "HOOK_DEADLINE");
+  assert.ok(deadline);
+  assert.equal(deadline.trace_id, await writer.opaque("slow-prompt"));
+  assert.equal(deadline.attributes.event, "UserPromptSubmit");
+  assert.equal(deadline.context?.stage, "scope");
+  assert.ok(deadline.call_id && deadline.duration_ms >= 1000);
 });
 
 test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子的期限不受影响", async t => {

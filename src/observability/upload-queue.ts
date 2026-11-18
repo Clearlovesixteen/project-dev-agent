@@ -10,7 +10,7 @@ export interface LocalUploadRejection { file: string; line: number; reason: Reje
 export interface UploadPage { events: TelemetryEvent[]; positions: UploadPositions; discarded: LocalUploadRejection[]; }
 
 /** 一次读取最多四批。每页持有独立游标快照，后页失败不能撤回已确认的前页。 */
-export async function uploadQueue(files: ProjectFiles, epoch: string, previous: UploadPositions) {
+export async function uploadQueue(files: ProjectFiles, epoch: string, previous: UploadPositions, batchSize: number) {
   const names: string[] = [];
   try {
     let inspected = 0;
@@ -39,7 +39,7 @@ export async function uploadQueue(files: ProjectFiles, epoch: string, previous: 
       positions[name] = index + 1;
       if (checked && "reason" in checked) { invalid++; discarded.push({ file: name, line: index + 1, reason: checked.reason }); }
       else if (checked) batch.push(checked.event);
-      if (batch.length === 50 || discarded.length === 50) {
+      if (batch.length === batchSize || discarded.length === 50) {
         flush(); if (pages.length === 4) return { pages, positions, invalid, pending: true };
       }
     }
