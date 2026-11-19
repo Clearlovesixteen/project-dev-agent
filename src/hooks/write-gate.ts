@@ -40,7 +40,7 @@ export function nativeToolIdentity(input: NativeHookInput, project: string, inte
 
 /** 原生工具检查只读项目状态；不替用户运行脚本、修改代码、终止任务或扩大工作范围。 */
 export async function checkProjectWrite(input: NativeHookInput, binding: WorktreeBinding, interaction: InteractionContext, home: string,
-  pluginRoot: string, diagnostic: DiagnosticContext, targets: readonly string[] = []): Promise<{ output: Record<string, unknown>; reason: string; ready: boolean; task?: string; coverage?: "observed" | "partial" }> {
+  pluginRoot: string, diagnostic: DiagnosticContext, targets: readonly string[] = [], targetResolution: "known" | "unknown" | "not_applicable" = "not_applicable"): Promise<{ output: Record<string, unknown>; reason: string; ready: boolean; task?: string; coverage?: "observed" | "partial" }> {
   const kind = writeKind(input, pluginRoot);
   if (!kind) return { output: {}, reason: "READ_ONLY_OR_UNSUPPORTED", ready: false };
   const uncertain = toolCommandDecision(input)?.classification === "unknown"
@@ -107,10 +107,15 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
   diagnostic.stage = "target"; diagnostic.planned_count = Math.min(planned.length, 500);
   if (!planned.length) diagnostic.target_scope = "unplanned";
   if (!planned.length) return stop("WRITE_SCOPE_REQUIRED", "先用 task_update.change_items 记录本次修改位置、原因和相关验收，保留已有 ID。");
-  if (kind === "patch") {
-    diagnostic.target_count = Math.min(targets.length, 500); diagnostic.target_scope = "unknown";
-    if (!targets.length) return stop("WRITE_TARGET_UNKNOWN", "无法识别补丁目标。请使用标准 apply_patch 文件头或明确的 file_path。");
-    for (const target of targets) {
+  // 合并恢复任务中的 validation run 已由 mergeRecoveryWrite 按任务、项目和检查 ID
+  // 精确核验，不能再次被普通 shell 未知目标规则拦截。其他动态 shell 写入仍然拒绝。
+  if (targetResolution === "unknown" && !task.workspace_baseline?.merge_recovery)
+    return stop("WRITE_TARGET_UNKNOWN", "无法可靠识别 shell 写入目标。请拆成明确的单文件修改命令，或使用 apply_patch 并提供标准文件头。不能按未知目标放行。");
+  if (kind === "patch" || targetResolution === "known") {
+    const resolvedTargets = targets ?? [];
+    diagnostic.target_count = Math.min(resolvedTargets.length, 500); diagnostic.target_scope = "unknown";
+    if (!resolvedTargets.length && kind === "patch") return stop("WRITE_TARGET_UNKNOWN", "无法识别补丁目标。请使用标准 apply_patch 文件头或明确的 file_path。");
+    for (const target of resolvedTargets) {
       if (!planned.includes(target)) { diagnostic.target_scope = "unplanned"; return stop("WRITE_SCOPE_REQUIRED", `补丁目标 ${target} 尚未记录在本任务修改清单。核对关联范围后追加清单，再重试。`); }
       if (modelScope && !modelScope.has(target)) {
         diagnostic.target_scope = "unplanned";
@@ -124,7 +129,7 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
     if (input.tool_use_id && !next.pending_tools.includes(input.tool_use_id)) next.pending_tools.push(input.tool_use_id);
   });
   diagnostic.stage = "ready"; diagnostic.decision = "allow"; diagnostic.required_action = "none";
-  return { output: {}, reason: "WRITE_READY", ready: true, task: task.id, coverage: kind === "patch" ? "observed" as const : "partial" as const };
+  return { output: {}, reason: "WRITE_READY", ready: true, task: task.id, coverage: targetResolution === "known" ? "observed" as const : "partial" as const };
 }
 
 /** PostToolUse 只证明支持的工具返回了结果，既不等同于产生 Git 差异，也不等同于验收通过。 */
@@ -135,10 +140,20 @@ export async function observeWriteResult(input: NativeHookInput, binding: Worktr
   if (!state || state.branch !== binding.branch) return false;
   if (state.completed_tools.includes(input.tool_use_id)) return true;
   if (!state.pending_tools.includes(input.tool_use_id)) return false;
+  if (toolResponseFailed(input.tool_response)) return "failed" as const;
   await store.change(binding.root, interaction, binding.branch, next => {
     if (next.completed_tools.includes(input.tool_use_id!)) return;
     next.pending_tools = next.pending_tools.filter(id => id !== input.tool_use_id);
     next.completed_tools = [...next.completed_tools, input.tool_use_id!].slice(-40); next.write_calls++;
   });
   return true;
+}
+
+/** 宿主返回结构可能随工具变化，只有明确失败才保留 pending，未知结构按兼容路径处理。 */
+function toolResponseFailed(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const response = value as Record<string, unknown>;
+  if (response.is_error === true || response.isError === true || response.success === false) return true;
+  if (typeof response.status === "string" && /^(?:error|failed|failure|cancelled|canceled)$/i.test(response.status)) return true;
+  return response.error !== undefined && response.error !== null;
 }

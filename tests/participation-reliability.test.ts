@@ -15,6 +15,7 @@ import { UnderstandingService } from "../src/understanding/service.js";
 import { recordRequirementSources } from "../src/quality/requirement-review.js";
 import { recordValidationPlan } from "../src/quality/validation-plan.js";
 import { ParticipationStore } from "../src/workflow/participation.js";
+import { observeWriteResult } from "../src/hooks/write-gate.js";
 
 const exec = promisify(execFile);
 const context = (result: Record<string, unknown>) => (result.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext ?? "";
@@ -97,6 +98,16 @@ test("缺失检查配置返回可定位的稳定错误，不再退化为 OPERATI
     assert.match(error.message, /lint/); assert.match(error.message, /\.stylelintrc\.js/);
     return true;
   });
+});
+
+test("修改工具明确失败时保留待确认状态，不把失败调用记成完成", async t => {
+  const s = await setup(t), store = new ParticipationStore(s.home), interaction = { session_id: "reliability-session", turn_id: "turn-1" };
+  await store.change(s.fixture.path, interaction, s.binding.branch, state => state.pending_tools.push("failed-write"));
+  const observed = await observeWriteResult({ hook_event_name: "PostToolUse", session_id: interaction.session_id, turn_id: interaction.turn_id,
+    cwd: s.fixture.path, tool_name: "Bash", tool_use_id: "failed-write", tool_input: { command: "sed -i 's/a/b/' src/auth.js" },
+    tool_response: { is_error: true, error: "permission denied" } }, s.binding, interaction, s.home);
+  assert.equal(observed, "failed");
+  assert.equal((await store.status(s.fixture.path, interaction, s.binding.branch)).state, "write_in_progress");
 });
 
 test("共享业务模型出现歧义时，查询回执不能放行后续代码修改", async t => {

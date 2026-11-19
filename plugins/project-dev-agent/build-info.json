@@ -157,8 +157,8 @@
     },
     {
       "path": "hooks/hooks.json",
-      "bytes": 855,
-      "sha256": "78de834ef88dd34a3f97ed65f355484e0a21f5e68a7770e6422257ea4c6037fd"
+      "bytes": 921,
+      "sha256": "eae3c788720ecc95cebd7bf507e0f0d754bc6dba9dd11ad7f873d449d0bea194"
     },
     {
       "path": "mcp.json",
@@ -172,8 +172,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 1856,
-      "sha256": "0c88159cb0d5d51eb0dba69f784957b345ac58b43bfc3a65d1eab2e2338da0a2"
+      "bytes": 2123,
+      "sha256": "0a8c1defbd6ae8a8225051a203199ff99c114433bf41307886d04def2de3f953"
     },
     {
       "path": "runtime/behavior-reporter.mjs",
@@ -182,13 +182,13 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1365044,
-      "sha256": "bb35fa630eb14f461ff1cae4dcbc3f34ab13487649e0cc5053318a18815dbd26"
+      "bytes": 1366505,
+      "sha256": "9ccdf9e7ee565eac84136d6746498d9cd8c58117d546462186d74e1f31dccb18"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1232312,
-      "sha256": "f076ecfdf2840773721d8e0c6aba5c685687978978f1c77db2bd1f750ecd9ca0"
+      "bytes": 1235554,
+      "sha256": "c0a29d5cb196633803de95382d2f019d64c442a5058bdaaf7971908e35edf0bb"
     },
     {
       "path": "runtime/symbol-index.mjs",

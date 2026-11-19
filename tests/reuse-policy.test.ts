@@ -69,6 +69,14 @@ test("原请求库的维护、未变化旧调用、类型和注释不算新增�
   assert.equal(check.quality.reuse.violations.length, 0); assert.equal(check.quality.reuse.state, "checked");
 });
 
+test("插件 runtime 生成资产不参与业务请求复用检查", async t => {
+  const { put, tasks } = await setup(t);
+  await put("plugins/project-dev-agent/runtime/generated.mjs", "globalThis.fetch('/diagnostic');\n");
+  const check = (await tasks.check({})).data as any;
+  assert.equal(check.quality.reuse.violations.length, 0);
+  assert.equal(check.quality.reuse.state, "checked");
+});
+
 test("重新扫描后新写客户端不能反过来成为任务的既有基础设施", async t => {
   const { put, tasks, service, task } = await setup(t);
   const original = JSON.stringify(task.implementation_baseline);

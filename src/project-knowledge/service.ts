@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { AppError } from "../domain/error.js";
 import type { WorktreeBinding } from "../git/baseline.js";
 import { ProjectKnowledgeRepository } from "./repository.js";
-import { collectSourceStamp, type SourceStamp } from "./source-stamp.js";
+import { collectSourceStamp, isConfigurationPath, type SourceStamp } from "./source-stamp.js";
 import { ModuleSnapshotSchema, resolveKnowledgeView, type KnowledgeView, type ModuleSnapshot } from "./view-resolver.js";
 import { ObjectEnvelopeSchema, ProjectKnowledgeApplyReceiptSchema, type ObjectEnvelope, type ProjectIdentity, type SnapshotPointer, type ProjectKnowledgeApplyReceipt } from "./contracts.js";
 
@@ -72,7 +72,7 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
       const snapshot = ModuleSnapshotSchema.parse(object.content);
       return [...snapshot.source_fingerprints, ...snapshot.dependency_fingerprints, ...snapshot.configuration_fingerprints].map(item => item.path);
     });
-    const source_stamp = await collectSourceStamp(binding, { paths });
+    const source_stamp = await collectSourceStamp(binding, { paths, includeConfiguration: true });
     const view = resolveKnowledgeView({ source_stamp, snapshots: objects });
     const state = view.modules.length === 0 ? "empty" : view.modules.some((item) => item.state === "partial") ? "partial" : view.unresolved.length ? "needs_review" : "matched";
     // 覆盖不足时保留快照 ID 给排障工具，业务查询只接收已经完整核验的正文。
@@ -155,8 +155,20 @@ export async function publishModelShadow(
   // 避免将普通修订误判为两个并行模型。
   const base = options.base_model && JSON.stringify(sharedContent(options.base_model));
   const anchor = base && modelSnapshots.find(item => JSON.stringify(item.snapshot.content) === base);
-  const source_stamp = await collectSourceStamp(binding, { paths: related.map(item => item.path) });
+  // related_versions 保存直接证据和关联实现路径。配置/依赖也必须进入同一份
+  // 快照，否则 package/lock/tsconfig 变化后仍可能复用旧业务结论。
+  const source_stamp = await collectSourceStamp(binding, { paths: related.map(item => item.path), includeConfiguration: true });
   const evidence_stamp_id = evidenceStampId(source_stamp);
+  const configurationPaths = new Set(source_stamp.configuration.map(item => item.path));
+  const sourcePaths = new Set(Array.isArray(model.sources)
+    ? model.sources.flatMap(item => typeof item === "object" && item !== null && "path" in item && typeof item.path === "string" ? [item.path] : [])
+    : []);
+  // 旧版影子写入可能只有 related_versions，没有 sources。此时保持旧语义，
+  // 将非配置路径视为源码证据，避免升级后所有历史候选都因 source_evidence_missing 消失。
+  const hasExplicitSourcePaths = sourcePaths.size > 0;
+  const source_fingerprints = related.filter(item => !configurationPaths.has(item.path) && (!hasExplicitSourcePaths || sourcePaths.has(item.path)));
+  const dependency_fingerprints = related.filter(item => !configurationPaths.has(item.path) && hasExplicitSourcePaths && !sourcePaths.has(item.path));
+  const configuration_fingerprints = source_stamp.configuration.filter(item => isConfigurationPath(item.path));
   // 同一业务模型修订在共享回执保存失败后会再次构造快照；使用模型自身的
   // immutable recorded_at 作为 provenance 时间，避免重试仅因当前时间变化而
   // 产生新的 snapshot_id。
@@ -180,7 +192,9 @@ export async function publishModelShadow(
   })).sort((a, b) => b.revision - a.revision || a.id.localeCompare(b.id));
   const baseContent = { model_id: modelId, module: typeof model.module === "string" ? model.module : modelId,
     parent_snapshot_ids: options.parent_snapshot_ids ?? (anchor ? [anchor.id] : parents.map(parent => parent.id)), basis,
-    source_fingerprints: related.map((item) => ({ path: item.path, sha256: item.sha256 })), dependency_fingerprints: [], configuration_fingerprints: [], content: sharedModel } satisfies ModuleSnapshot;
+    source_fingerprints: source_fingerprints.map((item) => ({ path: item.path, sha256: item.sha256 })),
+    dependency_fingerprints: dependency_fingerprints.map((item) => ({ path: item.path, sha256: item.sha256 })),
+    configuration_fingerprints, content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
     provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: evidence_stamp_id, recorded_at: recordedAt },

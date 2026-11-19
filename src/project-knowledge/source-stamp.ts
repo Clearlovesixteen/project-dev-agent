@@ -24,6 +24,7 @@ export type SourceEntry = z.infer<typeof SourceEntrySchema>;
 export const SourceStampSchema = z.object({
   schema_version: z.literal(1), repo_identity: z.string().min(1), worktree_root: z.string().min(1), head: z.string().regex(/^[a-f0-9]{40,64}$/),
   entries: z.array(SourceEntrySchema).max(MAX_FILES),
+  // 配置文件可能刚从 Git 删除或暂时不可读，保留 null 让读取校验能够报告变化。
   configuration: z.array(z.object({ path: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/).nullable() }).strict()).max(200),
   status: z.object({ staged: z.number().int().nonnegative(), unstaged: z.number().int().nonnegative(), untracked: z.number().int().nonnegative(), deleted: z.number().int().nonnegative(), renamed: z.number().int().nonnegative() }).strict(),
   coverage: z.object({ discovered: z.number().int().nonnegative(), read: z.number().int().nonnegative(), unreadable: z.number().int().nonnegative(), excluded: z.number().int().nonnegative(), bytes: z.number().int().nonnegative(), complete: z.boolean() }).strict(),
@@ -80,7 +81,7 @@ function parseStatus(output: Buffer): { items: StatusItem[]; excludedCount: numb
   return { items: [...items].map(([path, kinds]) => ({ path, kinds: [...kinds] })).sort((a, b) => a.path.localeCompare(b.path)), excludedCount };
 }
 
-async function candidatePaths(binding: WorktreeBinding): Promise<{ paths: string[]; statuses: Map<string, StatusKind[]>; statusRaw: Buffer; excludedCount: number }> {
+async function candidatePaths(binding: WorktreeBinding, options: { allowOverLimit?: boolean } = {}): Promise<{ paths: string[]; statuses: Map<string, StatusKind[]>; statusRaw: Buffer; excludedCount: number }> {
   const statusRaw = (await readGit(binding.root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])).stdout;
   const parsed = parseStatus(statusRaw), paths = new Set<string>(parsed.items.map((item) => item.path));
   const tracked = nulFields((await readGit(binding.root, ["ls-files", "-z"])).stdout);
@@ -93,7 +94,7 @@ async function candidatePaths(binding: WorktreeBinding): Promise<{ paths: string
     if (!excluded(path)) addPath(paths, path);
     if (status.startsWith("R") || status.startsWith("C")) { const destination = diff[index++]; if (!destination) throw new AppError("GIT_OUTPUT_INVALID", "Git 重命名差异缺少目标路径"); if (!excluded(destination)) addPath(paths, destination); }
   }
-  if (paths.size > MAX_FILES) throw new AppError("SOURCE_STAMP_LIMIT", `当前工作树超过 ${MAX_FILES} 个可读文件`);
+  if (!options.allowOverLimit && paths.size > MAX_FILES) throw new AppError("SOURCE_STAMP_LIMIT", `当前工作树超过 ${MAX_FILES} 个可读文件`);
   return { paths: [...paths].sort(), statuses: new Map(parsed.items.map((item) => [item.path, item.kinds])), statusRaw, excludedCount: parsed.excludedCount };
 }
 
@@ -133,7 +134,8 @@ async function readEntry(root: string, path: string, status: StatusKind[], total
   }
 }
 
-function configurationPath(path: string): boolean { return /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig(?:\.[^/]+)?\.json)$/.test(path); }
+/** 可影响业务模型实现的项目配置和依赖声明。 */
+export function isConfigurationPath(path: string): boolean { return /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig(?:\.[^/]+)?\.json)$/.test(path); }
 
 async function capture(binding: WorktreeBinding, scope?: readonly string[]): Promise<Capture> {
   const beforeHead = gitLine((await readGit(binding.root, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout);
@@ -143,16 +145,24 @@ async function capture(binding: WorktreeBinding, scope?: readonly string[]): Pro
   for (const path of candidates.paths) entries.push(await readEntry(binding.root, path, candidates.statuses.get(path) ?? ["tracked"], total));
   const status = { staged: 0, unstaged: 0, untracked: 0, deleted: 0, renamed: 0 };
   for (const entry of entries) for (const kind of entry.status) if (kind in status) status[kind as keyof typeof status]++;
-  const configuration = entries.filter((entry) => configurationPath(entry.path)).map((entry) => ({ path: entry.path, sha256: entry.sha256 }));
+  const configuration = entries.filter((entry) => isConfigurationPath(entry.path)).map((entry) => ({ path: entry.path, sha256: entry.sha256 }));
   const stampWithoutId = SourceStampSchema.omit({ stamp_id: true }).parse({ schema_version: 1, repo_identity: binding.repo_identity, worktree_root: binding.root, head: beforeHead, entries, configuration, status, coverage: { discovered: candidates.paths.length, read: entries.filter((entry) => entry.kind === "file").length, unreadable: entries.filter((entry) => entry.kind === "unreadable").length, excluded: candidates.excludedCount, bytes: total.bytes, complete: entries.every((entry) => entry.kind !== "unreadable") } });
   const signature = digest(JSON.stringify({ head: beforeHead, status: digest(candidates.statusRaw), paths: entries.map((entry) => [entry.path, entry.kind, entry.sha256, entry.target]) }));
   return { stamp: stampWithoutId, signature };
 }
 
-export async function collectSourceStamp(binding: WorktreeBinding, options: { onCaptured?: () => Promise<void> | void; paths?: readonly string[] } = {}): Promise<SourceStamp> {
+export async function collectSourceStamp(binding: WorktreeBinding, options: { onCaptured?: () => Promise<void> | void; paths?: readonly string[]; includeConfiguration?: boolean } = {}): Promise<SourceStamp> {
   // 已建模的工作树只为快照所依赖的路径做实时指纹，不因无关图片、构建物或单仓库总大小而判定规则过期。
   const scoped = options.paths === undefined ? undefined : new Set<string>();
   if (scoped) for (const path of options.paths!) if (!excluded(path)) addPath(scoped, path);
+  // 模型读取通常只传入 related_paths。把配置候选加入同一份源码快照，
+  // 才能在不扫描全部业务文件的情况下发现依赖声明或 TypeScript 路径变化。
+  if (scoped && options.includeConfiguration) {
+    // 这里只枚举路径来寻找少量配置文件，不读取其余内容，也不因仓库总文件数
+    // 超过源码快照上限而拒绝一次局部模型核验。
+    const candidates = await candidatePaths(binding, { allowOverLimit: true });
+    for (const path of candidates.paths) if (isConfigurationPath(path)) scoped.add(path);
+  }
   if (scoped && scoped.size > MAX_FILES) throw new AppError("SOURCE_STAMP_LIMIT", "当前模型依赖文件超过核对上限");
   const paths = scoped ? [...scoped].sort() : undefined;
   const first = await capture(binding, paths);

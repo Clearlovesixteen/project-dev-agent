@@ -1,0 +1,9 @@
+schema_version: 1
+knowledge_dir: .project-dev/knowledge
+exclude_paths:
+  - node_modules
+  - dist
+  - .project-dev/local
+  - plugins/*/runtime
+  - plugins/project-dev-agent/runtime
+  - docs/team-introduction.html

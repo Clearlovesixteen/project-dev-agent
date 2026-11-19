@@ -48,7 +48,11 @@ export async function mergeRecoveryWrite(input: NativeHookInput, binding: Worktr
   if (isPatch) targets = patchTargets;
   else {
     const words = singleCommand(args?.command ?? args?.cmd, shellDialect(input.cwd, args?.shell));
-    if (savedValidation(words, input, binding, task, pluginRoot)) { diagnostic.stage = "validation"; diagnostic.command_family = "validation"; await assertMergeResolved(binding, recovery); return; }
+    if (savedValidation(words, input, binding, task, pluginRoot)) {
+      diagnostic.stage = "validation"; diagnostic.command_family = "validation";
+      await assertMergeResolved(binding, recovery);
+      return;
+    }
     if (!words || !["git", "git.exe"].includes(words[0] ?? ""))
       return stop("MERGE_RECOVERY_COMMAND_REQUIRED", "恢复任务仅允许精确冲突路径的补丁，或单条 git restore / git add；不允许脚本、复合命令或任意终端写入。");
     const separator = words.indexOf("--");

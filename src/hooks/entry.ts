@@ -75,7 +75,9 @@ try {
   const input: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   const parsed = HookInput.safeParse(input);
   if (parsed.success) pendingInput = parsed.data;
-  // 仅完整读入的异步 Stop 允许更长网络预算；输入未结束和同步项目辅助仍走原短期限。
+  // 输入钩子保持短期限；修改前检查需要读取任务、模型与目标范围，在并发 Git 操作下
+  // 给它一段有限余量；仅完整读入的异步 Stop 允许更长网络预算。
+  if (input && typeof input === "object" && "hook_event_name" in input && input.hook_event_name === "PreToolUse") budget(6500, 7500);
   if (input && typeof input === "object" && "hook_event_name" in input && input.hook_event_name === "Stop") budget(5500, 6000);
   if (input && typeof input === "object" && "session_id" in input && typeof input.session_id === "string" && input.session_id.length <= 200) {
     const turn = "turn_id" in input && typeof input.turn_id === "string" && input.turn_id.length <= 200 ? input.turn_id : undefined;

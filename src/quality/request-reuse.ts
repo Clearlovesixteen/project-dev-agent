@@ -81,9 +81,13 @@ export async function requestReuseReview(
 ) {
   const files = new ProjectFiles(binding.root),
     { config } = await loadConfig(files);
+  // 发布包中的 runtime 是由源码构建出的运行资产，不能作为业务源码参与请求库复用审查。
+  // 否则打包后新增的 fetch/undici 代码会被误认为业务模块绕过统一请求入口。
+  const generatedRuntime = (path: string) => /^plugins\/[^/]+\/runtime\//.test(path);
   const candidates = changed.filter(
     (path) =>
       programFile(path) &&
+      !generatedRuntime(path) &&
       !excluded(path, config) &&
       !/(?:^|\/)(?:tests?|__tests__|e2e)\/|\.(?:test|spec)\./.test(path),
   );

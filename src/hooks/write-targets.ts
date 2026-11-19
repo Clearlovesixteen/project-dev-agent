@@ -5,7 +5,7 @@ import { bindWorktree } from "../git/index.js";
 import { ProjectFiles, hasCode } from "../storage/project-files.js";
 import type { NativeHookInput } from "./contracts.js";
 import { hookProject } from "./project.js";
-import { patchPaths } from "./tool-policy.js";
+import { patchPaths, shellWritePaths } from "./tool-policy.js";
 
 function within(root: string, path: string): string | undefined {
   const value = relative(root, path);
@@ -36,7 +36,8 @@ async function gitDirectory(directory: string, cache: Map<string, string | undef
 
 /** 修改前后按同一组目标定位；显式工具目录优先，隐式切换只允许一个已核验的同仓库工作树。 */
 export async function resolveWriteTargets(input: NativeHookInput, workdir: string, baseProject: string) {
-  const paths = patchPaths(input);
+  const paths = input.tool_name === "Bash" || input.tool_name === "exec_command" || input.tool_name === "shell_command" || input.tool_name === "shell"
+    ? shellWritePaths(input) ?? [] : patchPaths(input);
   if (!paths.length) return { project: baseProject, paths: [] };
   const directories = new Map<string, string | undefined>();
   const verifiedRoots = new Map<string, string>();

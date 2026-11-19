@@ -1,6 +1,7 @@
 import { resolve, win32 } from "node:path";
 import type { NativeHookInput } from "./contracts.js";
 import { classifyCommand, shellDialect, singleCommand, type CommandDecision } from "./shell-policy.js";
+import { shellSyntax } from "./shell-syntax.js";
 import { programName } from "./shell-commands.js";
 
 const PROJECT_TOOLS = new Set(["project_prepare", "project_scan", "project_context", "knowledge_search", "task_open", "task_update", "task_check",
@@ -60,4 +61,49 @@ export function patchPaths(input: NativeHookInput): string[] {
   const patch = args?.command ?? args?.patch ?? (typeof input.tool_input === "string" ? input.tool_input : undefined);
   if (typeof patch !== "string") return [];
   return [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): ([^\r\n]+)\r?$/gm)].map(match => match[1]!);
+}
+
+/**
+ * 提取少量可以静态确认的 shell 写入目标。
+ * 返回 null 表示命令本身是 Git 状态操作，不直接写业务文件，返回 undefined 表示不能安全确定目标。
+ */
+export function shellWritePaths(input: NativeHookInput): string[] | null | undefined {
+  const args = toolArguments(input), command = args?.command ?? args?.cmd;
+  const decision = toolCommandDecision(input);
+  if (decision?.classification !== "write" || typeof command !== "string") return undefined;
+  const syntax = shellSyntax(command, decision.dialect);
+  if (syntax.state === "unknown") return undefined;
+  const segments: string[][] = [];
+  let words: string[] = [];
+  for (const token of syntax.tokens) {
+    if (token.kind === "word") words.push(token.word.value);
+    else if (words.length) { segments.push(words); words = []; }
+  }
+  if (words.length) segments.push(words);
+  const paths: string[] = [];
+  let sawGit = false;
+  for (const segment of segments) {
+    const name = programName(segment[0] ?? "");
+    if (name === "git") { sawGit = true; continue; }
+    if (["cp", "mv", "copy-item", "move-item"].includes(name)) {
+      const values = segment.slice(1).filter(value => !value.startsWith("-"));
+      if (values.length < 2) return undefined;
+      paths.push(values.at(-1)!);
+      continue;
+    }
+    if (["rm", "rmdir", "touch", "mkdir", "tee", "set-content", "add-content", "out-file", "remove-item", "new-item", "rename-item", "set-item", "clear-content"].includes(name)) {
+      const values = segment.slice(1).filter(value => !value.startsWith("-"));
+      if (!values.length) return undefined;
+      paths.push(...(name === "tee" ? values.slice(-1) : values));
+      continue;
+    }
+    if (name === "sed") {
+      const values = segment.slice(1), script = values.findIndex(value => !value.startsWith("-"));
+      if (script < 0 || values.length <= script + 1) return undefined;
+      paths.push(...values.slice(script + 1));
+      continue;
+    }
+    return undefined;
+  }
+  return paths.length ? paths : sawGit ? null : undefined;
 }

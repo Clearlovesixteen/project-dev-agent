@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { writeKind } from "../src/hooks/tool-policy.js";
+import { shellWritePaths, writeKind } from "../src/hooks/tool-policy.js";
 
 const kind = (command: string, windows = false) => writeKind({ hook_event_name: "PreToolUse", session_id: "readonly-test",
   cwd: windows ? "C:\\work\\sample" : "/work/sample", tool_name: "Bash", tool_input: { command, shell: windows ? "pwsh.exe" : "bash" } });
@@ -83,4 +83,14 @@ test("插件管理仍可执行且不把配置字面值误认为管道", () => {
   const root = 'C:\\Users\\Person\\.codex\\plugins\\agent\\0.13.5';
   assert.equal(writeKind({ hook_event_name: "PreToolUse", cwd: 'C:\\work', session_id: "windows-cli", tool_name: "Bash",
     tool_input: { command: 'node.exe "c:\\users\\person\\.CODEX\\plugins\\AGENT\\0.13.5\\runtime\\cli.mjs" runtime status' } }, root), undefined);
+});
+
+test("shell 写入只在目标可静态确认时进入文件范围核对", () => {
+  const input = (command: string) => ({ hook_event_name: "PreToolUse" as const, cwd: "/work/sample", session_id: "shell-target", tool_name: "Bash", tool_input: { command } });
+  assert.deepEqual(shellWritePaths(input("sed -i 's/a/b/' src/index.js")), ["src/index.js"]);
+  assert.deepEqual(shellWritePaths(input("cp src/a.js src/b.js")), ["src/b.js"]);
+  assert.deepEqual(shellWritePaths(input("rm -f src/a.js")), ["src/a.js"]);
+  assert.equal(shellWritePaths(input("git merge feature")), null);
+  assert.deepEqual(shellWritePaths(input("git status --short; rm -f src/a.js")), ["src/a.js"]);
+  assert.equal(shellWritePaths(input("node -e 'writeFile()'")), undefined);
 });

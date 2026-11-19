@@ -91,7 +91,7 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </div>
 <div>
 <dt>当前阶段</dt>
-<dd>v0.13.7 · 项目级业务模型、设计约束与稳定生码</dd>
+<dd>v0.14.0 · 项目级业务模型、写入门禁与稳定生码</dd>
 </div>
 </dl>
 </aside>
@@ -445,6 +445,20 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 <div class="lifecycle-return">
 <span aria-hidden="true">↺</span> 更新后的相关规则供下次查询使用；原有修订继续保留。</div>
 </figure>
+<div class="table-wrap presentation-table model-fields" role="region" aria-label="业务模型字段与作用" tabindex="0">
+<table>
+<thead><tr><th scope="col">字段</th><th scope="col">记录什么</th><th scope="col">开发时如何使用</th></tr></thead>
+<tbody>
+<tr><th scope="row"><code>model_id / module</code></th><td>稳定的模型与业务模块标识</td><td>跨需求复用同一模块模型，避免每次重新解释。</td></tr>
+<tr><th scope="row"><code>parent_snapshot_ids</code></th><td>继承、分支与合并前的父快照</td><td>保留并行工作树的来源链，合并后重新核对，不覆盖另一条分支的记录。</td></tr>
+<tr><th scope="row"><code>basis</code></th><td><code>observed</code> 代码现状、<code>intended</code> 需求预期、<code>inferred</code> 待核实推断</td><td>让 Codex 区分已经存在的行为和本次要实现的目标。</td></tr>
+<tr><th scope="row"><code>source_fingerprints</code></th><td>模块直接实现文件的路径和 SHA-256</td><td>直接实现变化时标记模型重新核对。</td></tr>
+<tr><th scope="row"><code>dependency_fingerprints</code></th><td>公共封装、关联入口和依赖实现的路径和 SHA-256</td><td>发现点对点修改遗漏的上下游位置。</td></tr>
+<tr><th scope="row"><code>configuration_fingerprints</code></th><td><code>package.json</code>、锁文件、<code>tsconfig</code> 等配置指纹</td><td>配置变化后阻止继续沿用旧结论。</td></tr>
+<tr><th scope="row"><code>content / provenance</code></th><td>对象、流程、规则、关系、来源，以及仓库、工作树、HEAD 和记录时间</td><td>提供业务语义和可追溯的产生环境，支持后续审查与局部回写。</td></tr>
+</tbody>
+</table>
+</div>
 </div>
 </article><article class="topic" id="decisions" aria-labelledby="decisions-title">
 <header class="topic-head"><span class="topic-index">2.3</span><div><h3 id="decisions-title">工程约束：模块化、注释、组件与设计模式</h3><p>说明编码前如何判断沿用、扩展或新增。</p></div></header>
@@ -941,8 +955,8 @@ nav{gap:17px}.business-summary-link{display:inline-flex;gap:7px;color:var(--gree
 </div>
 <div class="proof-note">
 <div class="proof">
-<b>已经具备的机制</b>
-<p>项目检索、业务模型、即时纠正、任务接续、来源与真实检查校验已实现。v0.13.2 在 Node 20.19.6 通过 291 项全量回归，Node 18.19.0 / 18.19.1 各通过 38 项重点检查，完成隔离升级和宿主实际连接 16 个 MCP 工具的检查；线上受控验证一次确认 121 条积压测试事件，关闭后零新增。三个 Node 版本的全量 <a href="https://github.com/Clearlovesixteen/project-dev-agent/actions/runs/41598205025" target="_blank" rel="noopener noreferrer">CI 已通过</a>。测试数不代表实际生码收益。</p>
+<b>v0.14.0 本次补强</b>
+<p>写入门禁现在核对可识别的 shell 目标并保留失败状态；同一需求的多个工作树在登记后重算重叠范围；业务模型同时检查直接源码、关联依赖和项目配置指纹；诊断读取窗口截断时保持待上传。发布前以本地全量测试和安装包回归结果为准，测试数不代表实际生码收益。</p>
 </div>
 <div class="proof">
 <b>仍需要团队验证的效果</b>

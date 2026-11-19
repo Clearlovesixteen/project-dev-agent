@@ -71,7 +71,7 @@ test("真实单锁文件UU冲突：task_open不能与指定来源restore形成�
     target: observed.context?.target_scope, task: observed.context?.task_kind, family: observed.context?.command_family },
   { merge: "unmerged", remaining: 1, source: "matched", target: "within", task: "merge_recovery", family: "git_restore" });
   assert.ok(!JSON.stringify(observed).includes("pnpm-lock.yaml")); assert.ok(!JSON.stringify(observed).includes("runtime-compatibility-baseline"));
-  // 使用正式entry里的1500/1800ms预算；直接调用handleHook不能验证宿主时限。
+  // 使用正式 entry 的 PreToolUse 6500/7500ms 预算；直接调用 handleHook 不能验证宿主时限。
   const entry = join(s.fixture.root, "packaged/runtime/hooks.mjs"); await mkdir(join(s.fixture.root, "packaged/runtime"), { recursive: true });
   await build({ entryPoints: [fileURLToPath(new URL("../src/hooks/entry.js", import.meta.url))], bundle: true, platform: "node", format: "esm", minify: true, target: "node18.19", outfile: entry, logLevel: "silent",
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" } });

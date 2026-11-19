@@ -14,7 +14,7 @@ import { ContextReceipts } from "../context/receipts.js";
 import { interactionOwner, type InteractionContext } from "../workflow/interaction.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { HookInput, denyWrite } from "./contracts.js";
-import { projectTool, toolArguments, toolWorkingDirectory, toolCommandDecision, writeKind } from "./tool-policy.js";
+import { projectTool, toolArguments, toolWorkingDirectory, toolCommandDecision, writeKind, shellWritePaths } from "./tool-policy.js";
 import { checkProjectWrite, nativeToolIdentity, observeWriteResult } from "./write-gate.js";
 import { observeCommandDecision } from "./command-observation.js";
 import { hookDiagnosticContext, diagnosticAction, diagnosticCause } from "./diagnostic-context.js";
@@ -105,11 +105,22 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     }
     stage = "scope"; diagnostic.stage = "scope"; project = await hookProject(workdir);
     let targets: string[] | undefined;
+    let targetResolution: "known" | "unknown" | "not_applicable" = "not_applicable";
     if (write === "patch") {
+      targetResolution = "known";
       diagnostic.stage = "target";
       const destination = await resolveWriteTargets(input, workdir, project);
       project = destination.project; targets = destination.paths;
       diagnostic.stage = "scope";
+    } else if (write === "shell") {
+      const shellTargets = shellWritePaths(input);
+      targetResolution = shellTargets === undefined ? "unknown" : "known";
+      if (shellTargets !== undefined && shellTargets !== null && shellTargets.length) {
+        diagnostic.stage = "target";
+        const destination = await resolveWriteTargets(input, workdir, project);
+        project = destination.project; targets = destination.paths;
+        diagnostic.stage = "scope";
+      }
     }
     const workflow = resolve(pluginRoot, "skills/project-dev/SKILL.md");
     const router = `Project Dev Agent 自动参与入口。当前项目：${project}。\n先判断本轮是否为用户已授权的项目开发；是则读取 ${workflow}，先 project_prepare(apply:true)，查询 project_context 的 implementation_context 并阅读相关源码，再建立或恢复任务、记录实现依据与关联范围，随后修改和验证。PRD、SDD 或二者都可，复用已有规格。其他专业 skill 继续主导，本插件补充项目依据和质量记录；闲聊、问答及纯阅读不建开发任务。\n使用本轮 interaction=${JSON.stringify(interaction)}；原生工具钩子会为本插件 MCP 补齐宿主身份。缺失准备时修改会被退回，Agent 补齐后重试，不让用户填写额外表单。不得中止或接管其他会话任务，不扩大工作范围。`;
@@ -126,7 +137,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     guard();
     if (input.hook_event_name === "PreToolUse") {
       stage = "guard";
-      const result = await checkProjectWrite(input, binding, interaction, settings.home, pluginRoot, diagnostic, targets);
+      const result = await checkProjectWrite(input, binding, interaction, settings.home, pluginRoot, diagnostic, targets, targetResolution);
       guard();
       await record("participation.checked", { ...event, project, ...(result.task ? { task: result.task } : {}),
         outcome: result.ready ? "ok" : "incomplete", reason: result.reason,
@@ -137,14 +148,17 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     if (input.hook_event_name === "PostToolUse") {
       stage = "guard";
       const observed = await observeWriteResult(input, binding, interaction, settings.home, targets);
-      diagnostic.stage = "ready"; diagnostic.decision = observed === false ? "degraded" : "allow"; diagnostic.required_action = observed === false ? "review_runtime" : observed ? "check_task" : "none";
+      const failed = observed === "failed";
+      diagnostic.stage = "ready"; diagnostic.decision = observed === false || failed ? "degraded" : "allow"; diagnostic.required_action = observed === false || failed ? "review_runtime" : observed ? "check_task" : "none";
       if (observed === undefined) {
         await record("hook.finished", { ...event, project, reason: "PLUGIN_INPUT_STAGING_COMPLETED", duration: performance.now() - started }); return {};
       }
-      await record("participation.checked", { ...event, project, outcome: observed ? "ok" : "degraded",
-        reason: observed ? "WRITE_TOOL_COMPLETED" : "WRITE_GUARD_NOT_OBSERVED", attributes: { ...event.attributes, coverage: "partial" } });
-      await record("hook.finished", { ...event, project, outcome: observed ? "ok" : "degraded", reason: "POST_WRITE_CHECK_COMPLETED", duration: performance.now() - started });
-      return observed ? {} : { systemMessage: "Project Dev Agent：检测到修改工具返回，但未匹配到修改前检查记录。先核对钩子信任与本轮任务，再 task_check；本轮不能记为防护完整。" };
+      await record("participation.checked", { ...event, project, outcome: observed === true ? "ok" : "degraded",
+        reason: failed ? "WRITE_TOOL_FAILED" : observed === true ? "WRITE_TOOL_COMPLETED" : "WRITE_GUARD_NOT_OBSERVED", attributes: { ...event.attributes, coverage: "partial" } });
+      await record("hook.finished", { ...event, project, outcome: observed === true ? "ok" : "degraded", reason: failed ? "WRITE_TOOL_FAILED" : "POST_WRITE_CHECK_COMPLETED", duration: performance.now() - started });
+      return observed === true ? {} : { systemMessage: failed
+        ? "Project Dev Agent：修改工具明确返回失败，当前修改仍保留为待确认状态。先读取错误并修复或撤销，再 task_check，不能把失败调用记为已完成。"
+        : "Project Dev Agent：检测到修改工具返回，但未匹配到修改前检查记录。先核对钩子信任与本轮任务，再 task_check；本轮不能记为防护完整。" };
     }
     await record("scope.resolved", { ...event, project });
     const receipts = new ContextReceipts(settings.home);

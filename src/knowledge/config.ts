@@ -10,7 +10,8 @@ export const ProjectConfigSchema = z.object({
     !path.split("/").some((part) => [".git", "node_modules", "local"].includes(part)) && !/[\*?\[\]]/.test(path),
     "请指定具体的共享知识目录，避开 Git 内部目录、node_modules 和本地状态目录"),
   modules: z.array(z.object({ name: TextSchema, paths: z.array(RelativePathSchema).min(1).max(50) }).strict()).max(100).default([]),
-  exclude_paths: z.array(RelativePathSchema).max(100).default(["node_modules", "dist", ".project-dev/local"]),
+  // 发布包运行资产由源码构建生成，不属于业务源码，也不应参与业务模型和复用审查。
+  exclude_paths: z.array(RelativePathSchema).max(100).default(["node_modules", "dist", ".project-dev/local", "plugins/*/runtime"]),
 }).strict().superRefine((config, ctx) => {
   if (new Set(config.modules.map((entry) => entry.name)).size !== config.modules.length) {
     ctx.addIssue({ code: "custom", path: ["modules"], message: "模块名称不能重复" });

@@ -108,6 +108,10 @@ test("saved model is shadow-published to the project knowledge store and invalid
   assert.ok(repository);
   const snapshot = await repository.readObject((await repository.currentObjectIds())[0]!);
   const provenance = (snapshot.content as any).provenance;
+  const snapshotContent = snapshot.content as any;
+  assert.deepEqual(snapshotContent.source_fingerprints.map((item: any) => item.path), ["src/pages/orders/index.tsx"]);
+  assert.deepEqual(snapshotContent.dependency_fingerprints.map((item: any) => item.path), ["src/shared/status.ts"]);
+  assert.deepEqual(new Set(snapshotContent.configuration_fingerprints.map((item: any) => item.path)), new Set(["package.json", "tsconfig.json"]));
   assert.equal(provenance.repo_identity, binding.repo_identity);
   assert.equal(provenance.head, binding.head);
   assert.match(provenance.worktree_id, /^[a-f0-9]{64}$/);

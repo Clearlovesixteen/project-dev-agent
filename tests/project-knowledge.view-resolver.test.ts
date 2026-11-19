@@ -90,3 +90,21 @@ test("incomplete source coverage never reports a fully matched view", () => {
   assert.ok(view.unresolved.includes("procurement:partial"));
 });
 
+test("依赖和配置指纹都参与共享业务模型的适用性判断", () => {
+  const model = ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot", object_id: hash("with-dependencies"), content: {
+    model_id: "procurement", module: "procurement", parent_snapshot_ids: [], basis: "observed",
+    source_fingerprints: [{ path: "src/a.ts", sha256: hash("A") }],
+    dependency_fingerprints: [{ path: "src/shared.ts", sha256: hash("shared") }],
+    configuration_fingerprints: [{ path: "package.json", sha256: hash("package") }], content: { id: "with-dependencies" },
+  } });
+  const current = stamp([source("src/a.ts", "A"), source("src/shared.ts", "shared"), source("package.json", "package")]);
+  const matched = resolveKnowledgeView({ source_stamp: current, snapshots: [model] });
+  assert.equal(matched.modules[0]!.state, "matched");
+  const dependencyChanged = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A"), source("src/shared.ts", "changed"), source("package.json", "package")]), snapshots: [model] });
+  assert.equal(dependencyChanged.modules[0]!.state, "needs_review");
+  assert.ok(dependencyChanged.modules[0]!.reasons.includes("source_changed:src/shared.ts"));
+  const configurationChanged = resolveKnowledgeView({ source_stamp: stamp([source("src/a.ts", "A"), source("src/shared.ts", "shared"), source("package.json", "changed")]), snapshots: [model] });
+  assert.equal(configurationChanged.modules[0]!.state, "needs_review");
+  assert.ok(configurationChanged.modules[0]!.reasons.includes("source_changed:package.json"));
+});
+

@@ -34,6 +34,14 @@ test("unchanged capture is stable and records configuration fingerprints", async
   assert.ok(first.configuration.some((entry) => entry.path.endsWith("package.json")));
 });
 
+test("按路径核对模型时可以额外纳入配置和依赖声明", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  await writeFile(`${fixture.path}/package.json`, '{"dependencies":{"react":"19"}}');
+  const binding = await bindWorktree(fixture.path), stamp = await collectSourceStamp(binding, { paths: ["src/index.ts"], includeConfiguration: true });
+  assert.ok(stamp.entries.some((entry) => entry.path === "src/index.ts"));
+  assert.ok(stamp.configuration.some((entry) => entry.path === "package.json"));
+});
+
 test("a file changed during analysis returns VIEW_CHANGED", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path);
