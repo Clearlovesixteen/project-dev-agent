@@ -54,6 +54,16 @@ export type RequirementGroupResolution = {
 };
 
 /**
+ * 需求组登记后的实际并发状态；该结果只供任务服务内部使用，MCP 协议不暴露新字段。
+ * 登记必须在同一把公共索引锁内重算，避免两个工作树同时解析到旧快照而漏掉范围冲突。
+ */
+export type RequirementGroupRegistration = {
+  group: RequirementGroup;
+  scope_state: RequirementGroupResolution["scope_state"];
+  related_task_ids: string[];
+};
+
+/**
  * 同一仓库的需求组保存到 Git 公共目录。任务记录由各自的工作树独立维护。
  */
 export class RequirementGroupStore {
@@ -114,6 +124,19 @@ export class RequirementGroupStore {
   private overlap(left: string[], right: string[]) {
     if (!left.length || !right.length) return true;
     return left.some(a => right.some(b => a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)));
+  }
+
+  /**
+   * 在 registry 已更新后计算当前任务看到的并发状态。
+   * 当前任务本身不参与相关任务计算，避免重复登记把自己误判为冲突。
+   */
+  private registrationState(group: RequirementGroup, entry: { task_id: string; worktree_path: string; scope_paths: string[] }) {
+    const active = group.tasks.filter(task => task.phase === "active" && task.task_id !== entry.task_id);
+    const related = active.filter(task => task.worktree_path !== entry.worktree_path && this.overlap(task.scope_paths, entry.scope_paths));
+    return {
+      scope_state: !active.length ? "standalone" as const : related.length ? "scope_overlap_review" as const : "parallel_allowed" as const,
+      related_task_ids: related.map(task => task.task_id),
+    };
   }
 
   /** 读取需求组并选择候选；没有唯一证据时创建新组，不把相似文案自动认领为同一需求。 */
@@ -191,21 +214,23 @@ export class RequirementGroupStore {
   async register(entry: {
     group_id: string; task_id: string; worktree_path: string; branch: string | null; requirement_role: RequirementTaskKind;
     scope_paths: string[]; relationship: RequirementGroupResolution["relationship"]; phase?: "active" | "suspended" | "closed" | "aborted";
-  }) {
+  }): Promise<RequirementGroupRegistration> {
     const files = await this.files(), release = await this.lock(files);
     try {
       const current = await this.read();
       const group = current.registry.groups.find(item => item.id === entry.group_id);
       if (!group) throw new AppError("REQUIREMENT_GROUP_NOT_FOUND", `需求组 ${entry.group_id} 不存在`);
       const existing = group.tasks.find(task => task.task_id === entry.task_id);
-      if (existing && existing.phase === (entry.phase ?? "active")) return group;
+      if (existing && existing.phase === (entry.phase ?? "active")) {
+        return { group, ...this.registrationState(group, entry) };
+      }
       const next = RequirementGroup.parse({ ...group, updated_at: new Date().toISOString(), tasks: [...group.tasks.filter(task => task.task_id !== entry.task_id), {
         task_id: entry.task_id, worktree_path: entry.worktree_path, branch: entry.branch, requirement_role: entry.requirement_role,
         scope_paths: entry.scope_paths, phase: entry.phase ?? "active", relationship: entry.relationship, updated_at: new Date().toISOString(),
       }] });
       current.registry.groups = current.registry.groups.map(item => item.id === group.id ? next : item);
       await this.write(current.files, current.raw, current.registry);
-      return next;
+      return { group: next, ...this.registrationState(next, entry) };
     } finally { await release(); }
   }
 

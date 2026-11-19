@@ -167,9 +167,17 @@ export class TaskService {
   private async syncRequirementGroup(task: Task, action: "register" | "update") {
     if (!task.requirement_group_id) return [];
     try {
-      await this.groups.register({ group_id: task.requirement_group_id, task_id: task.id, worktree_path: task.worktree_path,
+      const registration = await this.groups.register({ group_id: task.requirement_group_id, task_id: task.id, worktree_path: task.worktree_path,
         branch: task.baseline_branch, requirement_role: task.requirement_role ?? "full", scope_paths: task.scope_paths ?? [],
         relationship: task.requirement_group_relationship ?? "new_requirement", phase: task.phase });
+      // resolve 可能早于另一个工作树的 register 完成；以锁内重算结果为准补发一次审查提示。
+      // 任务已成功保存，提示只用于提醒集成前人工核对，不阻断当前开发。
+      if (registration.scope_state === "scope_overlap_review" && task.parallel_state !== "scope_overlap_review") {
+        return [{
+          code: "REQUIREMENT_SCOPE_OVERLAP_REVIEW",
+          message: `需求组登记后发现相关工作树 ${registration.related_task_ids.join(", ")} 使用重叠范围；任务已建立，但集成前必须人工审查。`,
+        }];
+      }
       return [];
     } catch (error) { return [requirementGroupSyncDiagnostic(action, error)]; }
   }

@@ -73,3 +73,32 @@ test("相同文案在不同工作树并发创建时不会自动误认成同一�
   const groups = opened.map(result => TaskSchema.parse(result.data).requirement_group_id);
   assert.notEqual(groups[0], groups[1]);
 });
+
+test("需求组登记在锁内重算范围，避免并发工作树漏掉重叠审查", async t => {
+  const fixture = await createGitFixture();
+  t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path);
+  const opened = TaskSchema.parse((await new TaskService(binding).open({
+    ...baseInput,
+    requirement_role: "ui",
+    scope_paths: ["src/parent.js"],
+  })).data);
+  const store = new RequirementGroupStore(binding.repo_identity);
+  const entries = ["requirement-child-a", "requirement-child-b"].map((task_id, index) => ({
+    group_id: opened.requirement_group_id!,
+    task_id,
+    worktree_path: `/tmp/requirement-tree-${index}`,
+    branch: `requirement-child-${index}`,
+    requirement_role: "api" as const,
+    scope_paths: ["src/shared.js"],
+    relationship: "same_requirement_child" as const,
+    phase: "active" as const,
+  }));
+
+  const results = await Promise.all(entries.map(entry => store.register(entry)));
+  const overlapResults = results.filter(result => result.scope_state === "scope_overlap_review");
+  assert.equal(overlapResults.length, 1, JSON.stringify(results));
+  assert.deepEqual(overlapResults[0]?.related_task_ids, [
+    results.find(result => result.scope_state !== "scope_overlap_review")?.group.tasks.at(-1)?.task_id,
+  ]);
+});
