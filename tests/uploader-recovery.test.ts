@@ -131,3 +131,16 @@ test("积压超过四批时有界暂停，下次从已确认位置继续", async
   assert.equal(next.state, "ok"); assert.equal(next.sent, 51);
   assert.equal(new Set(fixture.calls.flatMap(batch => batch.events.map(event => event.event_id))).size, 251);
 });
+
+test("事件文件达到读取窗口时显式返回 pending，避免误报上传完成", async t => {
+  const fixture = await receiver(t, (batch, response) => { acknowledge(response, batch); });
+  await fixture.record(1);
+  const eventPath = join(fixture.home, "project-dev-agent/telemetry/events", `${new Date().toISOString().slice(0, 10)}.jsonl`);
+  const event = await readFile(eventPath, "utf8");
+  for (let day = 1; day <= 41; day++) {
+    await writeFile(join(fixture.home, "project-dev-agent/telemetry/events", `2020-01-${String(day).padStart(2, "0")}.jsonl`), event);
+  }
+  const result = await uploadDiagnostics(fixture.home);
+  assert.equal(result.state, "pending");
+  assert.equal(result.sent, 40);
+});

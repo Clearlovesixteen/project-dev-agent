@@ -136,7 +136,7 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     if (rejected || queue.invalid || omitted) await bestEffort(() => new DiagnosticWriter(settings.home).record("telemetry.gap", {
       outcome: "degraded", reason: omitted ? "UPLOAD_V1_CONTEXT_OMITTED" : "UPLOAD_EVENTS_REJECTED",
       attributes: { selected_count: rejected + queue.invalid, candidate_count: omitted, transport: "cli" } }), 50);
-    return { state: queue.pending ? "pending" : rejected || queue.invalid || omitted ? "partial" : "ok", sent, invalid: queue.invalid, rejected, omitted };
+    return { state: queue.pending ? "pending" : rejected || queue.invalid || omitted ? "partial" : "ok", sent, invalid: queue.invalid, rejected, omitted, truncated: queue.truncated };
   } catch {
     await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
     return { state: "unavailable", sent };
