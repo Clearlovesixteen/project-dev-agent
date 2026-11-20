@@ -45,8 +45,12 @@ export async function readProjectKnowledgeLight(binding: WorktreeBinding): Promi
     const identity = await repository.files.readIdentity(), pointer = await repository.current();
     if (!identity) throw new AppError("PROJECT_KNOWLEDGE_IDENTITY_MISSING", "项目知识库缺少身份记录");
     if (!pointer) return { state: "empty", project_id: identity.project_id, snapshot_count: 0 };
+    // CURRENT 只记录本次事务的对象。优先读取同事务的物化索引，避免轻量钩子
+    // 把“本次提交对象数”误报成“当前项目全部快照数”；索引缺失时保留兼容回退。
+    const index = await repository.files.readCurrentObjectIndex();
+    const snapshot_count = index?.transaction_id === pointer.transaction_id ? index.object_ids.length : pointer.object_ids.length;
     return { state: "unverified", project_id: identity.project_id, transaction_id: pointer.transaction_id,
-      snapshot_count: pointer.object_ids.length, message: "钩子仅读取共享事务状态；编码前由 project_context 核验当前源码适用性" };
+      snapshot_count, message: "钩子仅读取共享事务状态；编码前由 project_context 核验当前源码适用性" };
   } catch (error) {
     return { state: "unavailable", snapshot_count: 0, message: error instanceof Error ? error.message : String(error) };
   }

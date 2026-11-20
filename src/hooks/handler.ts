@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { PluginSettings } from "../plugin-settings.js";
-import { ACTIVATION_POLICY_VERSION, RuntimeSettings } from "../runtime/config.js";
+import { ACTIVATION_POLICY_VERSION, RuntimeConfiguration, RuntimeSettings } from "../runtime/config.js";
 import { initializePluginRuntime } from "../runtime/startup.js";
-import { DiagnosticWriter } from "../observability/writer.js";
-import { uploadDiagnostics } from "../observability/uploader.js";
+import { DiagnosticWriter, type DiagnosticRecordInput } from "../observability/writer.js";
 import { hasCode } from "../storage/project-files.js";
 import { hookProject, hookFailure, type HookStage } from "./project.js";
 import { TaskStore } from "../storage/task-store.js";
@@ -42,13 +41,41 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     await observeCommandDecision(input, decision, home, { ...correlation, context: diagnostic });
     return {};
   }
-  await initializePluginRuntime(home);
-  const started = performance.now(), settings = new RuntimeSettings(home), writer = new DiagnosticWriter(home);
+  const started = performance.now(), settings = new RuntimeSettings(home);
+  const runtime = await initializePluginRuntime(settings.home);
+  // 配置损坏或被其他进程暂时锁定时，启动器会保留原文件并返回不可用状态。
+  // 钩子此时使用一次性的保守快照，避免把配置故障变成宿主异常，也不擅自写回设置。
+  const config = runtime.config ?? RuntimeConfiguration.parse({
+    schema_version: 1,
+    revision: randomUUID(),
+    mode: "manual",
+    mode_origin: "legacy_unknown",
+    activation_policy_version: 0,
+    diagnostics: { local: false, upload: false },
+  });
+  const writer = new DiagnosticWriter(settings.home, config);
   const trace = input.turn_id ?? call;
   // 原事件只附同一次检查的内存快照；每次有界写入，慢日志不能跳过之后的关键结果。
-  const record = async (name: Parameters<DiagnosticWriter["record"]>[0], data: Parameters<DiagnosticWriter["record"]>[1] = {}) => {
+  const pendingRecords: Array<{ name: Parameters<DiagnosticWriter["record"]>[0]; input: DiagnosticRecordInput }> = [];
+  const record = async (name: Parameters<DiagnosticWriter["record"]>[0], data: DiagnosticRecordInput = {}) => {
     const snapshot = { ...diagnostic, ...data.context };
-    await bestEffort(() => writer.record(name, { ...data, context: snapshot }), 50);
+    pendingRecords.push({ name, input: { ...data, context: snapshot } });
+  };
+  const flushRecords = async (required = false) => {
+    if (!pendingRecords.length) return;
+    const batch = pendingRecords.splice(0, pendingRecords.length);
+    if (required) {
+      // Stop 后宿主可能马上结束，收尾事件必须在返回前完整落盘。
+      await writer.recordMany(batch);
+      return;
+    }
+    // 普通输入钩子没有后续读取依赖，诊断只能短暂等待，不能拖住真实门禁。
+    // 后台写入即使继续完成，也不会与本轮上传或清理并发。
+    await bestEffort(() => writer.recordMany(batch), 50);
+  };
+  const complete = async (output: Record<string, unknown>) => {
+    await flushRecords(input.hook_event_name === "Stop");
+    return output;
   };
   const guard = () => { if (control.signal?.aborted) throw new Error("HOOK_DEADLINE"); };
   const interaction: InteractionContext = { session_id: input.session_id,
@@ -59,9 +86,9 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
   try {
     guard();
     diagnostic.stage = "runtime";
-    const config = await settings.current(); automatic = config.mode === "auto"; control.onMode?.(config.mode);
+    automatic = config.mode === "auto"; control.onMode?.(config.mode);
     await record("hook.received", event);
-    if (automatic) await observeCommandDecision(input, decision, home, { ...correlation, context: diagnostic, enabled: true });
+    if (automatic) await observeCommandDecision(input, decision, home, { ...correlation, context: diagnostic, enabled: true, configuration: config });
     if (input.hook_event_name === "Stop") {
       let warning: string | undefined;
       if (automatic) {
@@ -77,22 +104,23 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
             reason: incomplete ? "PARTICIPATION_CHECK_REQUIRED" : "PARTICIPATION_RECORDED", attributes: { ...event.attributes, coverage: "partial" } });
         } catch { /* 上报仍继续；未取得项目状态不能记为开发已参与。 */ }
       }
-      diagnostic.stage = "upload";
-      await writer.prune(); await uploadDiagnostics(home);
+      diagnostic.stage = "ready";
+      // Stop 只负责把完整收尾事件落盘，不在宿主收尾阶段执行清理和网络请求。
+      // 后续由 MCP 进程启动或显式诊断入口消费队列，避免网络延迟拖住会话结束。
       await record("hook.finished", { ...event, ...(project ? { project } : {}), duration: performance.now() - started });
-      return warning ? { systemMessage: warning } : {};
+      return await complete(warning ? { systemMessage: warning } : {});
     }
     if (config.mode === "manual") {
       const pending = config.activation_policy_version < ACTIVATION_POLICY_VERSION;
       diagnostic.decision = pending ? "degraded" : "skip"; diagnostic.required_action = pending ? "review_runtime" : "none";
       await record("hook.finished", { ...event, outcome: pending ? "degraded" : "skipped", reason: pending ? "ACTIVATION_UPGRADE_PENDING" : "MANUAL_MODE", duration: performance.now() - started });
       const message = "Project Dev Agent：旧 manual 的自动迁移尚未完成。请核对运行配置权限或活跃锁；下次启动会自动重试，无需用户手动开启 auto。本轮不能记为自动参与。";
-      if (pending && input.hook_event_name === "PreToolUse" && write) return denyWrite(message);
-      return pending && ["SessionStart", "UserPromptSubmit"].includes(input.hook_event_name) ? { systemMessage: message } : {};
+      if (pending && input.hook_event_name === "PreToolUse" && write) return await complete(denyWrite(message));
+      return await complete(pending && ["SessionStart", "UserPromptSubmit"].includes(input.hook_event_name) ? { systemMessage: message } : {});
     }
     if (config.mode === "observe") {
       diagnostic.decision = "skip"; diagnostic.required_action = "none";
-      await record("hook.finished", { ...event, outcome: "skipped", reason: "OBSERVE_ONLY", duration: performance.now() - started }); return {};
+      await record("hook.finished", { ...event, outcome: "skipped", reason: "OBSERVE_ONLY", duration: performance.now() - started }); return await complete({});
     }
     // 本插件 MCP 仍负责自己的范围和修订号校验；仅补原生身份，不让初始化被门禁自身阻塞。
     if (input.hook_event_name === "PreToolUse" && ownTool) {
@@ -101,7 +129,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       const denied = (output.hookSpecificOutput as { permissionDecision?: string } | undefined)?.permissionDecision === "deny";
       diagnostic.stage = "owner"; diagnostic.decision = denied ? "deny" : "allow"; diagnostic.required_action = denied ? "review_runtime" : "none";
       await record("hook.finished", { ...event, duration: performance.now() - started, outcome: denied ? "incomplete" : "ok", reason: denied ? "MCP_IDENTITY_REJECTED" : "MCP_IDENTITY_LINKED" });
-      return output;
+      return await complete(output);
     }
     stage = "scope"; diagnostic.stage = "scope"; project = await hookProject(workdir);
     let targets: string[] | undefined;
@@ -131,8 +159,8 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       diagnostic.decision = input.hook_event_name === "PreToolUse" ? "deny" : "incomplete"; diagnostic.required_action = "prepare"; diagnostic.cause_code = diagnosticCause(error);
       await record("hook.finished", { ...event, project, outcome: write ? "incomplete" : "ok", reason: "PROJECT_SETUP_REQUIRED", duration: performance.now() - started });
       return input.hook_event_name === "PreToolUse"
-        ? denyWrite(`Project Dev Agent：当前项目尚未初始化。先用 project=${project} 调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open，补齐后重试修改。`)
-        : { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: `${router}\n当前项目尚未接入，project_prepare(apply:true) 仅登记当前 Git 根目录并保留其他项目记录；不会把父目录加入范围。显式设置的工作范围仍须遵守。` } };
+        ? await complete(denyWrite(`Project Dev Agent：当前项目尚未初始化。先用 project=${project} 调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open，补齐后重试修改。`))
+        : await complete({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: `${router}\n当前项目尚未接入，project_prepare(apply:true) 仅登记当前 Git 根目录并保留其他项目记录；不会把父目录加入范围。显式设置的工作范围仍须遵守。` } });
     }
     guard();
     if (input.hook_event_name === "PreToolUse") {
@@ -143,7 +171,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
         outcome: result.ready ? "ok" : "incomplete", reason: result.reason,
         attributes: { ...event.attributes, coverage: result.coverage ?? "partial" } });
       await record("hook.finished", { ...event, project, outcome: result.ready ? "ok" : "incomplete", reason: "WRITE_CHECK_COMPLETED", duration: performance.now() - started });
-      return result.output;
+      return await complete(result.output);
     }
     if (input.hook_event_name === "PostToolUse") {
       stage = "guard";
@@ -151,21 +179,21 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       const failed = observed === "failed";
       diagnostic.stage = "ready"; diagnostic.decision = observed === false || failed ? "degraded" : "allow"; diagnostic.required_action = observed === false || failed ? "review_runtime" : observed ? "check_task" : "none";
       if (observed === undefined) {
-        await record("hook.finished", { ...event, project, reason: "PLUGIN_INPUT_STAGING_COMPLETED", duration: performance.now() - started }); return {};
+        await record("hook.finished", { ...event, project, reason: "PLUGIN_INPUT_STAGING_COMPLETED", duration: performance.now() - started }); return await complete({});
       }
       await record("participation.checked", { ...event, project, outcome: observed === true ? "ok" : "degraded",
         reason: failed ? "WRITE_TOOL_FAILED" : observed === true ? "WRITE_TOOL_COMPLETED" : "WRITE_GUARD_NOT_OBSERVED", attributes: { ...event.attributes, coverage: "partial" } });
       await record("hook.finished", { ...event, project, outcome: observed === true ? "ok" : "degraded", reason: failed ? "WRITE_TOOL_FAILED" : "POST_WRITE_CHECK_COMPLETED", duration: performance.now() - started });
-      return observed === true ? {} : { systemMessage: failed
+      return await complete(observed === true ? {} : { systemMessage: failed
         ? "Project Dev Agent：修改工具明确返回失败，当前修改仍保留为待确认状态。先读取错误并修复或撤销，再 task_check，不能把失败调用记为已完成。"
-        : "Project Dev Agent：检测到修改工具返回，但未匹配到修改前检查记录。先核对钩子信任与本轮任务，再 task_check；本轮不能记为防护完整。" };
+        : "Project Dev Agent：检测到修改工具返回，但未匹配到修改前检查记录。先核对钩子信任与本轮任务，再 task_check；本轮不能记为防护完整。" });
     }
     await record("scope.resolved", { ...event, project });
     const receipts = new ContextReceipts(settings.home);
     if (input.hook_event_name === "SessionStart") {
       stage = "receipt"; diagnostic.stage = "context"; await receipts.reset(project, interaction);
       await record("hook.finished", { ...event, project, duration: performance.now() - started });
-      return { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: router } };
+      return await complete({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: router } });
     }
     stage = "task"; diagnostic.stage = "task";
     const active = continuation.test(input.prompt?.trim() ?? "")
@@ -193,7 +221,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     guard();
     await record("context.prepared", { ...event, project, attributes: { ...event.attributes, context_id: data.context_id, output_bytes: Buffer.byteLength(context), truncated: true } });
     await record("hook.finished", { ...event, project, duration: performance.now() - started });
-    return { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } };
+    return await complete({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
   } catch (error) {
     if (error instanceof AppError && ["WRITE_PROJECT_MISMATCH", "WRITE_WORKTREE_MISMATCH", "WRITE_TARGET_UNSAFE"].includes(error.code)) {
       diagnostic.target_scope = "outside"; diagnostic.required_action = "review_scope";
@@ -203,18 +231,18 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       const targetEvent = { ...event, ...(project ? { project } : {}) };
       await record("participation.checked", { ...targetEvent, outcome, reason: error.code });
       await record("hook.finished", { ...targetEvent, outcome, reason: "WRITE_CHECK_COMPLETED", duration: performance.now() - started });
-      return beforeWrite ? denyWrite(`Project Dev Agent：${error.message}`)
-        : { systemMessage: "Project Dev Agent：修改结果的实际工作树未能核验。请检查目标目录，再核对本轮任务。" };
+      return await complete(beforeWrite ? denyWrite(`Project Dev Agent：${error.message}`)
+        : { systemMessage: "Project Dev Agent：修改结果的实际工作树未能核验。请检查目标目录，再核对本轮任务。" });
     }
     const failure = hookFailure(error, stage);
     diagnostic.decision = failure.outcome === "skipped" ? "skip" : input.hook_event_name === "PreToolUse" && write ? "deny" : "degraded";
     diagnostic.required_action = failure.reason === "PROJECT_OUTSIDE_WORKSPACE" ? "review_scope" : diagnosticAction(failure.reason);
     diagnostic.cause_code = diagnosticCause(error);
     await record("hook.finished", { ...event, ...(project ? { project } : {}), ...failure, duration: performance.now() - started });
-    if (failure.reason === "NOT_GIT_WORKTREE") return {};
-    if (failure.reason === "PROJECT_OUTSIDE_WORKSPACE") return { systemMessage: "Project Dev Agent：当前项目不在已配置工作范围，插件未参与本轮。请按用户选择调整项目范围；不会自动扩大配置。" };
+    if (failure.reason === "NOT_GIT_WORKTREE") return await complete({});
+    if (failure.reason === "PROJECT_OUTSIDE_WORKSPACE") return await complete({ systemMessage: "Project Dev Agent：当前项目不在已配置工作范围，插件未参与本轮。请按用户选择调整项目范围；不会自动扩大配置。" });
     if (input.hook_event_name === "PreToolUse" && write)
-      return denyWrite(`Project Dev Agent：修改前检查未完成（${failure.reason}）。先核对 project_prepare、运行设置和当前任务，再重试；不能把本轮记为已参与。`);
-    return { systemMessage: `Project Dev Agent：项目辅助未就绪（${failure.reason}），本轮不能记为已参与；请核对插件状态。` };
+      return await complete(denyWrite(`Project Dev Agent：修改前检查未完成（${failure.reason}）。先核对 project_prepare、运行设置和当前任务，再重试；不能把本轮记为已参与。`));
+    return await complete({ systemMessage: `Project Dev Agent：项目辅助未就绪（${failure.reason}），本轮不能记为已参与；请核对插件状态。` });
   }
 }

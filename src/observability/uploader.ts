@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { DIAGNOSTIC_NOTICE, RuntimeSettings, runtimeFiles } from "../runtime/config.js";
+import { DIAGNOSTIC_NOTICE, RuntimeSettings, runtimeFiles, type RuntimeConfig } from "../runtime/config.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
 import { DiagnosticWriter } from "./writer.js";
@@ -29,14 +29,15 @@ async function recordTimeout(writer: DiagnosticWriter, reason: string, duration:
 }
 
 /** 每批最多 50 条，确认后保存游标；退避重试缩小批次并沿用宿主收尾期限。 */
-export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
+export async function uploadDiagnostics(home?: string, timeoutMs = 4000, configuration?: RuntimeConfig) {
   let release: (() => Promise<void>) | undefined;
   let transport: DiagnosticTransport | undefined;
   const deadline = performance.now() + (Number.isFinite(timeoutMs) ? Math.min(5000, Math.max(50, timeoutMs)) : 4000);
   let sent = 0, rejected = 0, omitted = 0, legacyOnly = false;
   const settings = new RuntimeSettings(home);
   try {
-    const diagnostics = (await settings.current()).diagnostics;
+    // 钩子已经读取过同一份运行设置时直接复用快照；独立 CLI 调用仍自行读取一次。
+    const diagnostics = (configuration ?? await settings.current()).diagnostics;
     if (!diagnostics.local || !diagnostics.upload || diagnostics.notice_version !== DIAGNOSTIC_NOTICE
       || !diagnostics.endpoint || !diagnostics.write_token || !diagnostics.upload_epoch) return { state: "disabled", sent: 0 };
     const files = await runtimeFiles(settings.home);
@@ -61,7 +62,8 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     transport = new DiagnosticTransport(diagnostics.endpoint);
     const sender = transport;
     const unchanged = async () => {
-      const current = (await settings.current()).diagnostics;
+      const current = (await settings.read())?.diagnostics;
+      if (!current) return false;
       return current.local && current.upload && current.upload_epoch === diagnostics.upload_epoch;
     };
     for (const [pageIndex, page] of queue.pages.entries()) {
@@ -114,7 +116,7 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
           await save({ epoch: diagnostics.upload_epoch, positions, failures,
             next_attempt: Date.now() + Math.min(3_600_000, 30_000 * 2 ** (failures - 1)) });
         }
-        const writer = new DiagnosticWriter(settings.home);
+        const writer = new DiagnosticWriter(settings.home, configuration);
         if (error instanceof DiagnosticTimeoutError || error instanceof Error && error.name === "AbortError") {
           const reason = error instanceof DiagnosticTimeoutError ? error.code : "UPLOAD_TIMEOUT";
           await recordTimeout(writer, reason, performance.now() - started, queue.pages.slice(pageIndex), queue.pending, failures);
@@ -133,12 +135,12 @@ export async function uploadDiagnostics(home?: string, timeoutMs = 4000) {
     if (!await unchanged()) return { state: "configuration_changed", sent };
     await save({ epoch: diagnostics.upload_epoch, failures: 0, next_attempt: 0,
       positions: queue.positions });
-    if (rejected || queue.invalid || omitted) await bestEffort(() => new DiagnosticWriter(settings.home).record("telemetry.gap", {
+    if (rejected || queue.invalid || omitted) await bestEffort(() => new DiagnosticWriter(settings.home, configuration).record("telemetry.gap", {
       outcome: "degraded", reason: omitted ? "UPLOAD_V1_CONTEXT_OMITTED" : "UPLOAD_EVENTS_REJECTED",
       attributes: { selected_count: rejected + queue.invalid, candidate_count: omitted, transport: "cli" } }), 50);
     return { state: queue.pending ? "pending" : rejected || queue.invalid || omitted ? "partial" : "ok", sent, invalid: queue.invalid, rejected, omitted, truncated: queue.truncated };
   } catch {
-    await new DiagnosticWriter(settings.home).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
+    await new DiagnosticWriter(settings.home, configuration).record("telemetry.gap", { outcome: "degraded", reason: "UPLOAD_QUEUE_UNAVAILABLE" });
     return { state: "unavailable", sent };
   }
   finally {

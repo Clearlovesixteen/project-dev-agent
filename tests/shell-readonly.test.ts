@@ -90,7 +90,10 @@ test("shell 写入只在目标可静态确认时进入文件范围核对", () =>
   assert.deepEqual(shellWritePaths(input("sed -i 's/a/b/' src/index.js")), ["src/index.js"]);
   assert.deepEqual(shellWritePaths(input("cp src/a.js src/b.js")), ["src/b.js"]);
   assert.deepEqual(shellWritePaths(input("rm -f src/a.js")), ["src/a.js"]);
-  assert.equal(shellWritePaths(input("git merge feature")), null);
+  for (const command of ["git reset --hard HEAD", "git clean -fd", "git checkout -- .", "git restore -- src/index.js",
+    "git apply change.patch", "git merge feature", "git rebase main", "git cherry-pick abc123", "git revert abc123", "git stash pop"])
+    assert.equal(shellWritePaths(input(command)), undefined, command);
+  assert.equal(shellWritePaths(input("git add src/index.js")), null);
   assert.deepEqual(shellWritePaths(input("git status --short; rm -f src/a.js")), ["src/a.js"]);
   assert.equal(shellWritePaths(input("node -e 'writeFile()'")), undefined);
 });

@@ -92,6 +92,28 @@ test("models validate current exact evidence, preserve revisions and flag all re
   assert.equal((await service.record({ ...model, expected_revision: 2 })).code, "PROJECT_SOURCE_CHANGED");
 });
 
+test("共享模型已提交而本地索引中断时，下一次模型记录会补偿并清理恢复标记", async (t) => {
+  const { service, files, input } = await setup(t);
+  await service.scan({});
+  const model = await input();
+  assert.equal((await service.record(model)).outcome, "ok");
+  const saved = (await models(files))[0]!;
+  const indexPath = ".project-dev/local/understanding/models.json";
+  const index = await files.read(indexPath);
+  await files.replace(indexPath, "[]\n", index);
+  const markerPath = ".project-dev/local/model-sync/order-state.json";
+  const markerBefore = await files.read(markerPath);
+  await files.replace(markerPath, `${JSON.stringify({
+    schema_version: 1, state: "pending", model_id: saved.id, revision: saved.revision,
+    snapshot_id: "0".repeat(64), model: saved, created_at: new Date().toISOString(),
+  })}\n`, markerBefore, 1_048_576);
+  assert.equal((await service.record({ ...model, expected_revision: 1, summary: "恢复后的模型修订" })).outcome, "ok");
+  assert.equal((await models(files)).find(item => item.id === saved.id)?.revision, 2);
+  const marker = JSON.parse(await files.read(".project-dev/local/model-sync/order-state.json"));
+  assert.equal(marker.state, "resolved");
+  assert.equal(marker.model, undefined);
+});
+
 test("saved model is shadow-published to the project knowledge store and invalidated by current code", async (t) => {
   const { service, input, put, binding } = await setup(t);
   await service.scan({});

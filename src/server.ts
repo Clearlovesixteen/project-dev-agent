@@ -38,6 +38,7 @@ import { ParticipationStore } from "./workflow/participation.js";
 import { RuntimeConfigureInput, RuntimeSettings } from "./runtime/config.js";
 import { initializePluginRuntime } from "./runtime/startup.js";
 import { enhancedModelWrites } from "./runtime/business-model-release.js";
+import { uploadDiagnostics } from "./observability/uploader.js";
 import {
   ContextInput,
   ModelRecordInput,
@@ -492,7 +493,10 @@ export async function startWorkspaceServer(path: string): Promise<void> {
 export async function startPluginServer(): Promise<void> {
   const settings = new PluginSettings();
   // 启动自动迁移旧 manual，并独立初始化新安装的默认诊断；不依赖模型调用设置命令。
-  await initializePluginRuntime(settings.home);
+  const runtime = await initializePluginRuntime(settings.home);
+  // MCP 是长驻进程，适合在启动阶段消费上次会话留下的本地队列。
+  // 不把网络请求放进 Stop 钩子，避免结束会话时等待上传或丢失收尾事件。
+  void uploadDiagnostics(settings.home, 1000, runtime.config).catch(() => {});
   await createServer(
     (project) => settings.bind(project),
     undefined,

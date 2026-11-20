@@ -96,13 +96,16 @@ test("真实MCP准备任务后门禁报告已观测context/task/basis/target；�
     basis: ready.context?.basis_state, target: ready.context?.target_scope, count: ready.context?.target_count },
   { stage: "ready", decision: "allow", context: "ready", task: "owned", basis: "ready", target: "within", count: 1 });
   const last = (await s.events()).find(event => event.call_id === ready.call_id && event.event_name === "hook.finished")!; assert.equal(last.operation_id, ready.operation_id);
-  const previous = DiagnosticWriter.prototype.record; DiagnosticWriter.prototype.record = async () => new Promise(() => {}); t.after(() => { DiagnosticWriter.prototype.record = previous; });
+  // 模拟诊断批量写入挂起，覆盖 Hook 实际使用的 recordMany 路径，而不是单条 record 包装器。
+  const previous = DiagnosticWriter.prototype.recordMany;
+  DiagnosticWriter.prototype.recordMany = async () => new Promise<boolean>(() => {});
+  t.after(() => { DiagnosticWriter.prototype.recordMany = previous; });
   const began = performance.now(); assert.notEqual(((await s.hook(write)).hookSpecificOutput as any)?.permissionDecision, "deny");
   const denied = await s.hook({ ...write, tool_input: { command: "*** Begin Patch\n*** Update File: src/service.js\n@@\n+// unplanned\n*** End Patch" } });
   assert.equal((denied.hookSpecificOutput as any)?.permissionDecision, "deny");
   const hungDuration = performance.now() - began;
   assert.ok(hungDuration < 2500, "诊断挂起不能等到宿主硬期限才返回真实门禁结果");
-  DiagnosticWriter.prototype.record = async () => { throw new Error("PRIVATE_LOGGER_FAILURE"); };
+  DiagnosticWriter.prototype.recordMany = async () => { throw new Error("PRIVATE_LOGGER_FAILURE"); };
   assert.notEqual(((await s.hook(write)).hookSpecificOutput as any)?.permissionDecision, "deny");
   assert.equal(((await s.hook({ ...write, tool_input: { command: "*** Begin Patch\n*** Update File: src/service.js\n@@\n+// unplanned\n*** End Patch" } })).hookSpecificOutput as any)?.permissionDecision, "deny");
   t.diagnostic(`hung diagnostics: allow+deny=${Math.round(hungDuration)}ms; throwing diagnostics preserve both results`);

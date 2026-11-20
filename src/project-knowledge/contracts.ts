@@ -56,6 +56,21 @@ export const SnapshotPointerSchema = z.object({
 }).strict();
 export type SnapshotPointer = z.infer<typeof SnapshotPointerSchema>;
 
+/**
+ * CURRENT 对应的物化对象索引。
+ *
+ * 事务链仍是事实来源。这个索引只用于缩短读取路径，缺失、过期或校验失败时
+ * 读取方必须回退到事务链，不能把索引文件当作唯一数据源。
+ */
+export const CurrentObjectIndexSchema = z.object({
+  schema_version: z.literal(1),
+  transaction_id: z.string().regex(/^[a-f0-9]{64}$/),
+  object_ids: z.array(HASH).max(10_000),
+  object_ids_hash: HASH,
+  updated_at: z.string().datetime({ offset: true }),
+}).strict();
+export type CurrentObjectIndex = z.infer<typeof CurrentObjectIndexSchema>;
+
 export const OperationRecordSchema = z.object({
   schema_version: z.literal(1), operation_id: z.string().min(1).max(200), transaction_id: z.string().regex(/^[a-f0-9]{64}$/),
   object_ids: z.array(HASH).max(10_000),

@@ -1,19 +1,25 @@
 import { DiagnosticWriter } from "../observability/writer.js";
-import { RuntimeSettings } from "./config.js";
+import { RuntimeSettings, type RuntimeConfig } from "./config.js";
 import { initializePublishedDiagnostics } from "./diagnostics-bootstrap.js";
 
 /** 原生 MCP 与钩子共用启动策略；模式迁移独立于诊断开关，不扩大项目范围。 */
 export async function initializePluginRuntime(home?: string) {
   const settings = new RuntimeSettings(home);
   const diagnostics = await initializePublishedDiagnostics(settings.home);
+  let config: RuntimeConfig | undefined = diagnostics.config;
   try {
-    const activation = await settings.upgradeActivation();
-    if (activation.state === "migrated") await new DiagnosticWriter(settings.home).record("health.checked", {
-      reason: activation.previous_mode === "manual" ? "MANUAL_UPGRADED_TO_AUTO" : "ACTIVATION_POLICY_ADOPTED",
-    });
-    return { diagnostics, activation };
+    const activation = await settings.upgradeActivation(config);
+    if (activation.state === "migrated") {
+      config = await settings.read() ?? undefined;
+      await new DiagnosticWriter(settings.home, config).record("health.checked", {
+        reason: activation.previous_mode === "manual" ? "MANUAL_UPGRADED_TO_AUTO" : "ACTIVATION_POLICY_ADOPTED",
+      });
+    } else if (!config) {
+      config = await settings.read() ?? undefined;
+    }
+    return { diagnostics, activation, config };
   } catch {
     // 损坏文件和活跃锁不被重写；后续启动自动重试，不能假报已迁移或阻断整个 MCP。
-    return { diagnostics, activation: { state: "unavailable" as const } };
+    return { diagnostics, activation: { state: "unavailable" as const }, config };
   }
 }

@@ -8,6 +8,7 @@ import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { bindWorktree } from "../src/git/index.js";
 import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
 import { RepositoryFiles } from "../src/project-knowledge/repository-files.js";
+import { readProjectKnowledgeLight } from "../src/project-knowledge/service.js";
 
 const object = (value: string) => {
   const content = { value };
@@ -62,6 +63,13 @@ test("openExisting 是只读探测，知识库结构不完整时不会偷偷创�
   assert.deepEqual((await readdir(files.root)).sort(), ["migrations", "operations", "transactions"].sort());
 });
 
+test("需求组先初始化时，知识库探测不会把协调目录误判为损坏", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path);
+  await mkdir(join(binding.repo_identity, "project-dev-agent", "requirement-groups"), { recursive: true });
+  assert.equal(await RepositoryFiles.openExisting(binding.repo_identity), undefined);
+});
+
 test("immutable objects and CURRENT are committed atomically and same operation is idempotent", async (t) => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
@@ -76,7 +84,29 @@ test("immutable objects and CURRENT are committed atomically and same operation 
   const retryAfterAnotherPublish = await repository.publish({ operation_id: "operation-a", objects: [a] });
   assert.equal(retryAfterAnotherPublish.transaction.transaction_id, first.transaction.transaction_id);
   assert.deepEqual(new Set(await repository.currentObjectIds()), new Set([a.object_id, b.object_id]));
+  const index = JSON.parse(await repository.files.read("CURRENT_INDEX.json")) as { transaction_id: string; object_ids: string[]; object_ids_hash: string };
+  assert.equal(index.transaction_id, (await repository.current())?.transaction_id);
+  assert.deepEqual(new Set(index.object_ids), new Set([a.object_id, b.object_id]));
+  assert.equal(index.object_ids_hash.length, 64);
   await assert.rejects(repository.publish({ operation_id: "operation-a", objects: [b] }), /operation_id 已用于另一组/);
+});
+
+test("轻量知识状态按当前索引统计全部对象而非只统计最后事务", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
+  await repository.publish({ operation_id: "light-a", objects: [object("A")] });
+  await repository.publish({ operation_id: "light-b", objects: [object("B")] });
+  const status = await readProjectKnowledgeLight(binding);
+  assert.equal(status.state, "unverified");
+  assert.equal(status.snapshot_count, 2);
+});
+
+test("物化对象索引缺失或损坏时安全回退事务链", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), repository = await ProjectKnowledgeRepository.open(binding.repo_identity);
+  const a = object("index-fallback"); await repository.publish({ operation_id: "index-fallback", objects: [a] });
+  await repository.files.replace("CURRENT_INDEX.json", JSON.stringify({ schema_version: 1, transaction_id: "f".repeat(64), object_ids: [], object_ids_hash: "0".repeat(64), updated_at: new Date().toISOString() }), await repository.files.read("CURRENT_INDEX.json"));
+  assert.deepEqual(await repository.currentObjectIds(), [a.object_id]);
 });
 
 test("读取共享对象会校验内容哈希，损坏快照不会被当作最新知识", async (t) => {

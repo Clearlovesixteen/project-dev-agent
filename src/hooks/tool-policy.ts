@@ -82,9 +82,26 @@ export function shellWritePaths(input: NativeHookInput): string[] | null | undef
   if (words.length) segments.push(words);
   const paths: string[] = [];
   let sawGit = false;
+  const gitWorktreeWrites = new Set(["reset", "clean", "checkout", "restore", "apply", "merge", "rebase", "cherry-pick", "revert", "am", "stash"]);
+  const gitAction = (args: string[]) => {
+    let index = 1;
+    while (index < args.length) {
+      const value = args[index]!;
+      if (["-C", "--git-dir", "--work-tree"].includes(value)) { index += 2; continue; }
+      if (/^--(?:git-dir|work-tree)=/.test(value) || ["--no-pager", "--no-optional-locks", "--literal-pathspecs"].includes(value)) { index++; continue; }
+      return value.startsWith("-") ? undefined : value;
+    }
+    return undefined;
+  };
   for (const segment of segments) {
     const name = programName(segment[0] ?? "");
-    if (name === "git") { sawGit = true; continue; }
+    if (name === "git") {
+      // 只有不会改写工作树的 Git 元数据操作可以继续走无路径分支。
+      // reset、clean、restore、checkout、apply、merge 等可能修改或删除多个文件，
+      // 无法从命令静态得到完整目标时必须进入未知目标门禁。
+      if (gitWorktreeWrites.has(gitAction(segment) ?? "")) return undefined;
+      sawGit = true; continue;
+    }
     if (["cp", "mv", "copy-item", "move-item"].includes(name)) {
       const values = segment.slice(1).filter(value => !value.startsWith("-"));
       if (values.length < 2) return undefined;

@@ -59,6 +59,8 @@ export function toolDiagnosticContext(tool: string, input: DiagnosticContext | u
   if (Array.isArray(data.projects)) value.enrolled_project_count = Math.min(1000, data.projects.length);
   if (result.outcome === "error") value.decision = "error";
   else if (result.outcome === "incomplete") value.decision = "incomplete";
+  else if (result.outcome === "degraded") value.decision = "degraded";
+  else if (result.outcome === "skipped") value.decision = "skip";
   // 错误含义由服务固定错误码提供；不解析或上传任何自由文本 message。
   switch (result.code) {
     case "PROJECT_NOT_ENROLLED": case "PLUGIN_NOT_CONFIGURED":

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { AppError } from "../domain/error.js";
-import { ObjectEnvelopeSchema, OperationRecordSchema, SnapshotPointerSchema, TransactionRecordSchema, type ObjectEnvelope, type OperationRecord, type SnapshotPointer, type TransactionRecord } from "./contracts.js";
+import { CurrentObjectIndexSchema, ObjectEnvelopeSchema, OperationRecordSchema, SnapshotPointerSchema, TransactionRecordSchema, type CurrentObjectIndex, type ObjectEnvelope, type OperationRecord, type SnapshotPointer, type TransactionRecord } from "./contracts.js";
 import { RepositoryFiles } from "./repository-files.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -57,18 +57,23 @@ export class ProjectKnowledgeRepository {
         });
         const currentPointer = current ? SnapshotPointerSchema.parse(JSON.parse(current)) : undefined;
         if (currentPointer && await this.currentChainContains(currentPointer.transaction_id, transaction.transaction_id)) {
+          await this.refreshCurrentObjectIndex(currentPointer);
           return { transaction, pointer: transaction.pointer };
         }
         // 当前指针仍停在原事务的父节点时，可以安全补写原指针；不能回退已经包含其他提交的链。
         if (!currentPointer || currentPointer.transaction_id === transaction.parent_transaction_id) {
+          const parentObjectIds = currentPointer ? await this.currentObjectIds(currentPointer) : [];
           await this.writeCurrent(currentPointer, transaction.pointer, current);
+          await this.refreshCurrentObjectIndex(transaction.pointer, [...transaction.object_ids, ...parentObjectIds]);
           return { transaction, pointer: transaction.pointer };
         }
         // 其他工作树已经提交了新事务：以当前指针为父节点创建恢复事务，
         // 将遗漏的 operation 接到链尾，避免覆盖或回退其他工作树的知识。
         const recovered = await this.recoverTransaction(transaction, currentPointer);
         await this.updateOperation(operationPath, operation, recovered.transaction_id);
+        const parentObjectIds = await this.currentObjectIds(currentPointer);
         await this.writeCurrent(currentPointer, recovered.pointer, current);
+        await this.refreshCurrentObjectIndex(recovered.pointer, [...recovered.object_ids, ...parentObjectIds]);
         return { transaction: recovered, pointer: recovered.pointer };
       }
       const parent = await this.files.readCurrent();
@@ -85,6 +90,7 @@ export class ProjectKnowledgeRepository {
           if (parsed.operation_id === input.operation_id && JSON.stringify(parsed.object_ids) === JSON.stringify(objectIds)) return { transaction: parsed, pointer: parsed.pointer };
         }
       }
+      const parentObjectIds = parent ? await this.currentObjectIds(parent) : [];
       const transactionId = digest(JSON.stringify([parent?.transaction_id ?? null, input.operation_id, objectIds]));
       const pointer: SnapshotPointer = SnapshotPointerSchema.parse({ schema_version: 1, transaction_id: transactionId, object_ids: objectIds, committed_at: new Date().toISOString() });
       const transaction: TransactionRecord = TransactionRecordSchema.parse({ schema_version: 1, transaction_id: transactionId, parent_transaction_id: parent?.transaction_id ?? null, operation_id: input.operation_id, object_ids: objectIds, pointer });
@@ -115,6 +121,7 @@ export class ProjectKnowledgeRepository {
         const currentPointer = SnapshotPointerSchema.parse(JSON.parse(current));
         if (currentPointer.transaction_id !== transactionId) await this.files.replace("CURRENT.json", JSON.stringify(pointer), current);
       }
+      await this.refreshCurrentObjectIndex(pointer, [...objectIds, ...parentObjectIds]);
       return { transaction, pointer };
     });
   }
@@ -171,6 +178,27 @@ export class ProjectKnowledgeRepository {
     await this.files.replace("CURRENT.json", JSON.stringify(next), previousRaw ?? JSON.stringify(previous));
   }
 
+  /**
+   * 物化索引不是事实来源。写入失败或当前链过大时保留旧索引，读取方会按
+   * transaction_id 验证并自动回退完整事务链，不能让加速数据阻断知识提交。
+   */
+  private async refreshCurrentObjectIndex(pointer: SnapshotPointer, objectIds?: string[]): Promise<void> {
+    try {
+      const ids = [...new Set(objectIds ?? await this.currentObjectIds(pointer))];
+      if (ids.length > 10_000) return;
+      const index: CurrentObjectIndex = CurrentObjectIndexSchema.parse({
+        schema_version: 1,
+        transaction_id: pointer.transaction_id,
+        object_ids: ids,
+        object_ids_hash: digest(JSON.stringify(ids)),
+        updated_at: new Date().toISOString(),
+      });
+      await this.files.writeCurrentObjectIndex(index);
+    } catch {
+      // CURRENT 已提交时索引只影响读取速度。下一次读取会校验索引并回退链路。
+    }
+  }
+
   async readObject(objectId: string): Promise<ObjectEnvelope> {
     const raw = await this.files.read(`objects/${objectId}.json`);
     const object = ObjectEnvelopeSchema.parse(JSON.parse(raw));
@@ -200,6 +228,10 @@ export class ProjectKnowledgeRepository {
   async currentObjectIds(current?: SnapshotPointer): Promise<string[]> {
     const pointer = current ?? await this.current();
     if (!pointer) return [];
+    const index = await this.files.readCurrentObjectIndex();
+    if (index && index.transaction_id === pointer.transaction_id && index.object_ids_hash === digest(JSON.stringify(index.object_ids))) {
+      return [...index.object_ids];
+    }
     const ids: string[] = [];
     const visited = new Set<string>();
     let transactionId: string | null = pointer.transaction_id;

@@ -1,5 +1,6 @@
 import { RuntimeSettings } from "./config.js";
 import { PUBLISHED_DIAGNOSTICS } from "./published-diagnostics.js";
+import type { RuntimeConfig } from "./config.js";
 
 type Profile = { endpoint: string; ingest_key: string; notice_version: typeof PUBLISHED_DIAGNOSTICS.notice_version };
 
@@ -10,14 +11,15 @@ type Profile = { endpoint: string; ingest_key: string; notice_version: typeof PU
 export async function initializePublishedDiagnostics(home?: string, profile: Profile = PUBLISHED_DIAGNOSTICS) {
   const settings = new RuntimeSettings(home);
   try {
-    if (await settings.read()) return { state: "preserved" as const };
+    const existing = await settings.read();
+    if (existing) return { state: "preserved" as const, config: existing };
     await settings.configure({ apply: true, expected_revision: null, diagnostics: {
       local: true, upload: true, notice_version: profile.notice_version,
       endpoint: profile.endpoint, write_token: profile.ingest_key,
     } });
-    return { state: "initialized" as const };
+    return { state: "initialized" as const, config: await settings.read() as RuntimeConfig };
   } catch {
     // 配置竞争、不可写和损坏不能影响插件启动；后续启动可重试，不绕过既有配置保护。
-    return { state: "unavailable" as const };
+    return { state: "unavailable" as const, config: undefined };
   }
 }

@@ -94,8 +94,9 @@ export class RuntimeSettings {
   }
 
   /** 和设置保存共用进程锁；锁内重读并原子替换，避免并发启动反复迁移或丢失刚保存的设置。 */
-  async upgradeActivation() {
-    const current = await this.read();
+  async upgradeActivation(known?: RuntimeConfig | null) {
+    // 启动入口已经读过同一份配置时复用快照；锁内仍然重新读取并核对，避免并发启动覆盖新设置。
+    const current = known === undefined ? await this.read() : known;
     if (!current || current.activation_policy_version >= ACTIVATION_POLICY_VERSION) return { state: "preserved" as const };
     const files = await runtimeFiles(this.home);
     await files.directory(RUNTIME_DIRECTORY);

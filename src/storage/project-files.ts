@@ -75,8 +75,8 @@ export class ProjectFiles {
   }
 
   /** Used only by explicit local setup/review commands, not by MCP knowledge tools. */
-  async replace(relative: string, content: string, previous: string): Promise<void> {
-    await this.write(relative, content, previous);
+  async replace(relative: string, content: string, previous: string, maximum = 65_536): Promise<void> {
+    await this.write(relative, content, previous, maximum);
   }
 
   private async write(relative: string, content: string, previous?: string, maximum = 65_536): Promise<void> {
@@ -100,7 +100,7 @@ export class ProjectFiles {
           throw error;
         }
       } else {
-        if (await this.read(relative, 65_536) !== previous) throw new AppError("FILE_CHANGED", `更新过程中文件发生变化：${relative}`);
+        if (await this.read(relative, maximum) !== previous) throw new AppError("FILE_CHANGED", `更新过程中文件发生变化：${relative}`);
         await rename(tempPath, target);
       }
     } finally {

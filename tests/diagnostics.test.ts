@@ -33,6 +33,34 @@ test("白名单事件拒绝原始输入，路径和身份去标识；并发追�
   assert.equal((await writer.read()).events.length, 40);
 });
 
+test("读取诊断时忽略追加锁文件，并保留工具的 degraded 结果", async (t) => {
+  const root = await home(t), writer = new DiagnosticWriter(root);
+  await writer.record("context.lookup");
+  await writeFile(join(root, "project-dev-agent/telemetry/events/2099-01-01.jsonl.lock"), "writer lock");
+  await writeFile(join(root, "project-dev-agent/telemetry/events/2099-01-01.jsonl.lock.recover"), "recovery lock");
+  const degraded = await observeTool(writer, "project_context", undefined, async () => ({ outcome: "degraded", code: "CONTEXT_PARTIAL" }));
+  assert.equal(degraded.code, "CONTEXT_PARTIAL");
+  const result = await writer.read();
+  assert.equal(result.invalid, 0);
+  const finished = result.events.find(event => event.event_name === "tool.finished" && event.reason_code === "CONTEXT_PARTIAL");
+  const lookup = result.events.find(event => event.event_name === "context.lookup" && event.reason_code === "CONTEXT_PARTIAL");
+  assert.equal(finished?.outcome, "degraded");
+  assert.equal(lookup?.outcome, "degraded");
+  assert.equal(finished?.context?.decision, "degraded");
+});
+
+test("同一钩子的诊断批量写入保留事件顺序并跳过单条坏记录", async (t) => {
+  const root = await home(t), writer = new DiagnosticWriter(root);
+  assert.equal(await writer.recordMany([
+    { name: "hook.received", input: { trace: "batch-trace" } },
+    { name: "context.lookup", input: { trace: "batch-trace", attributes: { selected_count: 2 } } },
+    { name: "hook.finished", input: { trace: "batch-trace", attributes: { selected_count: "bad" } as never } },
+  ]), true);
+  const events = (await writer.read()).events;
+  assert.deepEqual(events.map(event => event.event_name), ["hook.received", "context.lookup"]);
+  assert.ok(!JSON.stringify(events).includes('"bad"'));
+});
+
 test("结构化工具错误被记录，采集文件不可写时仍保留原工具结果", async (t) => {
   const root = await home(t), writer = new DiagnosticWriter(root);
   const result = await observeTool(writer, "project_context", "/private/project", async () => ({ outcome: "error", code: "EXPECTED_FAILURE" }));

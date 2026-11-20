@@ -92,6 +92,7 @@ test("PRD/SDD 来源核对、任务幂等重试及归属保护共同生效，旧
   const run = <T>(action: () => Promise<T>) => interactionStorage.run(owner, action);
   assert.equal((await run(() => tasks.open({ ...input, spec_input: { kind: "prd", source_ids: ["missing"] } }))).code, "SPECIFICATION_SOURCE_INVALID");
   const opened = await run(() => tasks.open(input)); assert.equal(opened.code, "TASK_OPENED");
+  assert.ok(opened.diagnostics.some(item => item.code === "SPECIFICATION_DOCUMENT_SOURCE_MISSING"));
   const saved = opened.data as { id: string; revision: number; spec_input: { kind: string } }; assert.equal(saved.spec_input.kind, "sdd");
   const repeated = await run(() => tasks.open(input)); assert.equal(repeated.code, "TASK_REUSED"); assert.equal((repeated.data as { id: string }).id, saved.id);
   assert.equal((await run(() => tasks.open({ ...input, requirement: "different operation payload" }))).code, "TASK_OPERATION_CONFLICT");

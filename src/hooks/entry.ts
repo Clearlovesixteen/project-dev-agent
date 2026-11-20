@@ -45,6 +45,8 @@ function finish(result: Record<string, unknown>) {
         attributes: { transport: "hook", output_bytes: Buffer.byteLength(output.additionalContext!),
           ...(output.hookEventName ? { event: output.hookEventName } : {}), ...(contextId ? { context_id: contextId } : {}) } }), 50);
     }
+    // 业务钩子事件已经在 handleHook 返回前完整落盘；此处只剩可选的
+    // context.emitted 诊断，保持原生钩子进程有界退出，不让宿主等待后台日志。
     process.exit(0);
   });
 }

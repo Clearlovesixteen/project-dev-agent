@@ -28,9 +28,18 @@ type ParticipationState = z.infer<typeof State>;
  */
 export class ParticipationStore {
   private readonly home: string;
-  constructor(home?: string) { this.home = new RuntimeSettings(home).home; }
+  private readonly diagnostics: DiagnosticWriter;
+  private filesPromise?: Promise<Awaited<ReturnType<typeof runtimeFiles>>>;
+  constructor(home?: string) {
+    this.home = new RuntimeSettings(home).home;
+    // 同一钩子内的 read/change 共用安装身份和用户目录解析，避免每次状态读写重复初始化诊断文件。
+    this.diagnostics = new DiagnosticWriter(this.home);
+  }
+  private async files() {
+    return this.filesPromise ??= runtimeFiles(this.home);
+  }
   private async path(project: string, interaction: InteractionContext, branch: string | null) {
-    const id = await new DiagnosticWriter(this.home).opaque(JSON.stringify([project, branch, interaction.session_id, interaction.actor_id ?? "main"]));
+    const id = await this.diagnostics.opaque(JSON.stringify([project, branch, interaction.session_id, interaction.actor_id ?? "main"]));
     return `${ROOT}/${id}.json`;
   }
   private fresh(branch: string | null): ParticipationState {
@@ -39,12 +48,12 @@ export class ParticipationStore {
       write_calls: 0, checked_calls: 0, check_outcome: null, pending_tools: [], completed_tools: [], last_turn: null };
   }
   async read(project: string, interaction: InteractionContext, branch: string | null): Promise<ParticipationState | undefined> {
-    const files = await runtimeFiles(this.home);
+    const files = await this.files();
     try { return State.parse(JSON.parse(await files.read(await this.path(project, interaction, branch)))); }
     catch (error) { if (hasCode(error, "ENOENT")) return undefined; throw error; }
   }
   async change(project: string, interaction: InteractionContext, branch: string | null, mutate: (state: ParticipationState) => void) {
-    const files = await runtimeFiles(this.home), path = await this.path(project, interaction, branch);
+    const files = await this.files(), path = await this.path(project, interaction, branch);
     await files.directory(ROOT);
     // 并行工具可能同时回写。短期限重试本模块锁；不能无限等待拖住宿主。
     const locked = async () => {

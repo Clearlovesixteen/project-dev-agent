@@ -165,21 +165,39 @@ export class TaskService {
 
   /** 工作树任务是回放依据。登记中断后，重试打开或任一更新可恢复需求组索引。 */
   private async syncRequirementGroup(task: Task, action: "register" | "update") {
-    if (!task.requirement_group_id) return [];
+    if (!task.requirement_group_id) return { task, diagnostics: [] as { code: string; message: string }[] };
     try {
       const registration = await this.groups.register({ group_id: task.requirement_group_id, task_id: task.id, worktree_path: task.worktree_path,
         branch: task.baseline_branch, requirement_role: task.requirement_role ?? "full", scope_paths: task.scope_paths ?? [],
         relationship: task.requirement_group_relationship ?? "new_requirement", phase: task.phase });
+      let synchronized = task;
+      const diagnostics: { code: string; message: string }[] = [];
+      if (task.phase === "active") {
+        try {
+          // 需求组登记锁内的最新结果必须回写本地任务。该操作只更新协同元数据，
+          // 保留任务 owner、revision 及用户提交的所有记录，便于后续 task_check 恢复。
+          synchronized = await this.store.syncCoordination(task.id, registration.scope_state, registration.related_task_ids);
+        } catch (error) {
+          diagnostics.push({ code: "TASK_COORDINATION_SYNC_PENDING", message: `任务已保存，但并发状态暂未写回：${error instanceof Error ? error.message : String(error)}。后续 task_check 或 task_update 会继续尝试。` });
+        }
+      }
       // resolve 可能早于另一个工作树的 register 完成；以锁内重算结果为准补发一次审查提示。
       // 任务已成功保存，提示只用于提醒集成前人工核对，不阻断当前开发。
       if (registration.scope_state === "scope_overlap_review" && task.parallel_state !== "scope_overlap_review") {
-        return [{
+        diagnostics.push({
           code: "REQUIREMENT_SCOPE_OVERLAP_REVIEW",
           message: `需求组登记后发现相关工作树 ${registration.related_task_ids.join(", ")} 使用重叠范围；任务已建立，但集成前必须人工审查。`,
-        }];
+        });
       }
-      return [];
-    } catch (error) { return [requirementGroupSyncDiagnostic(action, error)]; }
+      if (action === "register" && task.phase === "active") {
+        const cross = await this.groups.crossScopeOverlaps({ exclude_group_id: task.requirement_group_id, worktree_path: task.worktree_path, scope_paths: task.scope_paths ?? [] });
+        if (cross.related_task_ids.length) diagnostics.push({
+          code: "REQUIREMENT_CROSS_GROUP_SCOPE_OVERLAP_REVIEW",
+          message: `其它需求组的工作树 ${cross.related_task_ids.join(", ")} 使用重叠范围；插件不会自动合并，集成前必须人工审查。`,
+        });
+      }
+      return { task: synchronized, diagnostics };
+    } catch (error) { return { task, diagnostics: [requirementGroupSyncDiagnostic(action, error)] }; }
   }
 
   /** CLI 与 MCP 共用错误约定，协议适配层无需识别存储或 Git 的具体异常。 */
@@ -209,6 +227,22 @@ export class TaskService {
       if (current.repo_identity !== this.binding.repo_identity)
         throw new AppError("REPOSITORY_CHANGED", "当前绑定的仓库标识已变化");
       await assertStateIgnored(current);
+      const coordinationDiagnostics: { code: string; message: string }[] = [];
+      try {
+        const reconciled = await this.groups.reconcile();
+        if (reconciled.archived_task_ids.length || reconciled.synchronized_task_ids.length || reconciled.unreadable_task_ids.length) {
+          coordinationDiagnostics.push({
+            code: "REQUIREMENT_GROUP_RECONCILED",
+            message: `已核对需求组索引：归档 ${reconciled.archived_task_ids.length} 条、同步 ${reconciled.synchronized_task_ids.length} 条、待人工核对 ${reconciled.unreadable_task_ids.length} 条。`,
+          });
+        }
+      } catch (error) {
+        // 需求组是协同索引，不能因为清理暂时失败阻断核心任务创建；登记阶段会继续重试。
+        coordinationDiagnostics.push({
+          code: "REQUIREMENT_GROUP_RECONCILE_PENDING",
+          message: `需求组索引暂未完成清理：${error instanceof Error ? error.message : String(error)}。后续打开或更新任务时会继续尝试。`,
+        });
+      }
       if (request.resolution_source && request.task_kind !== "merge_recovery")
         throw new AppError("MERGE_RECOVERY_INTENT_REQUIRED", "resolution_source 仅用于明确的 task_kind:merge_recovery 任务");
       const recovery = request.task_kind === "merge_recovery" ? await captureMergeRecovery(current, request.resolution_source) : undefined;
@@ -262,11 +296,12 @@ export class TaskService {
           assertTaskOwner(existing);
           if (existing.operation_fingerprint !== operationFingerprint)
             throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
+          const sync = await this.syncRequirementGroup(existing, "register");
           return {
             outcome: "ok",
             code: "TASK_REUSED",
-            data: existing,
-            diagnostics: await this.syncRequirementGroup(existing, "register"),
+            data: sync.task,
+            diagnostics: [...coordinationDiagnostics, ...sync.diagnostics],
           };
         }
       }
@@ -281,9 +316,17 @@ export class TaskService {
           ...references,
         ],
       );
-      // 需求组先按来源指纹做保守关联；没有唯一证据时宁可创建新组，也不把两个需求串起来。
-      const grouping = request.requirement_role || request.requirement_group_id || request.parent_task_id || request.continuation_of_task_id;
-      const group = !recovery && grouping ? await this.groups.resolve({
+      if (request.spec_input && request.spec_input.kind !== "request") {
+        const sourceIds = new Set(request.spec_input.source_ids);
+        const hasDocumentSource = requirementSources.some(source => sourceIds.has(source.input.id) && source.input.kind === "document");
+        if (!hasDocumentSource) coordinationDiagnostics.push({
+          code: "SPECIFICATION_DOCUMENT_SOURCE_MISSING",
+          message: `${request.spec_input.kind.toUpperCase()} 仅保存了输入类型和来源 ID，当前没有可用于跨工作树关联的文档指纹；请传入 kind=document 的 PRD/SDD 来源，或显式复用 requirement_group_id。`,
+        });
+      }
+      // 所有普通任务都先走需求组解析。没有显式关联时由服务按唯一来源指纹
+      // 自动关联，来源不唯一则创建新组或明确报歧义，不能依赖调用方是否传 role。
+      const group = !recovery ? await this.groups.resolve({
         requirement: request.requirement,
         sources: requirementSources,
         acceptance: request.acceptance_criteria,
@@ -368,16 +411,17 @@ export class TaskService {
         if (group?.link === "new") await this.groups.discardIfEmpty(group.group_id).catch(() => {});
         throw error;
       }
-      const diagnostics = group?.scope_state === "scope_overlap_review"
+      const diagnostics = [...coordinationDiagnostics, ...(group?.scope_state === "scope_overlap_review"
         ? [{ code: "REQUIREMENT_SCOPE_OVERLAP_REVIEW", message: `同一需求组已有相关工作树 ${group.related_task_ids.join(", ")} 使用重叠范围；任务已建立，但集成前必须人工审查。` }]
         : group?.link === "auto_source_match"
         ? [{ code: "REQUIREMENT_GROUP_AUTO_LINKED", message: `已按唯一 PRD/SDD 来源指纹关联需求组 ${group.group_id}；如实际不是同一需求，请重新建立独立需求组。` }]
-        : [];
-      diagnostics.push(...await this.syncRequirementGroup(saved, "register"));
+        : [])];
+      const sync = await this.syncRequirementGroup(saved, "register");
+      diagnostics.push(...sync.diagnostics);
       return {
         outcome: "ok",
-        code: saved.id === task.id ? "TASK_OPENED" : "TASK_REUSED",
-        data: saved,
+        code: sync.task.id === task.id ? "TASK_OPENED" : "TASK_REUSED",
+        data: sync.task,
         diagnostics,
       };
     });
@@ -415,8 +459,8 @@ export class TaskService {
             reason: request.suspend_reason ?? request.abort_reason ?? `恢复挂起任务，原挂起原因：${current.suspend_reason}`,
             recorded_at: new Date().toISOString() }],
         }));
-        const diagnostics = await this.syncRequirementGroup(saved, "update");
-        return { outcome: "ok", code: saved.phase === "suspended" ? "TASK_SUSPENDED" : saved.phase === "active" ? "TASK_RESUMED" : "TASK_UPDATED", data: saved, diagnostics };
+        const sync = await this.syncRequirementGroup(saved, "update");
+        return { outcome: "ok", code: saved.phase === "suspended" ? "TASK_SUSPENDED" : saved.phase === "active" ? "TASK_RESUMED" : "TASK_UPDATED", data: sync.task, diagnostics: sync.diagnostics };
       }
       if (request.knowledge_versions?.length) {
         const files = new ProjectFiles(this.binding.root);
@@ -473,13 +517,13 @@ export class TaskService {
             `关闭任务前请补充并审查清单之外的改动：${unexpected.join(", ")}`,
           );
       }
-      const saved = await this.store.update(
-        request.task_id,
-        request.expected_revision,
-        async (current) => {
+      // 先在任务文件锁外完成 Git、模型、验证和需求审查。提交阶段只做修订号
+      // 与不可变字段核验，避免一个慢任务把同一工作树的恢复/读取全部阻塞。
+      const candidate = await (async (current) => {
           if (request.phase !== "aborted") assertEnhancedModelWrites(!!request.business_plan || !!current.business_model_policy
             || !!current.business_plans?.length || !!current.business_deltas?.some(delta => enhancedBusinessDelta(delta.input)));
-          // 在存储锁内基于最新记录检查集合，防止替换时抹去此前的验收或纠正记录。
+          // 基于提交前读取的任务快照检查集合。最终提交仍通过修订号和追加约束
+          // 防止并发更新抹去此前的验收或纠正记录。
           const collections = [
             "change_items",
             "acceptance_criteria",
@@ -745,14 +789,14 @@ export class TaskService {
             await assertRequirementReview(this.binding, next);
           }
           return next;
-        },
-      );
-      const diagnostics = await this.syncRequirementGroup(saved, "update");
+        })(prior);
+      const saved = await this.store.updateCandidate(request.task_id, request.expected_revision, candidate);
+      const sync = await this.syncRequirementGroup(saved, "update");
       return {
         outcome: "ok",
         code: "TASK_UPDATED",
-        data: saved,
-        diagnostics,
+        data: sync.task,
+        diagnostics: sync.diagnostics,
       };
     });
   }
@@ -764,30 +808,22 @@ export class TaskService {
         task_id: IdSchema,
         expected_revision: z.number().int().nonnegative(),
       }).parse(input);
+      const prior = await this.store.load(request.task_id);
+      assertTaskOwner(prior);
+      if (prior.revision !== request.expected_revision)
+        throw new AppError("REVISION_CONFLICT", `预期修订号为 ${request.expected_revision}，实际为 ${prior.revision}`);
+      // 业务模型与验证发布在任务锁外完成。任务记录只在最后以乐观修订号
+      // 轻量递增，发布中断时由业务回执 journal 恢复，不让任务锁包住 Git/模型 IO。
+      assertEnhancedModelWrites(!!prior.business_model_policy || !!prior.business_plans?.length);
+      await assertBaseline(this.binding, prior);
+      const snapshot = await reviewSnapshot(this.binding, prior.baseline_head, prior.workspace_baseline);
+      const execution = await validationReview(this.binding, prior, snapshot.hash, snapshot.paths);
+      assertValidationReview(execution);
+      assertBusinessPlan(await businessPlanReview(this.binding, prior, snapshot.hash, snapshot.paths, execution));
       let receipt: unknown;
-      const saved = await this.store.update(
-        request.task_id,
-        request.expected_revision,
-        async (current) => {
-          assertEnhancedModelWrites(!!current.business_model_policy || !!current.business_plans?.length);
-          await assertBaseline(this.binding, current);
-          const snapshot = await reviewSnapshot(
-            this.binding,
-            current.baseline_head,
-            current.workspace_baseline,
-          );
-          const execution = await validationReview(this.binding, current, snapshot.hash, snapshot.paths);
-          assertValidationReview(execution);
-          assertBusinessPlan(await businessPlanReview(this.binding, current, snapshot.hash, snapshot.paths, execution));
-          const {
-            task_id: _taskId,
-            expected_revision: _revision,
-            ...value
-          } = request;
-          receipt = await applyBusinessDelta(this.binding, current, value);
-          return current;
-        },
-      );
+      const { task_id: _taskId, expected_revision: _revision, ...value } = request;
+      receipt = await applyBusinessDelta(this.binding, prior, value);
+      const saved = await this.store.updateCandidate(request.task_id, request.expected_revision, prior);
       return {
         outcome: "ok",
         code: "BUSINESS_DELTA_APPLIED",

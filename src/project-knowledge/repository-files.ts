@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, lstat, open, realpath, rename, unlink } from "node:fs/promises";
+import { mkdir, lstat, open, readdir, realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { AppError } from "../domain/error.js";
 import { RelativePathSchema } from "../domain/common.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { hasCode } from "../storage/project-files.js";
-import { ProjectIdentitySchema, PROJECT_KNOWLEDGE_DIR, SnapshotPointerSchema, type ProjectIdentity, type SnapshotPointer } from "./contracts.js";
+import { CurrentObjectIndexSchema, ProjectIdentitySchema, PROJECT_KNOWLEDGE_DIR, SnapshotPointerSchema, type CurrentObjectIndex, type ProjectIdentity, type SnapshotPointer } from "./contracts.js";
 
 const MAX_FILE = 1_048_576;
 const unsafe = (message: string) => new AppError("PROJECT_KNOWLEDGE_PATH_UNSAFE", message);
@@ -37,6 +37,14 @@ export class RepositoryFiles {
       throw error;
     }
     const files = new RepositoryFiles(actual);
+    // 需求组登记和项目知识库共用顶层目录，但前者可以先于业务模型初始化。
+    // 只有协调目录时视为尚未初始化。已经出现知识库目录的残缺结构仍需报错，
+    // 让调用方知道需要执行受控的 prepare，而不是静默跳过损坏状态。
+    if (!(await files.readIdentity())) {
+      const names = await readdir(files.root);
+      const hasKnowledgeLayout = names.some((name) => ["identity.json", "CURRENT.json", "objects", "transactions", "operations", "migrations"].includes(name));
+      if (!hasKnowledgeLayout) return undefined;
+    }
     // 查询路径必须是只读探测。缺少任一结构目录表示初始化不完整，交给 prepare(apply:true)
     // 修复；不能让普通 project_context 通过 ensureDirectory 改写用户的 Git 公共目录。
     for (const directory of ["objects", "transactions", "operations", "migrations"]) {
@@ -173,6 +181,21 @@ export class RepositoryFiles {
   async readCurrent(): Promise<SnapshotPointer | undefined> {
     try { return SnapshotPointerSchema.parse(JSON.parse(await this.read("CURRENT.json", 32_768))); }
     catch (error) { if (hasCode(error, "ENOENT")) return undefined; throw error; }
+  }
+
+  /** 读取 CURRENT 的物化对象索引。缺失或损坏时由仓库实现回退事务链。 */
+  async readCurrentObjectIndex(): Promise<CurrentObjectIndex | undefined> {
+    try { return CurrentObjectIndexSchema.parse(JSON.parse(await this.read("CURRENT_INDEX.json", 1_048_576))); }
+    catch (error) { if (hasCode(error, "ENOENT")) return undefined; return undefined; }
+  }
+
+  /** 索引是可丢弃的加速数据，采用与 CURRENT 相同的原子写入语义。 */
+  async writeCurrentObjectIndex(index: CurrentObjectIndex): Promise<void> {
+    const content = JSON.stringify(CurrentObjectIndexSchema.parse(index)) + "\n";
+    const previous = await this.read("CURRENT_INDEX.json", 1_048_576).catch((error) => hasCode(error, "ENOENT") ? undefined : Promise.reject(error));
+    if (previous === content) return;
+    if (previous === undefined) await this.create("CURRENT_INDEX.json", content, 1_048_576);
+    else await this.replace("CURRENT_INDEX.json", content, previous, 1_048_576);
   }
 
   async writeObject(objectId: string, content: string): Promise<void> {

@@ -1,5 +1,5 @@
 {
-  "version": "0.14.0",
+  "version": "0.14.1",
   "node": ">=18.19.0",
   "business_model_mode": "writer",
   "dependencies": [
@@ -93,7 +93,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "74c9d949864e23e0c1a41983339f1fd93e1b326d60ce2f54b7bf143030941e02"
+      "sha256": "4bbd0008fca0f316ec9132b9b52179be34b85aed59a0e48685d7647810f67291"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -158,7 +158,7 @@
     {
       "path": "hooks/hooks.json",
       "bytes": 921,
-      "sha256": "eae3c788720ecc95cebd7bf507e0f0d754bc6dba9dd11ad7f873d449d0bea194"
+      "sha256": "663c3e7a4545e40209f3867284b88ee86e2222f0edf23e7ce2e8c580c8887f91"
     },
     {
       "path": "mcp.json",
@@ -168,12 +168,12 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "289704b67311707d53c0b056be90008eacff2e09c1890a21860a6ab9125cbe37"
+      "sha256": "42947eb4864f95bfd2821ac6e82f22dfd25a25f9ffcb302d048bf34206738b82"
     },
     {
       "path": "README.md",
       "bytes": 2123,
-      "sha256": "0a8c1defbd6ae8a8225051a203199ff99c114433bf41307886d04def2de3f953"
+      "sha256": "7efbf7a5967456f3a967c72052e15060ed0fc44f048fbef32ddbc86486e197d0"
     },
     {
       "path": "runtime/behavior-reporter.mjs",
@@ -182,13 +182,13 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1366505,
-      "sha256": "9ccdf9e7ee565eac84136d6746498d9cd8c58117d546462186d74e1f31dccb18"
+      "bytes": 1811302,
+      "sha256": "9b62c639a5109d04edef1f2e2e6b5271ca6119545896cadde00cf1e23e8b3b6d"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 1235554,
-      "sha256": "c0a29d5cb196633803de95382d2f019d64c442a5058bdaaf7971908e35edf0bb"
+      "bytes": 813093,
+      "sha256": "c9ba99822eef5a49bdaf8b47c6c6ac2819abd3f1150696f56f469e36de50ed88"
     },
     {
       "path": "runtime/symbol-index.mjs",

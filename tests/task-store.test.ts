@@ -46,6 +46,19 @@ test("task records survive reinstantiation and load returns an independent value
   assert.equal(loaded.baseline_head, fixture.head);
 });
 
+test("active-task index accelerates branch lookup without appearing as a task", async (t) => {
+  const fixture = await createGitFixture();
+  t.after(fixture.cleanup);
+  const store = new TaskStore(fixture.path);
+  await store.create(freshTask(fixture));
+  assert.equal((await store.active("main"))?.id, "task-1");
+  const index = join(fixture.path, ".project-dev", "local", "tasks", ".active-index.json");
+  assert.match(await readFile(index, "utf8"), /task-1/);
+  assert.equal((await store.list()).tasks.length, 1);
+  await store.update("task-1", 0, closedTask);
+  assert.equal(await store.active("main"), undefined);
+});
+
 test("duplicate IDs and overlapping active tasks are rejected", async (t) => {
   const fixture = await createGitFixture();
   t.after(fixture.cleanup);
@@ -70,6 +83,24 @@ test("concurrent updates cannot both commit the same revision", async (t) => {
   assert.ok(["STORE_BUSY", "REVISION_CONFLICT"].includes((failure.reason as { code: string }).code));
   assert.equal((await first.load("task-1")).revision, 1);
   await assert.rejects(first.update("task-1", 0, (current) => current), { code: "REVISION_CONFLICT" });
+});
+
+test("lock外生成的候选只在提交阶段占用任务锁并拒绝过期修订", async (t) => {
+  const fixture = await createGitFixture();
+  t.after(fixture.cleanup);
+  const store = new TaskStore(fixture.path);
+  await store.create(freshTask(fixture));
+  const prior = await store.load("task-1");
+  const committed = await store.updateCandidate("task-1", prior.revision, {
+    ...prior,
+    requirement: "候选已在锁外完成检查",
+  });
+  assert.equal(committed.revision, 1);
+  assert.equal(committed.requirement, "候选已在锁外完成检查");
+  await assert.rejects(
+    store.updateCandidate("task-1", prior.revision, { ...prior, requirement: "过期候选" }),
+    { code: "REVISION_CONFLICT" },
+  );
 });
 
 test("closing retains a read-only record and releases the active-task constraint", async (t) => {

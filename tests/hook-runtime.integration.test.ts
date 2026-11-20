@@ -12,6 +12,7 @@ import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { DIAGNOSTIC_NOTICE, RuntimeSettings } from "../src/runtime/config.js";
 import { PluginSettings } from "../src/plugin-settings.js";
 import { DiagnosticWriter } from "../src/observability/writer.js";
+import { uploadDiagnostics } from "../src/observability/uploader.js";
 import { PUBLISHED_DIAGNOSTICS } from "../src/runtime/published-diagnostics.js";
 
 const entry = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/hooks.mjs", import.meta.url));
@@ -67,6 +68,16 @@ test("真实运行包的修改前钩子会拒绝未查询上下文的补丁，�
   assert.equal((await new RuntimeSettings(home).current()).diagnostics.upload, false);
 });
 
+test("发布钩子清单给 PreToolUse 保留足够的宿主预算", async () => {
+  const manifest = JSON.parse(await readFile(join(process.cwd(), "hooks/hooks.json"), "utf8"));
+  const preToolUse = manifest.hooks.PreToolUse[0].hooks[0];
+  const sessionStart = manifest.hooks.SessionStart[0].hooks[0];
+  const stop = manifest.hooks.Stop[0].hooks[0];
+  assert.equal(preToolUse.timeout, 8);
+  assert.equal(sessionStart.timeout, 3);
+  assert.equal(stop.timeout, 8);
+});
+
 test("更新后的独立钩子自动迁移旧 manual，保留诊断关闭且重启幂等", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "upgrade-hook-home"); await mkdir(home);
@@ -110,12 +121,13 @@ test("输入钩子 Git 发现超时仍保留轻量入口，诊断指出具体检
   assert.ok(deadline.call_id && deadline.duration_ms >= 1000);
 });
 
-test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子的期限不受影响", async t => {
+test("Stop 先完整落盘并快速返回，下一次入口再消费收尾队列", async t => {
   const home = await mkdtemp(join(tmpdir(), "pda-stop-ack-")); t.after(() => rm(home, { recursive: true, force: true }));
-  let received = 0; const profiles: number[] = [];
+  let received = 0; const profiles: number[] = [], names: string[] = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const batch = JSON.parse(Buffer.concat(chunks).toString()); received += batch.events.length; profiles.push(batch.schema_version);
+    names.push(...batch.events.map((event: { event_name: string }) => event.event_name));
     // 新版Stop含结构化诊断，接收端必须按v2逐项持久确认，不能在新入口伪装成旧ACK。
     const ack = batch.schema_version === 2
       ? { schema_version: 2, batch_id: batch.batch_id, accepted_indexes: batch.events.map((_event: unknown, index: number) => index), rejected: [] }
@@ -128,16 +140,21 @@ test("异步 Stop 等待慢速持久确认再推进队列，同步输入钩子�
     upload: true, notice_version: DIAGNOSTIC_NOTICE,
     endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}/events`, write_token: "isolated-hook-write-token" } });
   await new DiagnosticWriter(home).record("health.checked", { reason: "ISOLATED_STOP_TEST" });
+  const started = performance.now();
   const result = await run(home, JSON.stringify({ hook_event_name: "Stop", session_id: "isolated-stop", cwd: home }));
   assert.equal(result.code, 0); assert.equal(result.stderr, ""); assert.deepEqual(JSON.parse(result.stdout), {});
+  assert.ok(performance.now() - started < 1000, "Stop 不应等待远程确认");
+  const localEvents = (await new DiagnosticWriter(home).read()).events;
+  assert.ok(localEvents.some(event => event.event_name === "hook.finished"), "Stop 收尾事件必须先落盘");
+  const drained = await uploadDiagnostics(home, 2500, await new RuntimeSettings(home).current());
+  assert.equal(drained.state, "ok");
   const cursor = JSON.parse(await readFile(join(home, "project-dev-agent/telemetry/upload.json"), "utf8"));
   assert.equal(cursor.failures, 0, "持久确认已收到时不能仍保留失败游标");
-  assert.ok(Object.values(cursor.positions).some(value => Number(value) >= 2));
-  assert.equal(received, 2);
+  assert.ok(Object.values(cursor.positions).some(value => Number(value) >= 3));
+  assert.ok(received >= 3);
+  assert.ok(names.includes("hook.finished"), "下一次入口消费时应包含上次 Stop 的收尾事件");
   assert.deepEqual(profiles, [2]);
-  const events = (await new DiagnosticWriter(home).read()).events;
-  assert.ok(events.some(event => event.event_name === "hook.finished"));
-  assert.ok(!events.some(event => event.reason_code === "HOOK_DEADLINE"));
+  assert.ok(!localEvents.some(event => event.reason_code === "HOOK_DEADLINE"));
 });
 
 test("新安装的真实钩子自动初始化公开上报，保存关闭后重启不重新开启", async t => {

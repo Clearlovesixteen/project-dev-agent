@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import { AppError } from "../domain/error.js";
 import { IdSchema } from "../domain/common.js";
 import { TaskSchema, type Task } from "../domain/task.js";
@@ -19,6 +20,8 @@ import { bindWorktree } from "../git/index.js";
 
 const MAX_RECORD_BYTES = 1_000_000;
 const MAX_TASK_ENTRIES = 1_000;
+const ACTIVE_INDEX = ".active-index.json";
+const ActiveIndex = z.object({ schema_version: z.literal(1), branches: z.record(z.string(), IdSchema) }).strict();
 const IMMUTABLE_FIELDS = [
   "id",
   "schema_version",
@@ -118,7 +121,7 @@ export class TaskStore {
       for await (const entry of directory) {
         if (++count > MAX_TASK_ENTRIES)
           throw new AppError("STATE_LIMIT", "任务目录中的记录数量超过限制");
-        if (!entry.name.endsWith(".json")) continue;
+        if (!entry.name.endsWith(".json") || entry.name === ACTIVE_INDEX) continue;
         const id = entry.name.slice(0, -5);
         taskId(id);
         const existing = await this.readTask(join(paths.tasks, entry.name));
@@ -167,7 +170,7 @@ export class TaskStore {
     let count = 0;
     for await (const entry of directory) {
       if (++count > MAX_TASK_ENTRIES) return { tasks, truncated: true };
-      if (!entry.name.endsWith(".json")) continue;
+      if (!entry.name.endsWith(".json") || entry.name === ACTIVE_INDEX) continue;
       if (tasks.length >= limit) return { tasks, truncated: true };
       const id = taskId(entry.name.slice(0, -5));
       const task = await this.readTask(join(paths.tasks, entry.name));
@@ -190,6 +193,40 @@ export class TaskStore {
     return tasks.find((task) => task.operation_key === operationKey);
   }
 
+  /**
+   * 将需求组登记后的并发状态写回任务。
+   *
+   * parallel_state 与 related_task_ids 是由公共需求组索引推导出的协同元数据，
+   * 不是用户提交的任务内容。它们需要在本地任务中持久化，便于切换工作树后
+   * task_check 恢复同一状态，但不能因为一次登记把任务 owner 或 revision 改写。
+   */
+  async syncCoordination(
+    id: string,
+    parallelState: NonNullable<Task["parallel_state"]>,
+    relatedTaskIds: string[],
+  ): Promise<Task> {
+    const safeId = taskId(id);
+    return this.withLock(async (paths) => {
+      const current = await this.readTask(join(paths.tasks, `${safeId}.json`));
+      if (current.id !== safeId)
+        throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
+      this.assertBinding(current, paths.root);
+      assertTaskOwner(current);
+      const nextRelated = [...new Set(relatedTaskIds)].sort();
+      if (current.parallel_state === parallelState
+        && JSON.stringify(current.related_task_ids ?? []) === JSON.stringify(nextRelated)) {
+        return structuredClone(current);
+      }
+      const next = parseTask({
+        ...current,
+        parallel_state: parallelState,
+        ...(nextRelated.length ? { related_task_ids: nextRelated } : { related_task_ids: undefined }),
+      });
+      await this.writeTask(paths, next, true);
+      return structuredClone(next);
+    });
+  }
+
   async active(currentBranch?: string | null, signal?: AbortSignal): Promise<Task | undefined> {
     signal?.throwIfAborted();
     let paths: StatePaths;
@@ -201,21 +238,35 @@ export class TaskStore {
       throw error;
     }
     const branch = currentBranch === undefined ? (await bindWorktree(paths.root)).branch : currentBranch;
+    // 先尝试按分支索引读取唯一活跃任务。索引只做正命中加速，缺失或失效时仍回退完整扫描，
+    // 保留旧版本记录和人工恢复状态的正确性。
+    const indexed = await this.readActiveIndex(paths);
+    const indexedId = indexed?.branches[branch ?? ""];
+    if (indexedId) {
+      try {
+        const task = await this.readTask(join(paths.tasks, `${taskId(indexedId)}.json`));
+        this.assertBinding(task, paths.root);
+        if (task.phase === "active" && task.baseline_branch === branch) return task;
+      } catch { /* 索引失效时走完整扫描并重建。 */ }
+    }
     const directory = await opendir(paths.tasks);
     let count = 0;
     let active: Task | undefined;
+    const activeBranches: Record<string, string> = {};
     for await (const entry of directory) {
       // 启动提示可以有界停止阅读任务历史；写入门禁仍使用完整检查。
       signal?.throwIfAborted();
       if (++count > MAX_TASK_ENTRIES)
         throw new AppError("STATE_LIMIT", "任务目录中的记录数量超过限制");
-      if (!entry.name.endsWith(".json")) continue;
+      if (!entry.name.endsWith(".json") || entry.name === ACTIVE_INDEX) continue;
       const id = taskId(entry.name.slice(0, -5));
       const task = await this.readTask(join(paths.tasks, entry.name));
       if (task.id !== id)
         throw new AppError("STATE_CORRUPT", "保存的任务 ID 与文件名不一致");
       this.assertBinding(task, paths.root);
-      if (task.phase !== "active" || task.baseline_branch !== branch) continue;
+      if (task.phase !== "active") continue;
+      if (task.baseline_branch) activeBranches[task.baseline_branch] = task.id;
+      if (task.baseline_branch !== branch) continue;
       if (active)
         throw new AppError(
           "MULTIPLE_ACTIVE_TASKS",
@@ -223,6 +274,8 @@ export class TaskStore {
         );
       active = task;
     }
+    // 索引属于可重建的性能缓存，写入失败不能影响任务读取结果。
+    await this.writeActiveIndex(paths, activeBranches).catch(() => {});
     return active;
   }
 
@@ -362,6 +415,17 @@ export class TaskStore {
       await this.writeTask(paths, next, true);
       return structuredClone(next);
     });
+  }
+
+  /**
+   * 以乐观修订号提交已经在锁外完成的任务候选。
+   *
+   * Git 快照、源码核验、模型和验证记录属于昂贵的外部读取，调用方应先在
+   * 锁外完成这些步骤，再把候选交给这里做一次短暂的修订号与不可变字段核验。
+   * 修订号变化会拒绝提交，调用方可基于新任务记录重新计算，不会覆盖并发更新。
+   */
+  async updateCandidate(id: string, expectedRevision: number, candidate: Task): Promise<Task> {
+    return this.update(id, expectedRevision, () => candidate);
   }
 
   private assertBinding(task: Task, root: string): void {
@@ -511,6 +575,8 @@ export class TaskStore {
       await this.prepare(false);
       await this.recordExists(target);
       await rename(temporary, target);
+      // 索引只用于缩短后续读路径，任务记录本身成功后即使索引更新失败也保留结果。
+      await this.updateActiveIndex(paths, task).catch(() => {});
     } finally {
       // Recheck the state path before removing a temporary file.
       try {
@@ -524,6 +590,29 @@ export class TaskStore {
           throw error;
       }
     }
+  }
+
+  private async readActiveIndex(paths: StatePaths): Promise<z.infer<typeof ActiveIndex> | undefined> {
+    try { return ActiveIndex.parse(JSON.parse(await this.readText(join(paths.tasks, ACTIVE_INDEX), 65_536))); }
+    catch (error) { if (error instanceof AppError && error.code === "TASK_NOT_FOUND") return undefined; return undefined; }
+  }
+
+  private async writeActiveIndex(paths: StatePaths, branches: Record<string, string>): Promise<void> {
+    const target = join(paths.tasks, ACTIVE_INDEX), temporary = join(paths.tasks, `.active-index-${randomUUID()}.tmp`);
+    const content = JSON.stringify({ schema_version: 1, branches }, null, 2) + "\n";
+    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { await handle.writeFile(content, "utf8"); await handle.sync(); } finally { await handle.close(); }
+    try { await rename(temporary, target); }
+    finally { try { await unlink(temporary); } catch (error) { if (!hasCode(error, "ENOENT")) throw error; } }
+  }
+
+  private async updateActiveIndex(paths: StatePaths, task: Task): Promise<void> {
+    const current = await this.readActiveIndex(paths);
+    if (!current || !task.baseline_branch) return;
+    const branches = { ...current.branches };
+    if (task.phase === "active") branches[task.baseline_branch] = task.id;
+    else if (branches[task.baseline_branch] === task.id) delete branches[task.baseline_branch];
+    await this.writeActiveIndex(paths, branches);
   }
 
   private async withLock<T>(
