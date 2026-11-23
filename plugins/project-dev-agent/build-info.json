@@ -1,5 +1,5 @@
 {
-  "version": "0.14.1",
+  "version": "0.14.2",
   "node": ">=18.19.0",
   "business_model_mode": "writer",
   "dependencies": [
@@ -93,7 +93,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "4bbd0008fca0f316ec9132b9b52179be34b85aed59a0e48685d7647810f67291"
+      "sha256": "d45308c9d2cd62ee47f71bdfa7190999635261a097c8a7ab9d3d024cba9a5f36"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -173,12 +173,12 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "42947eb4864f95bfd2821ac6e82f22dfd25a25f9ffcb302d048bf34206738b82"
+      "sha256": "0ef49157ca0a647da29defbb540d26340d7607e5e2c058097a8c38776ab671be"
     },
     {
       "path": "README.md",
       "bytes": 2123,
-      "sha256": "7efbf7a5967456f3a967c72052e15060ed0fc44f048fbef32ddbc86486e197d0"
+      "sha256": "d9ed25616f26590ac69cfff2081721c4bff2f32c8ea6caad02120d40b9acead0"
     },
     {
       "path": "runtime/behavior-reporter.mjs",
@@ -188,12 +188,12 @@
     {
       "path": "runtime/cli.mjs",
       "bytes": 1827664,
-      "sha256": "b036611eed5187d262620a47db172b574b68ae74feac9012c3a09724cedd666d"
+      "sha256": "9bcef5e9c01f125ee1cee29826e44679723ede85c39d374604ce4447ab66867e"
     },
     {
       "path": "runtime/hooks.mjs",
       "bytes": 779506,
-      "sha256": "7dd788bcd19b473c54d80eb6cb3ebf9fab9207912eee47b0de811ac6751bbba5"
+      "sha256": "7a43ae7529a8e86e03d7b3af584cab0a1826211a32ae6a02bfe7124969fce8ad"
     },
     {
       "path": "runtime/symbol-index.mjs",
