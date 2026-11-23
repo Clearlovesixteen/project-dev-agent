@@ -1,0 +1,122 @@
+{
+  "date": "2026-11-23",
+  "baseline_commit": "501d146",
+  "candidate_branch": "fix/codex-development-latency",
+  "platform": "macOS arm64",
+  "runtime_tests": {
+    "20.19.6": {
+      "files": 67,
+      "tests": 555,
+      "pass": 555,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0
+    },
+    "18.19.0": {
+      "files": 67,
+      "tests": 555,
+      "pass": 555,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0
+    }
+  },
+  "test_execution": "每个 Node 版本的 67 个文件分两组执行。61 个在默认沙箱运行，6 个使用本机回环服务。全部沿用原有超时阈值。",
+  "load_observations": [
+    "额外并发运行中，诊断挂起时的写前检查和 Stop 各触发过墙钟耗时断言。分别复测以及最终分组回归通过。",
+    "Stop 在主动消费上报队列前，接收端实际收到零条事件。"
+  ],
+  "native_codex": {
+    "case": "临时 Codex 目录中的合成升级，使用真实宿主和本机 Git 插件源。",
+    "result": "passed",
+    "mcp_tools": 16,
+    "discovered_hooks": 5,
+    "task_preserved": true,
+    "settings_preserved": true,
+    "loaded_candidate_in_isolation": true
+  },
+  "service_benchmark": {
+    "method": "scripts/benchmark-workflow.mjs 对两个已构建的工作副本分别运行。同一账户测试仓库，进程内计时，不包含宿主启动或模型推理。",
+    "baseline": {
+      "mode": "baseline",
+      "ordinary": {
+        "samples": 7,
+        "median_ms": 74.35,
+        "median_bytes": 1282
+      },
+      "scan": {
+        "samples": 5,
+        "median_ms": 78.97,
+        "median_bytes": 574
+      },
+      "context": {
+        "samples": 5,
+        "median_ms": 60.15,
+        "median_bytes": 12159
+      },
+      "resume": {
+        "samples": 7,
+        "median_ms": 122.47,
+        "median_bytes": 8309
+      },
+      "review": {
+        "samples": 3,
+        "median_ms": 121.18,
+        "median_bytes": 8309
+      }
+    },
+    "candidate": {
+      "mode": "candidate",
+      "ordinary": {
+        "samples": 7,
+        "median_ms": 0.01,
+        "median_bytes": 2
+      },
+      "scan": {
+        "samples": 5,
+        "median_ms": 62.96,
+        "median_bytes": 574
+      },
+      "context": {
+        "samples": 5,
+        "median_ms": 56.32,
+        "median_bytes": 5862
+      },
+      "resume": {
+        "samples": 7,
+        "median_ms": 29.29,
+        "median_bytes": 292
+      },
+      "review": {
+        "samples": 3,
+        "median_ms": 106.21,
+        "median_bytes": 8309
+      }
+    }
+  },
+  "prompt_hook_subprocess": {
+    "method": "独立 Node 子进程、同一隔离 Git 工作树和已有任务，预热后各测 5 次。",
+    "baseline_median_ms": 274.2,
+    "candidate_median_ms": 63.4
+  },
+  "sdd_replay": {
+    "case": "采购申请同步中宝",
+    "method": "将 501d146 的 enhanced-business-flow 中同一 SDD 测试分别对两份实现运行三次。覆盖来源、改动范围、真实测试、业务模型回写与关闭。未调用模型。",
+    "baseline": {
+      "samples_ms": [
+        10347.25,
+        9485.08,
+        9417.57
+      ],
+      "median_ms": 9485.08
+    },
+    "candidate": {
+      "samples_ms": [
+        9725.11,
+        7727.51,
+        7645.96
+      ],
+      "median_ms": 7727.51
+    }
+  }
+}

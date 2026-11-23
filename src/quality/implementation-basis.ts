@@ -18,32 +18,33 @@ import type { ImplementationBasisInput } from "./basis-contracts.js";
 
 type BasisReference = ImplementationBasisInput["references"][number];
 
-function matchesReference(
-  text: string,
-  reference: BasisReference,
-): boolean {
-  return (
-    digest(text) === reference.sha256 &&
-    (text.split(/\r?\n/)[reference.line - 1] ?? "").includes(reference.quote)
-  );
+type ReferenceBaseline = { binding: WorktreeBinding; head: string; workspace: WorkspaceBaseline | undefined };
+type ReferenceConfig = Awaited<ReturnType<typeof loadConfig>>["config"];
+
+function containsQuote(text: string, reference: BasisReference) {
+  return (text.split(/\r?\n/)[reference.line - 1] ?? "").includes(reference.quote);
+}
+
+function matchesReference(text: string, reference: BasisReference) {
+  return digest(text) === reference.sha256 && containsQuote(text, reference);
+}
+
+/** 基线回退也遵守当前配置、嵌套仓库与符号链接边界。 */
+async function baselineMatches(files: ProjectFiles, config: ReferenceConfig, reference: BasisReference, baseline: ReferenceBaseline) {
+  try {
+    await files.path(reference.path, true);
+    await sourceBoundary(files, reference.path, config);
+    return matchesReference(await baselineContent(baseline.binding, baseline.head, reference.path, baseline.workspace), reference);
+  } catch { return false; }
 }
 
 /** 已保存的引用可继续核对任务基线，新引用必须以当前工作树原文为准。 */
-async function referenceState(files: ProjectFiles, config: Awaited<ReturnType<typeof loadConfig>>["config"],
-  reference: BasisReference, baseline?: { binding: WorktreeBinding; head: string; workspace: WorkspaceBaseline | undefined }) {
+async function referenceState(files: ProjectFiles, config: ReferenceConfig, reference: BasisReference, baseline?: ReferenceBaseline) {
   if (excluded(reference.path, config)) return "stale";
   try {
     if (matchesReference(await safeSource(files, reference.path, config), reference)) return "current";
   } catch { /* 文件变化时，已保存的引用仍可尝试核对任务基线。 */ }
-  if (baseline) {
-    try {
-      await files.path(reference.path, true);
-      await sourceBoundary(files, reference.path, config);
-      const text = await baselineContent(baseline.binding, baseline.head, reference.path, baseline.workspace);
-      if (matchesReference(text, reference)) return "task_baseline";
-    } catch { /* 路径不安全或找不到旧原文时，保留待更新状态。 */ }
-  }
-  return "stale";
+  return baseline && await baselineMatches(files, config, reference, baseline) ? "task_baseline" : "stale";
 }
 
 /** 这里只核验引用原文，不把文件名、相似度或引用格式有效当作理解了项目。 */
@@ -91,6 +92,41 @@ export async function recordImplementationBasis(
       ? ("after_changes" as const)
       : ("before_changes" as const),
   };
+}
+
+/**
+ * 写前仅验证引用，复用同一任务已核实的行文。每次重新读取真实配置和文件字节，
+ * 用内容摘要比较来源；不会因 mtime 相同误用旧回执。基线回退每次独立核验。
+ */
+export async function checkWriteReferences(binding: WorktreeBinding, task: Task, prior?: string | null) {
+  const record = task.implementation_bases?.at(-1);
+  if (!record) return { valid: false, receipt: null };
+  const files = new ProjectFiles(binding.root);
+  const { config } = await loadConfig(files);
+  const references = record.basis.references;
+  const paths = [...new Set(references.map(reference => reference.path))];
+  const sources = new Map(await Promise.all(paths.map(async path => {
+    try {
+      const text = await safeSource(files, path, config);
+      return [path, { text, sha256: digest(text) }] as const;
+    } catch { return [path, undefined] as const; }
+  })));
+  // 只有所有来源仍精确匹配当前源码时才颁发可重用回执。
+  if (references.every(ref => sources.get(ref.path)?.sha256 === ref.sha256)) {
+    const receipt = digest(JSON.stringify([binding.root, binding.repo_identity, binding.branch, binding.head,
+      task.id, task.revision, record.basis, config]));
+    if (receipt === prior) return { valid: true, receipt };
+    const valid = references.every(ref => containsQuote(sources.get(ref.path)!.text, ref));
+    return { valid, receipt: valid ? receipt : null };
+  }
+  // 合法的本任务内修改可改变引用文件，保留现有的不可变基线核验语义。
+  for (const reference of references) {
+    const current = sources.get(reference.path);
+    if (current?.sha256 === reference.sha256 && containsQuote(current.text, reference)) continue;
+    if (!await baselineMatches(files, config, reference, { binding, head: task.baseline_head, workspace: task.workspace_baseline }))
+      return { valid: false, receipt: null };
+  }
+  return { valid: true, receipt: null };
 }
 
 /** 约束、实施选择或引用发生变化时只重开对应验收，移除决策也要复核其原验收。 */

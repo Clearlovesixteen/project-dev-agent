@@ -5,6 +5,10 @@ import { z } from "zod";
 import { resolve } from "node:path";
 import { AppError } from "./domain/error.js";
 import { VERSION } from "./version.js";
+import { findToolRoot } from "./package-root.js";
+import { ExpectedVersion, reloadMessage, runtimeReceipt } from "./runtime/version-receipt.js";
+import { completeBasis } from "./tools/basis-reference.js";
+import { WireBasis } from "./quality/basis-contracts.js";
 import { PluginSettings, PluginConfigureInput } from "./plugin-settings.js";
 import { Workspace } from "./workspace.js";
 import { prepareProject, ProjectPrepareInputSchema } from "./personal-setup.js";
@@ -73,6 +77,11 @@ export function createServer(
 ): McpServer {
   // 注入个人配置目录时，运行设置与诊断必须跟随同一个目录，不能回落到真实用户配置。
   const runtimeSettings = new RuntimeSettings(plugin?.home);
+  const packageRoot = plugin ? findToolRoot().catch(() => undefined) : undefined;
+  const checkRuntime = async (expected?: string) => {
+    const receipt = await runtimeReceipt(await packageRoot, expected);
+    if (receipt.state === "reload_required") throw new AppError("PLUGIN_RELOAD_REQUIRED", reloadMessage);
+  };
   const projectField = z
     .string()
     .min(1)
@@ -83,6 +92,9 @@ export function createServer(
     project: workspace || plugin ? projectField : projectField.optional(),
     interaction: Interaction.optional().describe("自动上下文提供的会话/轮次关联；旧调用可省略，不能借此授予新权限"),
   };
+  // 这两个选项属于协议适配层；持久任务仍使用原有完整输入与严格的业务验证。
+  const taskScope = { ...scope, expected_version: ExpectedVersion.optional().describe("升级后已核实的安装版本"), response_view: z.enum(["compact", "full"]).optional(),
+    implementation_basis: WireBasis.optional() };
   // 兜底处理绑定失败及尚未由领域服务捕获的异常，保留 AppError 的稳定错误码。
   async function operation(action: () => Promise<ToolResult>) {
     try {
@@ -112,11 +124,11 @@ export function createServer(
     {
       instructions:
         (plugin
-          ? "插件模式：开始已授权的开发时，用当前 Git 绝对根目录调用 project_prepare 并传 apply: true。默认按当前 Git 项目逐个接入，无需独立接入命令；切换项目先 prepare。旧版配置首次 prepare 时迁移为精确项目登记，不递归授权父目录；新版主动设置的 workspace 限制仍严格保留。所有项目工具传入当前 Git 根目录 project，不使用插件缓存作为项目。"
+          ? "插件模式：首次开发、切换项目或出现未接入提示时，用当前 Git 绝对根目录调用 project_prepare(apply:true)。同一项目继续任务时复用当前上下文与准备结果。项目仅登记具体仓库，保留已设置的工作范围。所有项目工具传入当前 Git 工作树根目录。"
           : workspace
           ? `工作目录模式：每次调用都需传入 project，值为 ${workspace} 内当前 Git 仓库的绝对根目录。不要把父工作目录当成 Git 仓库。`
           : "") +
-        "用带证据的清单跟踪关联改动。修改前建立任务并记录影响分析，随后审查差异和验证结果。编码前先查询 project_context 的 implementation_context，实际阅读项目规范、同类模块和已有基础设施；新业务目录无命中也不能跳过全局入口。优先复用适用的已有能力及用法，不得无依据另起封装。业务规则先保存变更草案，场景验收和真实检查通过后再回写模型。检查计划通过原终端 validation run 执行，MCP 不执行项目脚本。路径发生变化不代表审查完成；服务不独立保证业务正确性。新记录中的说明、业务理解和历史分析默认使用简体中文；字段、枚举、代码和原话引用保持原样，用户明确指定其他语言时遵循其要求。",
+        "新需求先用 project_context(view:'compact') 获取相关实施依据，阅读项目规范、同类实现、组件与封装，再登记验收和修改范围。同一任务续作先 task_check(mode:'resume')。索引缺失或受影响来源过期时扫描。已读依据、决策和更新尽量一次提交，使用 response_view:'compact'。语义或范围变化时补充受影响的证据。收尾时执行真实验证和完整 task_check，再更新受影响的业务模型；MCP 不执行项目脚本。记录默认简体中文，保留原话和代码。",
     },
   );
   instrumentMcp(server, plugin?.home);
@@ -148,7 +160,7 @@ export function createServer(
       {
         description:
           "读取当前插件版本、逐项目接入或显式工作范围配置，不扫描项目或修改设置。",
-        inputSchema: z.object({}).strict(),
+        inputSchema: z.object({ expected_version: ExpectedVersion.optional().describe("已核实的安装版本，可选；用于核对当前会话运行版本") }).strict(),
         annotations: {
           readOnlyHint: true,
           destructiveHint: false,
@@ -156,14 +168,17 @@ export function createServer(
           openWorldHint: false,
         },
       },
-      async () => configure(async () => {
+      async ({ expected_version }) => configure(async () => {
         const result = await plugin.status();
+        const version_receipt = await runtimeReceipt(await packageRoot, expected_version);
+        const status = { ...result, data: { ...result.data as object, version_receipt },
+          diagnostics: [...result.diagnostics, ...(version_receipt.state === "reload_required" ? [{ code: "PLUGIN_RELOAD_REQUIRED", message: reloadMessage }] : [])] };
         const capabilities = { business_model_writes: enhancedModelWrites, business_model_schema: 3,
           automatic_participation: true, native_write_checks: { requires_trusted_hooks: true, coverage: "supported_tool_paths",
             events: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"] } };
-        try { return { ...result, data: { ...result.data as object, capabilities, runtime: await runtimeSettings.status() } }; }
-        catch { return { ...result, data: { ...result.data as object, capabilities, runtime: { state: "unavailable", fallback_mode: "manual" } },
-          diagnostics: [{ code: "RUNTIME_CONFIG_UNAVAILABLE", message: "运行设置不可用，已保留原文件；手动项目工具继续可用，请单独核对运行设置。" }] }; }
+        try { return { ...status, data: { ...status.data, capabilities, runtime: await runtimeSettings.status() } }; }
+        catch { return { ...status, data: { ...status.data, capabilities, runtime: { state: "unavailable", fallback_mode: "manual" } },
+          diagnostics: [...status.diagnostics, { code: "RUNTIME_CONFIG_UNAVAILABLE", message: "运行设置不可用，已保留原文件；手动项目工具继续可用，请单独核对运行设置。" }] }; }
       }),
     );
     // 配置采用“预览修订号 → 应用”流程，具体并发保护由 PluginSettings 执行。
@@ -228,6 +243,7 @@ export function createServer(
       },
     },
     async ({ project, ...input }) => operation(async () => {
+      if (plugin) await checkRuntime();
       const result = plugin ? await plugin.prepare(project, input) : await prepareProject(await bindingFor(project), input);
       const interaction = currentInteraction();
       const root = (result.data as { project?: string })?.project;
@@ -246,7 +262,7 @@ export function createServer(
     {
       description:
         "在已绑定的 Git 工作树中捕获接入内容基线并创建任务，保留已有未提交改动，记录需求、验收及 implementation_basis。Agent 先读项目规范、相似实现和相关用法，记录真实原文引用、适用约束及实现选择，每项选择关联验收 ID；新任务未建立并复核依据不能关闭。时机与公共能力基线由服务捕获。已确认同一需求跨工作树拆分时使用 requirement_group_id、parent_task_id 或 continuation_of_task_id，按分工设置 requirement_role，普通任务省略。用户明确要求解决当前 merge 冲突时使用 task_kind:merge_recovery；resolution_source 仅在用户选择以该提交完整替换冲突文件时填写，手工合并可省略。仍须依据、验收和原冲突路径约束，说明默认中文。",
-      inputSchema: TaskOpenInputSchema.safeExtend(scope),
+      inputSchema: TaskOpenInputSchema.extend(taskScope),
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -254,15 +270,18 @@ export function createServer(
         openWorldHint: false,
       },
     },
-    async ({ project, ...input }) =>
-      run(project, (binding) => new TaskService(binding).open(input)),
+    async ({ project, expected_version, response_view: _view, implementation_basis, ...input }) =>
+      run(project, async (binding) => {
+        if (plugin) await checkRuntime(expected_version);
+        return new TaskService(binding).open(implementation_basis ? { ...input, implementation_basis: await completeBasis(binding, implementation_basis) } : input);
+      }),
   );
   server.registerTool(
     "task_update",
     {
       description:
         "使用最新修订号更新任务，集合完整替换且保留旧 ID。business_deltas 追加规则草案；business_plan 将需求原文、规则、关联位置的处置和命名测试连到验收，编码前保存。validation_plan 保存真实检查计划。修订依据或计划时，相关验收先重开为 pending。需求组和工作树归属在 task_open 时确定，task_update 不允许事后改组；同组任务关闭只更新子任务状态，不自动合并业务模型。复核前保存 task_check.review_snapshot，复核旧完成项另传 reviewed_ids。停止用 aborted 和原因。",
-      inputSchema: TaskUpdateInputSchema.safeExtend(scope),
+      inputSchema: TaskUpdateInputSchema.extend(taskScope),
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -270,14 +289,17 @@ export function createServer(
         openWorldHint: false,
       },
     },
-    async ({ project, ...input }) =>
-      run(project, (binding) => new TaskService(binding).update(input)),
+    async ({ project, expected_version, response_view: _view, implementation_basis, ...input }) =>
+      run(project, async (binding) => {
+        if (plugin) await checkRuntime(expected_version);
+        return new TaskService(binding).update(implementation_basis ? { ...input, implementation_basis: await completeBasis(binding, implementation_basis) } : input);
+      }),
   );
   server.registerTool(
     "task_check",
     {
       description:
-        "省略 task_id 恢复活跃任务。比较 Git 差异、清单和证据指纹，返回关联线索和业务场景。quality.business_plan 检查原文版本、受保护位置和命名测试。quality.implementation 核对实现依据，quality.reuse 检查明确 HTTP 绕过，quality.execution 核对终端检查，quality.business_delta 核对业务草案和回写回执。保留 review_snapshot 后实际核验，再用 task_update 保存。",
+        "继续开发用 mode:'resume' 恢复任务归属与修订号。收尾时省略 mode 执行完整检查，返回 Git 差异、关联范围、实现依据、业务规则和真实验证记录。保留 review_snapshot 后实际核验，再用 task_update 保存。",
       inputSchema: TaskCheckInputSchema.safeExtend(scope),
       annotations: {
         readOnlyHint: true,
@@ -415,7 +437,7 @@ export function createServer(
     "project_context",
     {
       description:
-        "查询代码线索与业务模型。implementation_context 在新目录无命中时仍提供公共能力、已有用法和规范候选。用 code_locations 单独查询静态声明、导入别名和重导出路径。用 model_id、model_revision 和可选 rule_ids 读取规则、条件、代码绑定、关系及依据。needs_rescan 需刷新索引；needs_review 按 review_required 局部复核。实际阅读相关源码后采用候选。",
+        "开发先传 view:'compact' 读相关业务规则、已有实现和规范，再直接核对命中源码。同一需求可复用有效依据。按需以 code_locations 查询声明和引用，以 model_id、model_revision、rule_ids 读规则详情。needs_rescan 刷新索引，needs_review 局部核对。",
       inputSchema: ContextInput.safeExtend(scope),
       annotations: {
         readOnlyHint: true,

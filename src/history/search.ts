@@ -1,9 +1,13 @@
 import { ProjectFiles } from "../storage/project-files.js";
 import { matchesPath } from "../knowledge/config.js";
-import { historyControl, historyProfile } from "./store.js";
+import { historyControl, historyProfile, manifestFor } from "./store.js";
 
-export async function searchHistoryHints(files: ProjectFiles, query: string, paths: string[], limit: number) {
-  const profile = await historyProfile(files);
+export async function searchHistoryHints(files: ProjectFiles, query: string, paths: string[], limit: number, maximumBatches?: number) {
+  const manifest = await manifestFor(files);
+  // 日常摘要有独立批次预算，超过时交由按需详情查询，不读取旧对话批次。
+  if (maximumBatches !== undefined && manifest && manifest.batches.length > maximumBatches)
+    return { state: "lookup_required", total_batches: manifest.batches.length, hints: [], truncated: true };
+  const profile = await historyProfile(files, { manifest });
   const control = await historyControl(files);
   const terms = [...new Intl.Segmenter("zh", { granularity: "word" }).segment(query.toLowerCase())]
     .filter((part) => part.isWordLike).map((part) => part.segment);

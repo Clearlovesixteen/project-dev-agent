@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile, unlink, symlink, readdir, rm } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat, unlink, symlink, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
@@ -51,8 +51,15 @@ test("structure scan indexes modules, aliases and consumers without executing sc
 test("repeat scans reuse extraction but re-resolve aliases and find added/deleted files", async (t) => {
   const { binding, service, files, put } = await setup(t);
   await service.scan({}); const first = (await readMap(files))!;
+  const report = join(binding.root, ".project-dev/local/understanding/report.html");
+  const beforeReport = await stat(report, { bigint: true });
   await service.scan({}); const second = (await readMap(files))!;
   assert.equal(second.scan_id, first.scan_id); assert.equal(second.coverage.reused, second.coverage.indexed);
+  assert.equal(second.scanned_at, first.scanned_at);
+  assert.equal((await stat(report, { bigint: true })).ino, beforeReport.ino);
+  await unlink(report);
+  await service.scan({});
+  assert.match(await readFile(report, "utf8"), /订单|src\/pages\/orders/);
   await put("src/new/status.ts", "export const state = 'new';\n");
   assert.deepEqual(((await service.context({ paths: ["src/new/status.ts"] })).data as any).unindexed_paths, ["src/new/status.ts"]);
   await put("tsconfig.json", '{"compilerOptions":{"paths":{"@/shared/*":["src/new/*"]}}}');
@@ -156,9 +163,38 @@ test("首次准备会把旧工作树模型影子迁移到项目公共知识库�
   assert.equal(knowledge.migration.published, 1);
   assert.deepEqual(knowledge.migration.failed, []);
   assert.equal(knowledge.snapshot_count, 1);
+  const retry = (await prepareProject(binding, { apply: true })).data as any;
+  assert.equal(retry.project_knowledge.migration.attempted, 0);
+  assert.equal(retry.project_knowledge.migration.reused, 1);
+  const daily = (await prepareProject(binding, { apply: true, include_recovery: false })).data as any;
+  assert.deepEqual(daily.task_recovery, { branch: binding.branch, state: "not_requested" });
+  assert.equal(daily.worktree_clean, retry.worktree_clean);
+  assert.deepEqual(daily.active_task, retry.active_task);
+  assert.equal(daily.merge_recovery_ready, retry.merge_recovery_ready);
+  assert.equal(daily.history.state, "not_scanned");
+  assert.ok(Array.isArray(retry.task_recovery.preserved));
   const restored = (await service.context({})).data as any;
   assert.equal(restored.project_knowledge.state, "matched");
   assert.equal(restored.project_knowledge.selected_models[0].model_id, "order-state");
+});
+
+test("日常实现摘要只带已验证的模型入口，源码变化时撤回过期视图", async t => {
+  const { service, input, put } = await setup(t);
+  await service.scan({}); await service.record(await input());
+  const query = { view: "compact", paths: ["src/pages/orders"] };
+  const current = (await service.context(query)).data as any;
+  assert.equal(current.context_query_kind, "implementation");
+  assert.ok(Array.isArray(current.implementation_context.implementation_candidates.candidates));
+  assert.ok(Array.isArray(current.knowledge_context.results));
+  assert.equal(current.project_knowledge.state, "matched");
+  assert.equal(current.project_knowledge.selected_models, undefined);
+  assert.equal(current.models[0].details_request.model_id, "order-state");
+  const full = (await service.context({ view: "compact", model_id: "order-state" })).data as any;
+  assert.ok(full.models[0].sources);
+  await put("src/shared/status.ts", "export const state = 'closed';\n");
+  const changed = (await service.context(query)).data as any;
+  assert.equal(changed.project_knowledge.state, "needs_review");
+  assert.notEqual(current.context_id, changed.context_id);
 });
 
 test("同一源码内容仅改变 staged 状态时不会产生重复的共享业务候选", async (t) => {

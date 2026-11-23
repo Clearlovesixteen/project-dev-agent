@@ -7,6 +7,7 @@ import { ProjectFiles } from "../src/storage/project-files.js";
 import { KnowledgeSchema } from "../src/domain/knowledge.js";
 import { digest, renderKnowledge } from "../src/knowledge/document.js";
 import { searchKnowledge } from "../src/knowledge/search.js";
+import { compactKnowledge } from "../src/context/compact-knowledge.js";
 
 async function fixture(t: TestContext) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "knowledge-match-"))); t.after(() => rm(root, { recursive: true, force: true }));
@@ -53,4 +54,17 @@ test("命中解释不将候选、停用或过期规则提升为有效约束", as
   assert.deepEqual(hints.results.map((item: any) => item.id).sort(), ["candidate", "component"]);
   assert.ok(hints.results.every((item: any) => !item.effective && item.match_explanation.condition_check === "required"));
   assert.equal(hints.results.find((item: any) => item.id === "component").status, "needs_review");
+});
+
+test("规则摘要完整保留适用条件和路径；长条件超预算时明确交由详情读取", async t => {
+  const f = await fixture(t); await f.add(); await f.add({ id: "long", applicable_conditions: ["长条件".repeat(400)] });
+  const input = { query: "组件", paths: ["src/accounts/form.ts"] };
+  const result = await searchKnowledge(f.files, input);
+  const brief = compactKnowledge(result);
+  assert.deepEqual(brief.results.map(rule => rule.id), ["component"]);
+  assert.deepEqual(brief.results[0]!.applicable_conditions, ["已有组件满足需求"]);
+  assert.deepEqual(brief.results[0]!.paths, ["src/accounts/**/*.ts"]);
+  assert.equal(brief.rules_lookup_required, true);
+  assert.equal(brief.details_request?.tool, "knowledge_search");
+  assert.equal((result.data as any).results.find((rule: any) => rule.id === "long").applicable_conditions[0].length, 1200);
 });

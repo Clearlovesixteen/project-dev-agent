@@ -81,6 +81,10 @@ try {
     assert.notEqual(prior, current, "Previous release must differ from the target");
     evidence.scenario = `Published ${prior} to ${current} using an isolated native Git marketplace`;
   } else {
+    // 合成旧包也要使 Codex 清单、磁盘包版本和运行进程的版本一致。
+    const packagePath = join(source, "package.json");
+    const packageInfo = JSON.parse(await readFile(packagePath, "utf8"));
+    await writeFile(packagePath, JSON.stringify({ ...packageInfo, version: prior }));
     manifest.version = prior;
     await writeFile(manifestPath, JSON.stringify(manifest));
     const bundle = await readFile(join(source, "runtime/cli.mjs"), "utf8");

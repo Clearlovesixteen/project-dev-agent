@@ -135,7 +135,7 @@ export class PluginSettings {
     }
     // 只校验调用方指定仓库；linked worktree 通过双向登记校验后只授权精确元数据。
     const { binding, entry } = await inspectEnrolledProject(project);
-    const preview = await prepareProject(binding, { apply: false });
+    const preview = await prepareProject(binding, { ...input, apply: false });
     if (!input.apply) return { ...preview, data: {
       ...preview.data as Record<string, unknown>,
       plugin_setup: { action: "would_initialize", workspace: binding.root, settings_path: join(files.root, FILE) },

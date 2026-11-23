@@ -155,6 +155,13 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   const run = await runValidation(binding, task.id, check.id);
   assert.equal(run.outcome, "ok", JSON.stringify(run));
   assert.deepEqual((await quality()).business_plan.scenarios.map((item: any) => item.state), acceptance.map(() => "passed"));
+  if (existing) {
+    // 完整验收可复用同一源码的解析；再次检查前修改受保护代码必须立即失效。
+    assert.equal((await quality()).business_plan.boundary.state, "checked");
+    await put(policyFile, newPolicy.replace("'details'", "'changed'"));
+    assert.ok((await quality()).business_plan.boundary.issues.some((item: any) => item.state === "outside_symbols"));
+    await put(policyFile, newPolicy);
+  }
   await put(specFile, spec + "需求版本变化\n");
   assert.ok((await quality()).business_plan.issues.includes("input_changed"));
   await put(specFile, spec);

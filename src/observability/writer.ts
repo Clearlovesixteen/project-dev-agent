@@ -230,7 +230,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
       outcome: diagnosticOutcome(value.outcome),
       reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK", attributes: { tool, transport } });
     const eventName = tool === "task_open" ? value.code === "TASK_OPENED" ? "workflow.bound" : undefined : tool === "task_update" ? "task.transitioned"
-      : tool === "task_check" ? "quality.checked" : tool === "project_model_record" || tool === "project_model_apply" ? "model.changed"
+      : tool === "task_check" && value.data?.mode !== "resume" ? "quality.checked" : tool === "project_model_record" || tool === "project_model_apply" ? "model.changed"
       : tool === "project_feedback_record" || tool === "feedback_record" ? "feedback.recorded" : tool === "project_context" ? "context.lookup" : undefined;
     if (eventName && value.outcome !== "error") {
       const spec = value.data?.spec_input as { kind?: TelemetryAttributes["input_kind"] } | undefined;

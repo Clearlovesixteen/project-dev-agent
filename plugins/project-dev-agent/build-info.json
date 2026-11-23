@@ -157,8 +157,13 @@
     },
     {
       "path": "hooks/hooks.json",
-      "bytes": 921,
-      "sha256": "663c3e7a4545e40209f3867284b88ee86e2222f0edf23e7ce2e8c580c8887f91"
+      "bytes": 920,
+      "sha256": "8ee5c664c6b9276ba3636b49fd8dd1eb5fed4f99c0b355403db27339c5f6ec1d"
+    },
+    {
+      "path": "hooks/prompt.mjs",
+      "bytes": 203,
+      "sha256": "7cbdf1bc57b258fcdc6d7bbf8e21713800a917475f506542f908516b6fe653b0"
     },
     {
       "path": "mcp.json",
@@ -182,18 +187,18 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1811302,
-      "sha256": "9b62c639a5109d04edef1f2e2e6b5271ca6119545896cadde00cf1e23e8b3b6d"
+      "bytes": 1827664,
+      "sha256": "b036611eed5187d262620a47db172b574b68ae74feac9012c3a09724cedd666d"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 813093,
-      "sha256": "c9ba99822eef5a49bdaf8b47c6c6ac2819abd3f1150696f56f469e36de50ed88"
+      "bytes": 779506,
+      "sha256": "7dd788bcd19b473c54d80eb6cb3ebf9fab9207912eee47b0de811ac6751bbba5"
     },
     {
       "path": "runtime/symbol-index.mjs",
-      "bytes": 315696,
-      "sha256": "b444dfe37a2cabee39aba7a57d24c28577953910441e6ba2ad1fbc312f1176cb"
+      "bytes": 315849,
+      "sha256": "0b855939e47cc25d269350b2dde6b023a779f4b1f74bf95f4146430ced328059"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -207,8 +212,8 @@
     },
     {
       "path": "skills/project-dev/references/history-inputs.md",
-      "bytes": 5900,
-      "sha256": "0eaa3ae9004d65f14b1341b2e01c34d0e7a563cc530895d9d634689e10914f67"
+      "bytes": 5560,
+      "sha256": "787577914c8a1904e36219dc4c1376b568770815ce1ef4f0a533ce7bdf0d2e80"
     },
     {
       "path": "skills/project-dev/references/spec-and-interaction.md",
@@ -217,8 +222,8 @@
     },
     {
       "path": "skills/project-dev/references/task-inputs.md",
-      "bytes": 23751,
-      "sha256": "40e067e1dcbd75bfd7d8010e8362d3dfa9130d852ef2057ca4ba227632638c37"
+      "bytes": 24839,
+      "sha256": "4faa3aa8ae1690545cc41ec57ddc3f57dab0f5d1362d615dad1d8379cf226d61"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
@@ -227,13 +232,13 @@
     },
     {
       "path": "skills/project-dev/references/workflow.md",
-      "bytes": 32388,
-      "sha256": "37b18acc420ba6b4423ef12e9f80aba4319641e308745d914cf8dc62dd961a59"
+      "bytes": 29825,
+      "sha256": "a293a753ee69d2c1c7221f8a64187d916e90d7c93cecc2aa6d9ab1fac51bd842"
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 6614,
-      "sha256": "dd3bc9c1140146548834af9552d3d0f047bd20dfe25ed354cb52bd0d9846d42e"
+      "bytes": 6663,
+      "sha256": "c59c1e7dbb006cec4685079f8b041beb7714fd9e372acfd72e075a50c13278ee"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -252,8 +257,8 @@
     },
     {
       "path": "skills/project-dev-update/SKILL.md",
-      "bytes": 4618,
-      "sha256": "4f3d98aea1887d9f1ab9fc118e3db71484a21b7db99f467a5919e4bd45f3ae3c"
+      "bytes": 5542,
+      "sha256": "3df095d073a474a9da034c8cf99b69a6c8c4616bbbe7b9dd0fefb16d5626ce80"
     },
     {
       "path": "templates/knowledge.md",

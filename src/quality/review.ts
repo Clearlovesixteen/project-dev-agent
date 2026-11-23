@@ -21,7 +21,7 @@ export async function qualityReview(binding: WorktreeBinding, task: Task, change
     const files = new ProjectFiles(binding.root), map = await readMap(files);
     if (!map) return { state: "not_scanned", next_step: "调用 project_scan 后获取关联位置与业务场景。" };
     const { config } = await loadConfig(files);
-    const entries = (await mapFiles(files)).filter(entry => !excluded(entry.path, config));
+    const entries = (await mapFiles(files, map)).filter(entry => !excluded(entry.path, config));
     const knowledge = await readProjectKnowledge(binding);
     const visible = knowledge.state === "unavailable" ? [] : (await readWorktreeModels(files, knowledge)).models.filter(model => modelVisible(model, config));
     const paths = [...new Set([...changed, ...task.change_items.map(item => item.target_path)])].filter(path => !excluded(path, config));
@@ -65,7 +65,7 @@ export async function assertBusinessAcceptance(binding: WorktreeBinding, task: T
   const knowledge = await readProjectKnowledge(binding);
   if (knowledge.state === "unavailable") throw new Error("项目共享业务模型暂无法核验，恢复读取后再确认业务验收。");
   const visible = (await readWorktreeModels(files, knowledge)).models.filter(model => modelVisible(model, config));
-  const evidence = new ModelEvidence(files, config, new Map((await mapFiles(files)).map(entry => [entry.path, entry])), binding.repo_identity, new Map([[task.id, task]]));
+  const evidence = new ModelEvidence(files, config, new Map((await mapFiles(files, map)).map(entry => [entry.path, entry])), binding.repo_identity, new Map([[task.id, task]]));
   const ids = new Set(task.acceptance_criteria.flatMap(item => item.business_check ? [item.business_check.model_id] : []));
   for (const id of ids) {
     const model = visible.find(item => item.id === id);

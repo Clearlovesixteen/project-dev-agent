@@ -27,7 +27,7 @@ test("自动钩子在工作范围外正常跳过，不把其他项目计作上�
   await new PluginSettings(home).configure({ workspace: fixture.path, apply: true, expected_revision: null });
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
   const prior = await readFile(join(home, "project-dev-agent/settings.json"), "utf8");
-  const output = await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "outside-session", cwd: other.path, prompt: "修复这个项目" }, fixture.path, home);
+  const output = await handleHook({ hook_event_name: "SessionStart", session_id: "outside-session", cwd: other.path, prompt: "修复这个项目" }, fixture.path, home);
   assert.match(String(output.systemMessage), /未参与本轮/);
   assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), prior);
   const event = (await new DiagnosticWriter(home).read()).events.find(event => event.event_name === "hook.finished");
@@ -39,7 +39,7 @@ test("auto 首次使用 Git 项目能给出初始化入口，钩子本身不擅�
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = await temporaryHome(t);
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
-  const output = await handleHook({ hook_event_name: "UserPromptSubmit", session_id: "first-session", cwd: fixture.path, prompt: "修复这里的功能" }, fixture.path, home);
+  const output = await handleHook({ hook_event_name: "SessionStart", session_id: "first-session", cwd: fixture.path, prompt: "修复这里的功能" }, fixture.path, home);
   const context = (output.hookSpecificOutput as { additionalContext?: string } | undefined)?.additionalContext;
   assert.ok(context?.includes("project_prepare"), "首次自动开发仍须可进入已授权的项目初始化");
   await assert.rejects(readFile(join(home, "project-dev-agent/settings.json")), { code: "ENOENT" });

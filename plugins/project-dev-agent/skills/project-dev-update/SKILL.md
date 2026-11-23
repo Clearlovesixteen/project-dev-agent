@@ -38,6 +38,10 @@ codex -c 'marketplaces.project-dev-team.sparse_paths=[".agents/plugins","plugins
 
 ## 核验结果
 
+以当前会话的 MCP 工具声明判断支持的输入。若 `plugin_status` 支持 `expected_version`，传入 Codex 插件管理器核实的安装版本。回执中 `loaded_version` 属于当前服务进程，`package_version` 来自它启动时的目录，`expected_version` 对应此次核验的安装记录。并排保留旧缓存时，要以经核实的 `expected_version` 完成比对。
+
+回执 `reload_required` 或诊断 `PLUGIN_RELOAD_REQUIRED` 表明当前会话需要重新连接。重开会话后再核对一次。回执 `unverified` 表示启动目录清单未能确认，保留未核实状态。旧服务的声明没有 `expected_version` 时使用 `plugin_status({})`，将返回的 `version` 与安装版本比对。仍有偏差时停止本轮重复调用，保留原任务，并说明待重载的当前版本。只有新会话的实际运行版本与安装记录一致，才能确认升级已生效。
+
 刷新成功后，用相同 `-c` 覆盖执行 `plugin list --marketplace project-dev-team --json`，核对安装版本。读取本次 `upgradedRoots` 内对应发布目录的清单：旧版为 `plugins/project-dev-agent/plugin.json`，0.12 起为 `plugins/project-dev-agent/.codex-plugin/plugin.json`，本地源则在其现有根目录查找。只在第一个文件确实不存在时检查兼容入口，读取失败或内容损坏不能当作版本不存在。比较源版本与安装版本；版本不一致或没有可核对的源版本、安装记录时，不能报告“已是最新版”。不要为满足旧路径另写根清单，否则宿主会选错入口而漏掉钩子。
 
 若源已成功刷新，但原生客户端未同步已安装缓存，使用相同覆盖执行 `plugin add project-dev-agent@project-dev-team --json` 确保安装，再核验版本；刷新失败时不得继续此步并把旧缓存当作新版。

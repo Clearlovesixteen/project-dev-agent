@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { DiagnosticWriter, observeTool } from "../src/observability/writer.js";
 import { ToolResultSchema } from "../src/domain/result.js";
+import { VERSION } from "../src/version.js";
 
 const bundle = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/cli.mjs", import.meta.url));
 test("真实 STDIO 保留原 16 工具，新增输入、运行设置和回执贯通，错误会话不能更新任务", async t => {
@@ -19,6 +20,9 @@ test("真实 STDIO 保留原 16 工具，新增输入、运行设置和回执贯
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [bundle, "serve", "--plugin"], env, stderr: "pipe" }));
   assert.equal((await client.listTools()).tools.length, 16);
   const call = async (name: string, args: Record<string, unknown> = {}) => ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
+  const drift = await call("plugin_status", { expected_version: VERSION + "-next" });
+  assert.equal((drift.data as { version_receipt: { state: string; loaded_version: string } }).version_receipt.loaded_version, VERSION);
+  assert.ok(drift.diagnostics.some(item => item.code === "PLUGIN_RELOAD_REQUIRED"));
   assert.equal((await call("project_prepare", { project: fixture.path, apply: true })).outcome, "ok");
   const status = (await call("plugin_status")).data as { revision: string; runtime: { revision: string | null; diagnostics: { upload: boolean } } };
   assert.equal(status.runtime.diagnostics.upload, true, "新安装在真实 MCP 启动阶段已配置默认上报");
@@ -32,12 +36,22 @@ test("真实 STDIO 保留原 16 工具，新增输入、运行设置和回执贯
   const receipt = (context.data as { context_id: string }).context_id;
   const input = { project: fixture.path, requirement: "原始私有 SDD 文本不能进入诊断", acceptance_criteria: [{ id: "behavior", description: "符合已给的业务要求" }],
     spec_input: { kind: "sdd", source_ids: ["task-request"] }, interaction: { ...interaction, context_id: receipt } };
+  // 两个安装目录并存时，已核实的宿主版本可以在写入前截住旧进程。
+  const wrongVersion = await call("task_open", { ...input, expected_version: VERSION + "-next" });
+  assert.equal(wrongVersion.code, "PLUGIN_RELOAD_REQUIRED");
   const opened = await call("task_open", input); assert.equal(opened.outcome, "ok", JSON.stringify(opened));
+  const invalid = await call("task_open", { ...input, unknown: input.requirement });
+  assert.equal(invalid.code, "TASK_INPUT_INVALID");
   const task = opened.data as { id: string; revision: number };
+  // 重试已落盘的操作不能重新把开发期间出现的大文件收入初始基线。
+  const lateFile = join(fixture.path, "late.bin");
+  await writeFile(lateFile, Buffer.alloc(8 * 1024 * 1024 + 1));
   assert.equal((await call("task_open", input)).code, "TASK_REUSED");
+  await rm(lateFile);
   assert.equal((await call("task_update", { project: fixture.path, task_id: task.id, expected_revision: 0, phase: "aborted", abort_reason: "跨会话不能中止",
     interaction: { session_id: "other" } })).code, "TASK_SESSION_MISMATCH");
   const events = (await new DiagnosticWriter(home).read()).events;
+  assert.ok(events.some(event => event.event_name === "tool.finished" && event.attributes.tool === "task_open" && event.reason_code === "TASK_INPUT_INVALID"));
   assert.ok(events.some(event => event.event_name === "context.acknowledged" && event.reason_code === "RECEIPT_MATCHED"));
   assert.ok(events.some(event => event.event_name === "workflow.bound" && event.attributes.input_kind === "sdd"));
   assert.equal(events.filter(event => event.event_name === "workflow.bound").length, 1);

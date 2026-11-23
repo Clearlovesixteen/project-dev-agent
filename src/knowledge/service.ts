@@ -1,4 +1,3 @@
-import { feedbackContext } from "../feedback/service.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError } from "../domain/error.js";
@@ -13,12 +12,11 @@ import {
 import { ProjectFiles } from "../storage/project-files.js";
 import { TaskStore } from "../storage/task-store.js";
 import { renderKnowledge } from "./document.js";
-import { searchKnowledge } from "./search.js";
+import { scopedKnowledgeSearch } from "./search.js";
 import { KnowledgeSearchInputSchema } from "./search.js";
-import { searchHistoryHints } from "../history/search.js";
+import { searchSupportContext } from "./support-context.js";
 import { projectContext } from "../understanding/context.js";
 import { readProjectKnowledge } from "../project-knowledge/service.js";
-import { loadConfig, matchesPath } from "./config.js";
 
 export const ExperienceProposeInputSchema = z
   .object({
@@ -70,14 +68,9 @@ export class KnowledgeService {
   async search(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = KnowledgeSearchInputSchema.parse(input);
-      const result = await searchKnowledge(this.files, request);
+      const { result, paths } = await scopedKnowledgeSearch(this.files, request);
       // 主查询拒绝的路径不能借附加历史或模块查询重新进入结果。
       if (result.code === "PATHS_EXCLUDED") return result;
-      const { config } = await loadConfig(this.files);
-      const paths = request.paths.filter(
-        (path) =>
-          !config.exclude_paths.some((pattern) => matchesPath(pattern, path)),
-      );
       // 附加线索不可用时暴露其状态或诊断，尽量保留已取得的知识查询结果。
       let understanding: unknown;
       try {
@@ -93,43 +86,10 @@ export class KnowledgeService {
           message: error instanceof Error ? error.message : String(error),
         };
       }
-      try {
-        return {
-          ...result,
-          data: {
-            ...(result.data as object),
-            feedback: await feedbackContext(this.files, request.query, paths),
-            history: await searchHistoryHints(
-              this.files,
-              request.query,
-              paths,
-              request.limit,
-            ),
-            understanding,
-          },
-        };
-      } catch (error) {
-        return {
-          ...result,
-          outcome: "incomplete",
-          data: {
-            ...(result.data as object),
-            understanding,
-            history: {
-              state: "unavailable",
-              hints: [],
-              message: error instanceof Error ? error.message : String(error),
-            },
-          },
-          diagnostics: [
-            ...result.diagnostics,
-            {
-              code: "HISTORY_HINTS_UNAVAILABLE",
-              message: error instanceof Error ? error.message : String(error),
-            },
-          ],
-        };
-      }
+      const { history, feedback, diagnostics } = await searchSupportContext(this.files, request.query, paths, request.limit);
+      return { ...result, outcome: diagnostics.length ? "incomplete" : result.outcome,
+        data: { ...(result.data as object), feedback, history, understanding },
+        diagnostics: [...result.diagnostics, ...diagnostics].slice(0, 100) };
     });
   }
 

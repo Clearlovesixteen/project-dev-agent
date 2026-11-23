@@ -8,19 +8,36 @@ import { bestEffort } from "../runtime/best-effort.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { bindWorktree } from "../git/index.js";
 import { implementationContextReady } from "../context/implementation-status.js";
+import { z } from "zod";
+import { TaskInputFailures, taskTransportSchema } from "../tools/task-contract.js";
+import { compactTaskReceipt } from "../tools/task-receipt.js";
+import type { ToolResult } from "../domain/result.js";
 
 type Registration = (name: string, config: Record<string, unknown>, handler: (...input: unknown[]) => unknown) => unknown;
 
 /**
  * 通过 SDK 的公开注册接口包装 handler，保留原有参数校验、权限注解和返回结构。
- * SDK 在 handler 之前拒绝的无效参数不进入此统计，报告必须保留这一覆盖限制。
+ * 任务写入工具使用相同契约自行校验，从而能在任务创建或修改前记录格式失败。
  */
 export function instrumentMcp(server: McpServer, home?: string) {
   // 类型擦除只位于协议适配边界；外部调用继续使用 SDK 原有泛型签名。
   const register = server.registerTool.bind(server) as unknown as Registration, writer = new DiagnosticWriter(home);
+  const failures = new TaskInputFailures();
   const registration: Registration = (name, config, handler) => {
+    const taskContract = (name === "task_update" || name === "task_open") && config.inputSchema instanceof z.ZodObject
+      ? config.inputSchema : undefined;
     const wrapped = (async (...received: unknown[]) => {
-      const raw = received[0];
+      const parsed = taskContract?.safeParse(received[0]);
+      if (parsed && !parsed.success && (name === "task_open" || name === "task_update")) {
+        const result = failures.diagnose(name, received[0], parsed.error);
+        const raw = received[0] as Record<string, unknown>;
+        const identity = Interaction.safeParse(raw.interaction);
+        return interactionStorage.run(identity.success ? identity.data : undefined, () => observeTool(writer, name,
+          typeof raw.project === "string" ? raw.project : undefined, async () => ({
+            isError: true, structuredContent: result, content: [{ type: "text", text: JSON.stringify(result) }],
+          })));
+      }
+      const raw = parsed?.success ? parsed.data : received[0];
       let interaction: InteractionContext | undefined;
       if (raw && typeof raw === "object" && !Array.isArray(raw)) {
         const input = { ...raw } as Record<string, unknown>;
@@ -71,10 +88,18 @@ export function instrumentMcp(server: McpServer, home?: string) {
           }
         } catch { /* 可观测性不改变业务操作结果。 */ }
         });
+        // 完整任务先用于归属、回执和诊断，随后只精简客户端收到的任务记录。
+        if (taskContract) {
+          const full = result as { structuredContent: ToolResult };
+          const compact = raw && typeof raw === "object" && "response_view" in raw && raw.response_view === "compact";
+          const advised = failures.adviseAfterExecution(name, raw, full.structuredContent);
+          const view = compact ? compactTaskReceipt(advised) : advised;
+          if (view !== full.structuredContent) return { ...full, structuredContent: view, content: [{ type: "text", text: JSON.stringify(view) }] };
+        }
         return result;
       });
     });
-    return register(name, config, wrapped);
+    return register(name, taskContract ? { ...config, inputSchema: taskTransportSchema(taskContract) } : config, wrapped);
   };
   server.registerTool = registration as unknown as McpServer["registerTool"];
 }

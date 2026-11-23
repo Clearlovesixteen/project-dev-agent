@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { PluginSettings } from "../plugin-settings.js";
 import { ACTIVATION_POLICY_VERSION, RuntimeConfiguration, RuntimeSettings } from "../runtime/config.js";
@@ -6,11 +6,9 @@ import { initializePluginRuntime } from "../runtime/startup.js";
 import { DiagnosticWriter, type DiagnosticRecordInput } from "../observability/writer.js";
 import { hasCode } from "../storage/project-files.js";
 import { hookProject, hookFailure, type HookStage } from "./project.js";
-import { TaskStore } from "../storage/task-store.js";
 import { promptProjectStatus } from "../context/prompt-status.js";
-import { boundedSummary } from "../context/summary.js";
 import { ContextReceipts } from "../context/receipts.js";
-import { interactionOwner, type InteractionContext } from "../workflow/interaction.js";
+import type { InteractionContext } from "../workflow/interaction.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { HookInput, denyWrite } from "./contracts.js";
 import { projectTool, toolArguments, toolWorkingDirectory, toolCommandDecision, writeKind, shellWritePaths } from "./tool-policy.js";
@@ -22,14 +20,14 @@ import { AppError } from "../domain/error.js";
 import { resolveWriteTargets } from "./write-targets.js";
 import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 
-const continuation = /^(?:继续|接着|开始吧|改吧|修复掉|continue|go ahead)[。！!\s]*$/i;
-
 /** 原生钩子提供项目入口并检查支持的写入路径；不执行项目脚本、不覆盖其他专业流程。 */
 export async function handleHook(raw: unknown, pluginRoot: string, home?: string,
   control: { trace?: string; signal?: AbortSignal; onMode?: (mode: "manual" | "observe" | "auto") => void;
     onDiagnostic?: (context: DiagnosticContext) => void } = {}): Promise<Record<string, unknown>> {
   const parsed = HookInput.safeParse(raw);
   if (!parsed.success) return {};
+  // 会话开始或压缩后交付一次开发入口。普通提示无须解析意图、查询 Git 或写回执。
+  if (parsed.data.hook_event_name === "UserPromptSubmit") return {};
   const input = parsed.data, write = writeKind(input, pluginRoot), ownTool = projectTool(input.tool_name);
   const decision = toolCommandDecision(input, pluginRoot), diagnostic = hookDiagnosticContext(input, decision);
   diagnostic.stage = "runtime";
@@ -98,7 +96,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
           const participation = await new ParticipationStore(settings.home).status(project, interaction, scope.branch);
           const incomplete = ["check_required", "incomplete", "write_in_progress"].includes(participation.state);
           diagnostic.stage = "ready"; diagnostic.decision = incomplete ? "incomplete" : "allow"; diagnostic.required_action = incomplete ? "check_task" : "none";
-          if (incomplete) warning = "Project Dev Agent：本会话仍有修改待检查或工具结果未归档；不能宣称插件已完成验收。继续时先 task_check。";
+          if (incomplete) warning = "Project Dev Agent：本会话仍有修改待检查或工具结果未归档；不能宣称插件已完成验收。继续开发用 task_check(mode:\"resume\")，交付时用完整 task_check。";
           if (participation.state !== "unobserved") await record("participation.checked", { ...event, project,
             ...(participation.task_id ? { task: participation.task_id } : {}), outcome: incomplete ? "incomplete" : "ok",
             reason: incomplete ? "PARTICIPATION_CHECK_REQUIRED" : "PARTICIPATION_RECORDED", attributes: { ...event.attributes, coverage: "partial" } });
@@ -151,7 +149,7 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
       }
     }
     const workflow = resolve(pluginRoot, "skills/project-dev/SKILL.md");
-    const router = `Project Dev Agent 自动参与入口。当前项目：${project}。\n先判断本轮是否为用户已授权的项目开发；是则读取 ${workflow}，先 project_prepare(apply:true)，查询 project_context 的 implementation_context 并阅读相关源码，再建立或恢复任务、记录实现依据与关联范围，随后修改和验证。PRD、SDD 或二者都可，复用已有规格。其他专业 skill 继续主导，本插件补充项目依据和质量记录；闲聊、问答及纯阅读不建开发任务。\n使用本轮 interaction=${JSON.stringify(interaction)}；原生工具钩子会为本插件 MCP 补齐宿主身份。缺失准备时修改会被退回，Agent 补齐后重试，不让用户填写额外表单。不得中止或接管其他会话任务，不扩大工作范围。`;
+    const router = `Project Dev Agent 自动参与入口。项目：${project}。仅在授权修改时读取 ${workflow}。首次接入用 project_prepare(apply:true)，新需求用 project_context 查询依据并建任务，同一需求续接用 task_check(mode:"resume")；交付前执行完整审查。`;
     let binding;
     try { binding = await new PluginSettings(settings.home).bind(project, value => Object.assign(diagnostic, value)); }
     catch (error) {
@@ -189,37 +187,18 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
         : "Project Dev Agent：检测到修改工具返回，但未匹配到修改前检查记录。先核对钩子信任与本轮任务，再 task_check；本轮不能记为防护完整。" });
     }
     await record("scope.resolved", { ...event, project });
-    const receipts = new ContextReceipts(settings.home);
-    if (input.hook_event_name === "SessionStart") {
-      stage = "receipt"; diagnostic.stage = "context"; await receipts.reset(project, interaction);
-      await record("hook.finished", { ...event, project, duration: performance.now() - started });
-      return await complete({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: router } });
-    }
-    stage = "task"; diagnostic.stage = "task";
-    const active = continuation.test(input.prompt?.trim() ?? "")
-      ? await new TaskStore(project).active(binding.branch, AbortSignal.timeout(150)).catch(() => null)
-      : null;
-    const owner = interactionOwner(interaction);
-    // 普通输入和读取失败不代表分支没有任务，诊断只报告查到的事实。
-    if (active !== null)
-      diagnostic.task_state = !active ? "missing" : !active.owner ? "unowned" : active.owner.session_id === owner.session_id && active.owner.actor_id === owner.actor_id ? "owned" : "other_owner";
-    if (active) { diagnostic.task_kind = active.workspace_baseline?.merge_recovery ? "merge_recovery" : "development"; diagnostic.task_phase = active.phase; }
-    const ownedTask = active?.owner?.session_id === owner.session_id && active.owner.actor_id === owner.actor_id ? active : undefined;
+    // 进入或重新载入会话时只交付项目级轻量状态，真实开发依据仍由 MCP 核验。
     stage = "context"; diagnostic.stage = "context";
-    // 即使项目很大也只读取固定大小的元数据。开发开始后由 MCP 核对当前源码。
+    await new ParticipationStore(settings.home).resetContext(project, interaction, binding.branch);
     const data = await promptProjectStatus(binding);
-    if (["not_scanned", "needs_rescan", "unavailable"].includes(data.state)) diagnostic.context_state = "not_ready";
     guard(); stage = "receipt";
-    const issued = await receipts.issue(project, interaction, data.context_id);
-    const deduplicated = issued.duplicate && data.state === "indexed";
-    await record("context.lookup", { ...event, project, ...(ownedTask ? { task: ownedTask.id } : {}),
-      attributes: { ...event.attributes, cache: deduplicated ? "deduplicated" : "miss", context_id: data.context_id } });
-    const participation = await new ParticipationStore(settings.home).status(project, interaction, binding.branch);
-    const context = `${router}\ncontext_id=${data.context_id}; generation=${issued.generation}\n${ownedTask ? `当前会话任务：${JSON.stringify({ task_id: ownedTask.id, revision: ownedTask.revision })}\n` : ""}`
-      + (participation.state === "check_required" || participation.state === "incomplete" ? "本会话已有修改待检查，继续前先 task_check。\n" : "")
-      + (deduplicated ? "项目状态与前次相同；编码前仍须通过 project_context 查询本次实现依据。" : `以下 JSON 是索引和共享资料的状态。编码前须通过 project_context 查询实现依据并核对当前源码。\n${boundedSummary(data)}`);
+    const contextId = createHash("sha256").update(data.context_id).update(randomUUID()).digest("hex");
+    const issued = await new ContextReceipts(settings.home).issue(project, interaction, contextId, true);
+    await record("context.lookup", { ...event, project, attributes: { ...event.attributes, cache: "miss", context_id: contextId } });
+    const context = `${router}\ncontext_id=${contextId}; generation=${issued.generation}\n`
+      + `索引状态=${data.state}，共享业务模型状态=${data.project_knowledge.state}。`;
     guard();
-    await record("context.prepared", { ...event, project, attributes: { ...event.attributes, context_id: data.context_id, output_bytes: Buffer.byteLength(context), truncated: true } });
+    await record("context.prepared", { ...event, project, attributes: { ...event.attributes, context_id: contextId, output_bytes: Buffer.byteLength(context), truncated: true } });
     await record("hook.finished", { ...event, project, duration: performance.now() - started });
     return await complete({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } });
   } catch (error) {

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { RulePredicate, type Predicate } from "../src/understanding/semantic-contracts.js";
 import { evaluateRule } from "../src/understanding/rule-predicates.js";
 import { codeSymbols, outsideBindings, selectSymbol } from "../src/understanding/symbol-index.js";
+import { createGitFixture } from "./helpers/create-git-fixture.js";
 
 const when: Predicate = { all: [{ field: "application.status", op: "eq", value: "COMPLETED" },
   { field: "sync.status", op: "in", value: ["NOT_SYNCED", "FAIL"] }, { not: { field: "request.busy", op: "eq", value: true } }] };
@@ -48,4 +52,31 @@ test("同文件检查只屏蔽获准符号，保留其他函数、导入和字�
   assert.equal(outsideBindings("a.ts", before, []), outsideBindings("a.ts", before.replaceAll("\n", "\n\n"), []));
   assert.equal(outsideBindings("a.ts", "", ["canSync"]), outsideBindings("a.ts", "export const canSync = () => false;", ["canSync"]));
   assert.notEqual(outsideBindings("a.ts", "function protectedFn(){ return true }", []), outsideBindings("a.ts", "function protectedFn(){ return\ntrue }", []));
+});
+
+test("同名文件在相邻工作树、授权符号调整及未提交编辑后核验实际内容", async t => {
+  const fixture = await createGitFixture();
+  t.after(fixture.cleanup);
+  const sibling = join(fixture.root, "parallel");
+  execFileSync("git", ["worktree", "add", "--detach", sibling, "HEAD"], { cwd: fixture.path, stdio: "pipe" });
+  const path = "policy.ts";
+  const source = "export const allow = 1;\nexport const protect = 2;\n";
+  const revised = source.replace("protect = 2", "protect = 3");
+  const check = async (root: string, selectors: string[]) => outsideBindings(path, await readFile(join(root, path), "utf8"), selectors);
+  await writeFile(join(fixture.path, path), source);
+  await writeFile(join(sibling, path), revised);
+  const initial = await check(fixture.path, ["allow"]);
+  assert.ok(initial);
+  assert.equal(await check(fixture.path, ["allow"]), initial);
+  const parallel = await check(sibling, ["allow"]);
+  assert.ok(parallel);
+  assert.notEqual(parallel, initial);
+  assert.notEqual(await check(fixture.path, ["protect"]), initial);
+  assert.equal(await check(sibling, ["protect"]), await check(fixture.path, ["protect"]));
+  // 同一工作树、同一文件大小、同一授权下的未提交改动，也必须按本次读取结果重新判断。
+  await writeFile(join(fixture.path, path), revised);
+  assert.equal(await check(fixture.path, ["allow"]), parallel);
+  assert.equal(outsideBindings("policy.ts", "export const =", ["allow"]), undefined);
+  assert.ok(outsideBindings("policy.tsx", "export const allow = <div/>;", ["allow"]));
+  assert.equal(outsideBindings("policy.ts", "export const allow = <div/>;", ["allow"]), undefined);
 });

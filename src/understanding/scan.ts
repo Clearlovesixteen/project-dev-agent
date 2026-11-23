@@ -9,7 +9,7 @@ import { ProjectFiles, hasCode } from "../storage/project-files.js";
 import { digest } from "../knowledge/document.js";
 import { loadConfig, matchesPath, type ProjectConfig } from "../knowledge/config.js";
 import { FileSchema, MAP_DIR, MapSchema, type MapFile, type ProjectMap } from "./contracts.js";
-import { mapFiles, optional, save } from "./store.js";
+import { mapFiles, optional, readMap, save } from "./store.js";
 
 export const MAX_SOURCE = 512_000;
 const EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".css", ".less", ".scss", ".json", ".yaml", ".yml", ".md", ".mdx", ".html", ".py", ".go", ".java", ".kt", ".cs", ".rs", ".sql", ".toml", ".xml", ".graphql", ".gql"]);
@@ -124,7 +124,8 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   // ls-files --cached 包含未暂存的删除。只排除 Git 在扫描开始时确认的删除，
   // 扫描期间消失的文件、权限问题及不安全路径仍报告为不完整，不能一律吞掉 ENOENT。
   const deleted = new Set(decodeGitOutput((await readGit(binding.root, ["ls-files", "--deleted", "-z"])).stdout).split("\0").filter(Boolean));
-  const previous = new Map((await mapFiles(files)).map((file) => [file.path, file]));
+  const previousMap = await readMap(files);
+  const previous = new Map((await mapFiles(files, previousMap)).map((file) => [file.path, file]));
   const records: MapFile[] = [], diagnostics: ProjectMap["diagnostics"] = [];
   const coverage = { discovered: paths.length, indexed: 0, excluded: 0, unreadable: 0, unsupported: 0, reused: 0, complete: true, content_reused: 0, read_files: 0, read_bytes: 0 };
   const eligible = paths.filter((path) => {
@@ -133,16 +134,37 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
     if (!EXTENSIONS.has(posix.extname(path)) && !/^(?:Dockerfile|Makefile|\.eslintrc|\.prettierrc)$/.test(posix.basename(path))) { coverage.unsupported++; return false; }
     return true;
   });
-  const all = new Set(eligible), mappings = await aliases(files, config);
+  const all = new Set(eligible);
+  // 所有目标、项目配置和仓库身份相同时，未变文件的导入解析仍然有效。
+  // 新增、删除和重命名都会改变路径集合，即使 HEAD 没有变化也会重算导入。
+  const stableResolution = previousMap?.project === binding.root && previousMap.repo_identity === binding.repo_identity && previousMap.coverage.complete
+    && previousMap.config_hash === configBefore && all.size === previous.size && eligible.every(path => previous.has(path));
+  const mappings = await aliases(files, config);
   let totalBytes = 0;
   const diagnostic = (code: string, message: string) => { coverage.complete = false; if (diagnostics.length < 100) diagnostics.push({ code, message: message.slice(0, 500) }); };
+  const withinBudget = (bytes: number) => {
+    if (bytes + totalBytes > 80_000_000) {
+      diagnostic("PROJECT_SCAN_LIMIT", "项目结构索引超过 80 MB 容量上限，本次仅覆盖部分范围");
+      return false;
+    }
+    totalBytes += bytes;
+    return true;
+  };
   for (const path of eligible) {
     if (records.length >= 10_000 || totalBytes >= 80_000_000) { diagnostic("PROJECT_SCAN_LIMIT", "剩余文件超出 10,000 个文件或 80 MB 的读取上限；本次扫描仅覆盖部分范围"); break; }
     try {
       const stat_signature = await sourceSignature(files, path, config), prior = previous.get(path);
       const cached = prior?.stat_signature === stat_signature && (posix.basename(path) !== "package.json" || prior.package);
+      if (cached && stableResolution) {
+        if (!withinBudget(prior!.bytes)) break;
+        records.push(prior!);
+        coverage.content_reused++;
+        coverage.reused++;
+        continue;
+      }
       const content = cached ? null : await safeSource(files, path, config);
-      const bytes = content === null ? prior!.bytes : Buffer.byteLength(content); totalBytes += bytes;
+      const bytes = content === null ? prior!.bytes : Buffer.byteLength(content);
+      if (!withinBudget(bytes)) break;
       if (content === null) coverage.content_reused++;
       else { coverage.read_files++; coverage.read_bytes += bytes; }
       if (content?.includes("\0")) { coverage.unsupported++; continue; }
@@ -169,18 +191,26 @@ export async function scanProject(binding: WorktreeBinding): Promise<ProjectMap>
   for (const record of records) for (const entry of record.imports) if (entry.target && !indexed.has(entry.target)) entry.target = null;
   if (gitLine((await readGit(binding.root, ["rev-parse", "HEAD"])).stdout) !== before) throw new AppError("PROJECT_SCAN_CHANGED", "扫描期间 HEAD 已变化，请重试");
   coverage.indexed = records.length;
-  const chunks: string[] = []; let group: MapFile[] = [];
-  const flush = async () => { if (!group.length) return; const raw = JSON.stringify(group) + "\n", id = digest(raw);
-    const target = `${MAP_DIR}/chunks/${id}.json`, existing = await optional(files, target);
-    if (existing === undefined) await files.create(target, raw); else if (existing !== raw) throw new AppError("PROJECT_MAP_CORRUPT", "现有不可变分块的内容不一致");
-    chunks.push(id); group = []; };
-  for (const record of records) {
-    if (Buffer.byteLength(JSON.stringify([...group, record])) > 48_000) await flush();
-    group.push(record);
-  }
-  await flush();
   const config_hash = await mapConfigHash(files, config);
   if (configBefore !== config_hash || digest(JSON.stringify((await loadConfig(files)).config)) !== digest(JSON.stringify(config))) throw new AppError("PROJECT_SCAN_CHANGED", "扫描期间项目配置已变化，请重试");
+  // 路径、HEAD 和逐文件指纹一致时保留原快照时间和分块身份，复用统计单独更新。
+  if (stableResolution && previousMap!.head === before && coverage.complete && coverage.content_reused === eligible.length) {
+    const map = { ...previousMap!, coverage };
+    await save(files, `${MAP_DIR}/manifest.json`, map);
+    return map;
+  }
+  const chunks: string[] = []; let group: string[] = [], groupBytes = 2;
+  const flush = async () => { if (!group.length) return; const raw = `[${group.join(",")}]\n`, id = digest(raw);
+    const target = `${MAP_DIR}/chunks/${id}.json`, existing = await optional(files, target);
+    if (existing === undefined) await files.create(target, raw); else if (existing !== raw) throw new AppError("PROJECT_MAP_CORRUPT", "现有不可变分块的内容不一致");
+    chunks.push(id); group = []; groupBytes = 2; };
+  for (const record of records) {
+    const serialized = JSON.stringify(record), bytes = Buffer.byteLength(serialized);
+    if (groupBytes + bytes + (group.length ? 1 : 0) > 48_000) await flush();
+    groupBytes += bytes + (group.length ? 1 : 0);
+    group.push(serialized);
+  }
+  await flush();
   const map = MapSchema.parse({ schema_version: 1, project: binding.root, repo_identity: binding.repo_identity, head: before, scanned_at: new Date().toISOString(),
     config_hash, scan_id: digest(JSON.stringify([1, binding.root, before, config_hash, chunks])), chunks, coverage, diagnostics });
   await save(files, `${MAP_DIR}/manifest.json`, map);

@@ -23,18 +23,18 @@ async function setup(t: test.TestContext) {
   await plugin.prepare(fixture.path, { apply: true });
   const binding = await bindWorktree(fixture.path), service = new UnderstandingService(binding);
   await service.scan({});
-  const event = { session_id: "conversation-a", turn_id: "turn-a", cwd: fixture.path, hook_event_name: "UserPromptSubmit", prompt: "修改 account 状态功能" };
+  const event = { session_id: "conversation-a", turn_id: "turn-a", cwd: fixture.path, hook_event_name: "SessionStart" };
   const call = (input: object = {}) => handleHook({ ...event, ...input }, "/installed/project-dev-agent", home);
   const mode = async (mode: "manual" | "observe" | "auto") => settings.configure({ apply: true, expected_revision: (await settings.read())?.revision ?? null, mode });
   return { fixture, home, plugin, settings, binding, service, event, call, mode };
 }
 const context = (result: Record<string, unknown>) => (result.hookSpecificOutput as { additionalContext: string } | undefined)?.additionalContext ?? "";
 
-test("钩子默认自动；observe 不注入，闲聊只提供入口不建任务，异常范围不扩大配置", async t => {
+test("钩子默认自动；observe 不注入，闲聊免注入且不建任务，异常范围不扩大配置", async t => {
   const { call, mode, home, plugin } = await setup(t);
   assert.ok(context(await call()).includes("Project Dev Agent"));
   await mode("observe"); assert.deepEqual(await call(), {});
-  await mode("auto"); assert.ok(context(await call({ prompt: "你好" })).includes("闲聊"));
+  await mode("auto"); assert.deepEqual(await call({ hook_event_name: "UserPromptSubmit", prompt: "你好" }), {});
   const before = await plugin.status();
   assert.match(String((await call({ cwd: "/path/does-not-exist" })).systemMessage), /未就绪/);
   assert.deepEqual(await plugin.status(), before);
@@ -44,12 +44,9 @@ test("钩子默认自动；observe 不注入，闲聊只提供入口不建任务
 test("自动上下文同源检索、有限输出、按会话去重，生命周期刷新，回执严格绑定项目与身份", async t => {
   const { call, mode, home, fixture, event } = await setup(t); await mode("auto");
   const first = context(await call()); assert.ok(first.includes("Project Dev Agent")); assert.ok(first.includes("context_id="));
-  // 原生 UserPromptSubmit 与 MCP project_context 必须读取同一份共享知识视图。
-  assert.ok(first.includes("project_knowledge")); assert.ok(first.includes('"state":"empty"'));
-  assert.ok(Buffer.byteLength(first) < 6_500); assert.ok(!first.includes("permissionDecision"));
-  assert.ok(context(await call()).includes("与前次相同"));
-  await call({ hook_event_name: "SessionStart", source: "compact" });
-  assert.ok(!context(await call()).includes("与前次相同"));
+  assert.match(first, /共享业务模型状态=empty/);
+  assert.ok(Buffer.byteLength(first) < 1500); assert.ok(!first.includes("permissionDecision"));
+  assert.deepEqual(await call({ hook_event_name: "UserPromptSubmit" }), {});
   const contextId = /context_id=([a-f0-9]{64})/.exec(first)![1]!;
   const receipts = new ContextReceipts(home);
   assert.equal(await receipts.valid(fixture.path, { session_id: event.session_id, context_id: contextId }), true);
@@ -76,7 +73,7 @@ test("输入钩子只读索引状态，完整 MCP 查询仍校验索引分块", 
   assert.ok(chunk);
   await writeFile(join(directory, "chunks", chunk), "[]");
   const prompt = context(await call());
-  assert.match(prompt, /索引和共享资料的状态/);
+  assert.match(prompt, /索引状态=indexed/);
   assert.match(prompt, /project_context/);
   const events = (await new DiagnosticWriter(home).read()).events;
   assert.equal(events.find(event => event.event_name === "context.lookup")?.context?.task_state, undefined);
@@ -99,8 +96,10 @@ test("PRD/SDD 来源核对、任务幂等重试及归属保护共同生效，旧
   assert.equal((await tasks.update({ task_id: saved.id, expected_revision: 0, phase: "aborted", abort_reason: "试图修改另一会话" })).code, "TASK_SESSION_REQUIRED");
   assert.equal((await interactionStorage.run({ session_id: "another" }, () => tasks.check({}))).code, "TASK_SESSION_MISMATCH");
   const status = await new TaskStore(fixture.path).load(saved.id); assert.equal(status.revision, 0); assert.equal(status.phase, "active");
-  await mode("auto"); assert.ok(context(await call({ prompt: "继续" })).includes(saved.id));
-  assert.ok(!context(await call({ session_id: "another", prompt: "继续" })).includes(saved.id));
+  await mode("auto");
+  assert.deepEqual(await call({ hook_event_name: "UserPromptSubmit", prompt: "继续" }), {});
+  assert.equal((await run(() => tasks.check({ mode: "resume" }))).code, "TASK_CONTINUATION_READY");
+  assert.equal((await interactionStorage.run({ session_id: "another" }, () => tasks.check({ task_id: saved.id, mode: "resume" }))).code, "TASK_SESSION_MISMATCH");
   assert.equal((await run(() => tasks.update({ task_id: saved.id, expected_revision: 0, phase: "aborted", abort_reason: "测试完成" }))).outcome, "ok");
   const legacy = await tasks.open({ requirement: "兼容普通明确调用", acceptance_criteria: input.acceptance_criteria });
   assert.equal(legacy.outcome, "ok"); assert.equal((legacy.data as { owner?: unknown }).owner, undefined);

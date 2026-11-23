@@ -1,5 +1,3 @@
-import { historyFreshness } from "./history/freshness.js";
-import { HistoryService } from "./history/service.js";
 import { rename, unlink } from "node:fs/promises";
 import { z } from "zod";
 import { AppError } from "./domain/error.js";
@@ -13,14 +11,15 @@ import {
 import { readGit } from "./git/command.js";
 import { hasCode, ProjectFiles } from "./storage/project-files.js";
 import { TaskStore } from "./storage/task-store.js";
-import { historyStatus } from "./history/store.js";
-import { understandingStatus, models } from "./understanding/store.js";
+import { historyControl, manifestFor } from "./history/store.js";
+import { understandingStatus } from "./understanding/store.js";
 import { currentInteraction, interactionOwner } from "./workflow/interaction.js";
 import { ProjectKnowledgeRepository } from "./project-knowledge/repository.js";
-import { publishModelShadow } from "./project-knowledge/service.js";
+import { migrateLocalModels } from "./project-knowledge/migrate-local.js";
 
 export const ProjectPrepareInputSchema = z
-  .object({ apply: z.boolean().default(false) })
+  .object({ apply: z.boolean().default(false),
+    include_recovery: z.boolean().default(true).describe("日常准备传 false，只核对当前分支的任务；恢复挂起任务或历史分支时查询恢复清单") })
   .strict();
 
 async function optionalText(
@@ -84,7 +83,7 @@ export async function prepareProject(
   binding: WorktreeBinding,
   input: unknown,
 ): Promise<ToolResult> {
-  const { apply } = ProjectPrepareInputSchema.parse(input);
+  const { apply, include_recovery } = ProjectPrepareInputSchema.parse(input);
   await new ProjectFiles(binding.root).path(".project-dev/local", true);
   // 已被跟踪的文件不会因新增 ignore 规则而退出版本管理，需要先显式处理。
   const tracked = await readGit(binding.root, [
@@ -126,7 +125,8 @@ export async function prepareProject(
     clean = false;
   }
   const store = new TaskStore(binding.root), active = await store.active(binding.branch);
-  const taskList = await store.list(100), interaction = currentInteraction(), owner = interaction ? interactionOwner(interaction) : undefined;
+  const taskList = include_recovery ? await store.list(100) : undefined;
+  const interaction = currentInteraction(), owner = interaction ? interactionOwner(interaction) : undefined;
   const owned = !active?.owner || !!owner && owner.session_id === active.owner.session_id && owner.actor_id === active.owner.actor_id;
   const unmerged =
     (await readGit(binding.root, ["ls-files", "--unmerged", "-z"])).stdout
@@ -135,18 +135,15 @@ export async function prepareProject(
   let history: unknown;
   let history_freshness: unknown;
   try {
-    const files = new ProjectFiles(binding.root),
-      freshness = await historyFreshness(files);
-    if (
-      apply &&
-      ignored &&
-      freshness.needs_refresh &&
-      freshness.state !== "not_scanned"
-    ) {
-      const refreshed = await new HistoryService(binding).scan({});
-      history_freshness = { ...freshness, refresh_result: refreshed.code };
-    } else history_freshness = freshness;
-    history = await historyStatus(files);
+    const files = new ProjectFiles(binding.root);
+    const [manifest, control] = await Promise.all([manifestFor(files), historyControl(files)]);
+    // 接入只读已有进度；历史工具负责扫描来源和核验分析原文，避免日常开发等待全部聊天日志。
+    history_freshness = manifest ? { state: "not_checked", scanned_at: manifest.scanned_at }
+      : { state: "not_scanned", needs_refresh: true };
+    history = { state: !manifest ? "not_scanned" : control.paused ? "paused" : "snapshot_available",
+      scan_id: manifest?.scan_id ?? null, total_batches: manifest?.batches.length ?? 0, paused: control.paused,
+      next_step: !manifest ? "首次接入可通过 history_scan 发现本项目历史习惯。"
+        : "需要刷新历史时调用 history_scan，已有分析进度可以通过 history_next 查看。" };
   } catch (error) {
     history = {
       state: "unavailable",
@@ -166,19 +163,7 @@ export async function prepareProject(
   try {
     const repository = apply ? await ProjectKnowledgeRepository.open(binding.repo_identity) : await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
     if (repository) {
-      let migration: { attempted: number; published: number; failed: string[] } | undefined;
-      if (apply) {
-        const localModels = await models(new ProjectFiles(binding.root));
-        const failed: string[] = [];
-        for (const model of localModels) {
-          try {
-            await publishModelShadow(binding, model as unknown as Record<string, unknown>);
-          } catch (error) {
-            failed.push(`${model.id}:${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
-          }
-        }
-        migration = { attempted: localModels.length, published: localModels.length - failed.length, failed };
-      }
+      const migration = apply ? await migrateLocalModels(binding, repository) : undefined;
       const identity = await repository.files.readIdentity();
       const pointer = await repository.current();
       project_knowledge = { state: migration?.failed.length ? "unavailable" : pointer ? "ready" : "empty", project_id: identity?.project_id, snapshot_count: (await repository.currentObjectIds()).length,
@@ -211,10 +196,11 @@ export async function prepareProject(
             baseline_branch: active.baseline_branch,
           }
         : null,
-      task_recovery: { branch: binding.branch, truncated: taskList.truncated,
+      task_recovery: taskList ? { branch: binding.branch, truncated: taskList.truncated,
         preserved: taskList.tasks.filter(task => task.phase === "suspended" || task.phase === "active" && task.baseline_branch !== binding.branch)
           .map(task => ({ id: task.id, revision: task.revision, phase: task.phase, branch: task.baseline_branch,
-            next_step: task.phase === "suspended" ? "切回原分支后由所属会话显式恢复；已有活跃任务时先处理冲突。" : "原分支任务保留，切回原分支后恢复；不会阻塞当前分支建立新任务。" })) },
+            next_step: task.phase === "suspended" ? "切回原分支后由所属会话显式恢复；已有活跃任务时先处理冲突。" : "原分支任务保留，切回原分支后恢复；不会阻塞当前分支建立新任务。" })) }
+        : { branch: binding.branch, state: "not_requested" },
       local_ignore_change: changeNeeded
         ? {
             file: `${binding.repo_identity}/info/exclude`,

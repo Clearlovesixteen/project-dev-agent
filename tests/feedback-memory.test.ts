@@ -12,6 +12,7 @@ import { TaskSchema } from "../src/domain/task.js";
 import { withImplementationBasis } from "./helpers/implementation-basis.js";
 import { KnowledgeService } from "../src/knowledge/service.js";
 import { HistoryService } from "../src/history/service.js";
+import { searchSupportContext } from "../src/knowledge/support-context.js";
 import { historyFreshness } from "../src/history/freshness.js";
 const message = (id: string, role: string, text: string) =>
   JSON.stringify({
@@ -237,4 +238,16 @@ test("旧任务不读取新反馈资料，初始纠正选择拒绝未知ID", asy
     (await feedbackReview(s.binding, task, "a".repeat(64))).state,
     "legacy",
   );
+});
+
+test("摘要在读取反馈正文前检查数量预算；超过时不返回部分数据的版本", async t => {
+  const s = await setup(t);
+  await recordFeedback(s.binding, s.input, s.home);
+  const dir = join(s.f.path, ".project-dev/local/feedback");
+  for (let i = 0; i < 12; i++) await writeFile(join(dir, `pending-${i}.json`), "{");
+  const limited = await searchSupportContext(s.files, "请求", ["src/a.ts"], 3, true);
+  assert.equal(limited.feedback.state, "lookup_required"); assert.equal(limited.feedback.version, null);
+  assert.equal(limited.history.state, "not_scanned");
+  const full = await searchSupportContext(s.files, "请求", ["src/a.ts"], 3);
+  assert.equal(full.feedback.state, "unavailable");
 });

@@ -45,11 +45,12 @@ function matchExplanation(knowledge: Knowledge, modules: string[], paths: string
     condition_check: "required", explanation: "范围匹配用于筛选，关键词用于排序；使用前仍需结合本任务核对适用条件。来源有效和已确认状态不代表本任务已满足条件。" };
 }
 
-export async function searchKnowledge(files: ProjectFiles, input: unknown): Promise<ToolResult> {
+/** 所有来源共用此次配置快照的允许路径，避免第二次读取配置产生范围差异。 */
+export async function scopedKnowledgeSearch(files: ProjectFiles, input: unknown): Promise<{ result: ToolResult; paths: string[] }> {
   const request = KnowledgeSearchInputSchema.parse(input);
   const { config, defaulted, entries, diagnostics } = await loadKnowledge(files);
   const paths = request.paths.filter((path) => !config.exclude_paths.some((pattern) => matchesPath(pattern, path)));
-  if (request.paths.length && !paths.length) return { outcome: "ok", code: "PATHS_EXCLUDED", data: { results: [], notices: [], truncated: false }, diagnostics: [] };
+  if (request.paths.length && !paths.length) return { paths, result: { outcome: "ok", code: "PATHS_EXCLUDED", data: { results: [], notices: [], truncated: false }, diagnostics: [] } };
   const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
   const terms = [...new Set([...segmenter.segment(request.query.toLowerCase())].filter((part) => part.isWordLike).map((part) => part.segment))].slice(0, 50);
   const ranked = entries.filter(({ knowledge }) => knowledge.status !== "disabled" && scopeMatch(knowledge, request.modules, paths, config)).map((entry) => {
@@ -81,8 +82,13 @@ export async function searchKnowledge(files: ProjectFiles, input: unknown): Prom
     results.push(value);
     resultBytes += size;
   }
-  return { outcome: diagnostics.length ? "incomplete" : "ok", code: diagnostics.length ? "KNOWLEDGE_PARTIAL" : "KNOWLEDGE_SEARCHED",
+  return { paths, result: { outcome: diagnostics.length ? "incomplete" : "ok", code: diagnostics.length ? "KNOWLEDGE_PARTIAL" : "KNOWLEDGE_SEARCHED",
     data: { results, notices: notices.slice(0, 20), notices_truncated: notices.length > 20, eligible_count: eligible, truncated,
       knowledge_directory: config.knowledge_dir, configuration: defaulted ? "defaults" : "project",
-      next_step: entries.length === 0 ? "未找到可复用的规则。请阅读现有项目说明、相关文档和参考实现，不要编造已确认的规则。" : null }, diagnostics };
+      next_step: entries.length === 0 ? "未找到可复用的规则。请阅读现有项目说明、相关文档和参考实现，不要编造已确认的规则。" : null }, diagnostics } };
+}
+
+/** 单独查询确认规则的调用方只需要原有工具回执。 */
+export async function searchKnowledge(files: ProjectFiles, input: unknown): Promise<ToolResult> {
+  return (await scopedKnowledgeSearch(files, input)).result;
 }

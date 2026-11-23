@@ -35,8 +35,9 @@ function normalized(text: string): string { return text.normalize("NFKC").toLowe
 export function findingId(finding: HistoryFinding): string {
   return `habit-${digest(JSON.stringify([finding.type, finding.audience, normalized(finding.rule), [...finding.paths].sort(), finding.applicable_conditions.map(normalized).sort()])).slice(0, 24)}`;
 }
-export async function historyProfile(files: ProjectFiles) {
-  const manifest = await manifestFor(files);
+export async function historyProfile(files: ProjectFiles, snapshot?: { manifest: HistoryManifest | undefined }) {
+  // 查询将已检查预算的同一清单传入，避免重读或在清单变化后超预算。
+  const manifest = snapshot ? snapshot.manifest : await manifestFor(files);
   if (!manifest) return { manifest: undefined, analyzed: 0, pending: [] as string[], hints: [] as HistoryHint[] };
   const pending: string[] = [], combined = new Map<string, HistoryHint>();
   let analyzed = 0;

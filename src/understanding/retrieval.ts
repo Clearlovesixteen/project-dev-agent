@@ -46,6 +46,30 @@ export const lexicalProvider: RetrievalProvider = {
   },
 };
 
+// MCP 常驻期间仅保存少量词法评分。业务正文、来源核验及最终任务校验都在请求内实时完成。
+const recentRankings = new Map<string, Map<string, RetrievalMatch>>();
+
+/** 共享结构快照不变时复用同一需求的评分，工作树、版本化分块、查询任一变化即隔离。 */
+export function queryRanking(query: string, snapshot?: { project: string; chunks: string[] }): RetrievalProvider {
+  const key = snapshot && digest(JSON.stringify([snapshot.project, snapshot.chunks, query]));
+  let previous = key ? recentRankings.get(key) : undefined;
+  if (key && !previous) {
+    previous = new Map<string, RetrievalMatch>();
+    if (recentRankings.size >= 4) recentRankings.delete(recentRankings.keys().next().value!);
+    recentRankings.set(key, previous);
+  }
+  const matches = new WeakMap<MapFile, RetrievalMatch>();
+  return { name: lexicalProvider.name, rank(entry) {
+    let match = matches.get(entry) ?? previous?.get(entry.path);
+    if (!match) {
+      match = lexicalProvider.rank(entry, query);
+      if (previous && previous.size < 4_000) previous.set(entry.path, match);
+    }
+    matches.set(entry, match);
+    return match;
+  } };
+}
+
 /** 新模块仍可查询所属应用与仓库根级公共能力，不因目录不存在就认定没有实现。 */
 export function implementationScope(path: string, targets: string[]): boolean {
   if (!targets.length) return true;

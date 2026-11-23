@@ -144,6 +144,7 @@ export const TaskUpdateInputSchema = z
 export const TaskCheckInputSchema = z
   .object({
     task_id: IdSchema.optional(),
+    mode: z.enum(["resume", "review"]).default("review").describe("resume 仅核对当前任务及基线；review 完整审查并签发代码快照"),
     include_evaluation: z.boolean().default(false),
   })
   .strict();

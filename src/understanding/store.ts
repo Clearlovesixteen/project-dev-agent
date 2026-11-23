@@ -4,7 +4,7 @@ import { ProjectFiles } from "../storage/project-files.js";
 import { acquireFileLock } from "../storage/file-lock.js";
 import { digest } from "../knowledge/document.js";
 import { optional, save } from "../history/store.js";
-import { FileSchema, HASH, MAP_DIR, MapSchema, SavedModelSchema, type MapFile, type SavedModel } from "./contracts.js";
+import { FileSchema, HASH, MAP_DIR, MapSchema, SavedModelSchema, type MapFile, type ProjectMap, type SavedModel } from "./contracts.js";
 import { IdSchema } from "../domain/common.js";
 
 export { optional, save };
@@ -19,8 +19,8 @@ export async function readMap(files: ProjectFiles) {
   if (map.project !== files.root) throw new AppError("PROJECT_MAP_MISMATCH", "项目结构索引属于另一个工作区");
   return map;
 }
-export async function mapFiles(files: ProjectFiles): Promise<MapFile[]> {
-  const map = await readMap(files); if (!map) return [];
+export async function mapFiles(files: ProjectFiles, snapshot?: ProjectMap): Promise<MapFile[]> {
+  const map = snapshot ?? await readMap(files); if (!map) return [];
   const result: MapFile[] = [];
   for (const id of map.chunks) {
     const raw = await files.read(`${MAP_DIR}/chunks/${id}.json`, 65_536);
@@ -33,14 +33,18 @@ const ModelsIndex = z.array(z.object({ id: IdSchema, revision: z.number().int().
 export async function modelIndex(files: ProjectFiles) {
   return ModelsIndex.parse(JSON.parse(await optional(files, `${MAP_DIR}/models.json`) ?? "[]"));
 }
+/** 读取指定不可变修订并核对正文。迁移与并行修订共用同一读取合同。 */
+export async function readIndexedModel(files: ProjectFiles, entry: z.infer<typeof ModelsIndex>[number]): Promise<SavedModel> {
+  const raw = await files.read(`${MAP_DIR}/models/${entry.hash}.json`, 65_536);
+  if (digest(raw) !== entry.hash) throw new AppError("PROJECT_MODEL_CORRUPT", "模型内容与记录的哈希不一致");
+  const model = SavedModelSchema.parse(JSON.parse(raw));
+  if (model.project !== files.root || model.id !== entry.id || model.revision !== entry.revision) throw new AppError("PROJECT_MODEL_MISMATCH", "模型身份信息不匹配");
+  return model;
+}
 export async function models(files: ProjectFiles): Promise<SavedModel[]> {
   const result: SavedModel[] = [];
   for (const entry of await modelIndex(files)) {
-    const raw = await files.read(`${MAP_DIR}/models/${entry.hash}.json`, 65_536);
-    if (digest(raw) !== entry.hash) throw new AppError("PROJECT_MODEL_CORRUPT", "模型内容与记录的哈希不一致");
-    const model = SavedModelSchema.parse(JSON.parse(raw));
-    if (model.project !== files.root || model.id !== entry.id || model.revision !== entry.revision) throw new AppError("PROJECT_MODEL_MISMATCH", "模型身份信息不匹配");
-    result.push(model);
+    result.push(await readIndexedModel(files, entry));
   }
   return result;
 }

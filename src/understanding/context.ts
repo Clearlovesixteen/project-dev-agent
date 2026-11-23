@@ -13,7 +13,7 @@ import { businessScenarios } from "../quality/scenarios.js";
 import { impactCandidates } from "../quality/impact.js";
 import { auditModels } from "./model-audit.js";
 import { materializeModel, modelPreview, selectModelRules } from "./model-view.js";
-import { lexicalProvider } from "./retrieval.js";
+import { queryRanking } from "./retrieval.js";
 import { businessGraph } from "./business-graph.js";
 import { codeLocations } from "./code-locations.js";
 import { readModelSnapshot, type ProjectKnowledgeStatus } from "../project-knowledge/service.js";
@@ -36,7 +36,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
   const { config } = await loadConfig(files);
   const paths = request.paths.filter((path) => !excluded(path, config));
   if (request.paths.length && !paths.length) return { state: "paths_excluded", files: [], models: [], modules: [] };
-  const entries = (await mapFiles(files)).filter((entry) => !excluded(entry.path, config));
+  const entries = (await mapFiles(files, map)).filter((entry) => !excluded(entry.path, config));
   if (request.code_locations) {
     const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head || await mapConfigHash(files, config) !== map.config_hash;
     const locations = stale ? [] : await codeLocations(files, config, entries, request.code_locations);
@@ -46,8 +46,9 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
   }
   const terms = [...new Intl.Segmenter("zh", { granularity: "word" }).segment(request.query.toLowerCase())].filter((term) => term.isWordLike).map((term) => term.segment).slice(0, 50);
   const score = (text: string) => terms.filter((term) => text.toLowerCase().includes(term)).length;
+  const ranking = queryRanking(request.query, map);
   const matched = entries.filter((entry) => (!paths.length || paths.some((path) => intersects(path, entry.path))) && (!request.modules.length || request.modules.includes(entry.module)))
-    .map((entry) => ({ entry, score: lexicalProvider.rank(entry, request.query).score }))
+    .map((entry) => ({ entry, score: ranking.rank(entry, request.query).score }))
     .filter((entry) => !terms.length || paths.length || request.modules.length || entry.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.path.localeCompare(b.entry.path));
   const selected = matched.slice(0, request.limit).map(({ entry }) => ({ entry, relation: "matched" }));
@@ -151,7 +152,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
   const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-    implementation_context: await implementationContext(files, entries, config, paths, request.query),
+    implementation_context: await implementationContext(files, entries, config, paths, request.query, ranking),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     business_graph: graph,
     impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),

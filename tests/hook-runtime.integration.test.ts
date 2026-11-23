@@ -16,9 +16,9 @@ import { uploadDiagnostics } from "../src/observability/uploader.js";
 import { PUBLISHED_DIAGNOSTICS } from "../src/runtime/published-diagnostics.js";
 
 const entry = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/hooks.mjs", import.meta.url));
-async function run(home: string, input: string, end = true, extraEnv: NodeJS.ProcessEnv = {}) {
+async function run(home: string, input: string, end = true, extraEnv: NodeJS.ProcessEnv = {}, executable = entry) {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(process.execPath, [entry], { env: { ...process.env, CODEX_HOME: home, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [executable], { env: { ...process.env, CODEX_HOME: home, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("独立钩子未在外部测试预算内结束")); }, 9000);
     child.stdout.on("data", part => { stdout += part; }); child.stderr.on("data", part => { stderr += part; });
@@ -37,6 +37,19 @@ test("独立钩子面对无效/超限/未结束输入都返回单个 JSON，不�
   assert.ok(performance.now() - started < 5000, "未结束输入应有界退出，不能一直占用会话");
   // 截止事件是尽力记录；重载时硬期限可以先于磁盘写入结束，不能把正常降级误判为失败。
   assert.equal((await new DiagnosticWriter(home).read()).invalid, 0);
+});
+
+test("已打包的 UserPromptSubmit 使用独立轻量入口，其他四项仍指向真实运行时", async t => {
+  const root = fileURLToPath(new URL("../../plugins/project-dev-agent/", import.meta.url));
+  const config = JSON.parse(await readFile(join(root, "hooks/hooks.json"), "utf8"));
+  for (const name of ["SessionStart", "PreToolUse", "PostToolUse", "Stop"])
+    assert.equal(config.hooks[name][0].hooks[0].command, 'node "${PLUGIN_ROOT}/runtime/hooks.mjs"');
+  assert.equal(config.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${PLUGIN_ROOT}/hooks/prompt.mjs"');
+  const home = await mkdtemp(join(tmpdir(), "pda-prompt-only-")); t.after(() => rm(home, { recursive: true, force: true }));
+  const result = await run(home, JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "长".repeat(60_000) }),
+    true, {}, join(root, "hooks/prompt.mjs"));
+  assert.equal(result.code, 0); assert.equal(result.stderr, ""); assert.equal(result.stdout, "{}\n");
+  await assert.rejects(readFile(join(home, "project-dev-agent/runtime.json")), { code: "ENOENT" });
 });
 
 test("真实打包入口在 auto 下输出路由，只有写出 stdout 才计 emitted，未开远程不会发送", async t => {
@@ -97,18 +110,22 @@ test("更新后的独立钩子自动迁移旧 manual，保留诊断关闭且重�
   assert.equal(await readFile(path, "utf8"), migrated);
 });
 
-test("输入钩子 Git 发现超时仍保留轻量入口，诊断指出具体检查阶段", async t => {
+test("会话入口 Git 发现超时仍保留轻量入口，诊断指出具体检查阶段", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const home = join(fixture.root, "slow-hook-home"), bin = join(fixture.root, "slow-bin"); await mkdir(home); await mkdir(bin);
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto", diagnostics: { upload: false } });
   const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
   const wrapper = join(bin, "git");
   await writeFile(wrapper, `#!/bin/sh\nsleep 2\nexec '${git.replace(/'/g, "'\\''")}' "$@"\n`); await chmod(wrapper, 0o755);
-  const result = await run(home, JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "slow-discovery",
+  // 普通提示不会触发 Git 发现；慢 Git 下也无需回退或追加工作流说明。
+  const prompt = await run(home, JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "ordinary-prompt",
+    cwd: fixture.path, prompt: "看看这个接口有什么作用" }), true, { PATH: `${bin}:${process.env.PATH ?? ""}` });
+  assert.deepEqual(JSON.parse(prompt.stdout), {});
+  const result = await run(home, JSON.stringify({ hook_event_name: "SessionStart", session_id: "slow-discovery",
     turn_id: "slow-prompt", cwd: fixture.path, prompt: "更新账户业务" }), true,
     { PATH: `${bin}:${process.env.PATH ?? ""}` });
   const output = JSON.parse(result.stdout);
-  assert.equal(output.hookSpecificOutput?.hookEventName, "UserPromptSubmit");
+  assert.equal(output.hookSpecificOutput?.hookEventName, "SessionStart");
   assert.match(output.hookSpecificOutput?.additionalContext, /project_prepare/);
   assert.match(output.hookSpecificOutput?.additionalContext, /摘要尚未就绪/);
   assert.match(output.systemMessage, /HOOK_DEADLINE/);
@@ -116,7 +133,7 @@ test("输入钩子 Git 发现超时仍保留轻量入口，诊断指出具体检
   const deadline = (await writer.read()).events.find(event => event.reason_code === "HOOK_DEADLINE");
   assert.ok(deadline);
   assert.equal(deadline.trace_id, await writer.opaque("slow-prompt"));
-  assert.equal(deadline.attributes.event, "UserPromptSubmit");
+  assert.equal(deadline.attributes.event, "SessionStart");
   assert.equal(deadline.context?.stage, "scope");
   assert.ok(deadline.call_id && deadline.duration_ms >= 1000);
 });
@@ -143,7 +160,9 @@ test("Stop 先完整落盘并快速返回，下一次入口再消费收尾队列
   const started = performance.now();
   const result = await run(home, JSON.stringify({ hook_event_name: "Stop", session_id: "isolated-stop", cwd: home }));
   assert.equal(result.code, 0); assert.equal(result.stderr, ""); assert.deepEqual(JSON.parse(result.stdout), {});
-  assert.ok(performance.now() - started < 1000, "Stop 不应等待远程确认");
+  const stopDuration = performance.now() - started;
+  assert.equal(received, 0, "Stop 返回前接收端不应收到任何网络请求");
+  assert.ok(stopDuration < 1000, `Stop 不应等待远程确认，实测 ${Math.round(stopDuration)}ms`);
   const localEvents = (await new DiagnosticWriter(home).read()).events;
   assert.ok(localEvents.some(event => event.event_name === "hook.finished"), "Stop 收尾事件必须先落盘");
   const drained = await uploadDiagnostics(home, 2500, await new RuntimeSettings(home).current());

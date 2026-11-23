@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, realpath, rename, symlink, writeFile } fro
 import { join } from "node:path";
 import test from "node:test";
 import { bindWorktree } from "../src/git/index.js";
+import { prepareProject } from "../src/personal-setup.js";
 import { HistoryService } from "../src/history/service.js";
 import { historyProfile, historyStatus } from "../src/history/store.js";
 import { ProjectFiles } from "../src/storage/project-files.js";
@@ -38,6 +39,21 @@ async function next(service: HistoryService) {
   const result = await service.next({}); assert.equal(result.outcome, "ok");
   return result.data as { scan_id: string; batch: HistoryBatch | null; total_batches: number; analyzed_batches: number };
 }
+
+test("日常接入只报告已保存的历史快照，新增会话在独立的历史扫描中发现", async t => {
+  const { home, binding, service, files } = await setup(t);
+  await log(home, "first", binding.root, [message("one", "user", "复用项目表单")]);
+  assert.equal((await service.scan({})).outcome, "ok");
+  const manifest = ".project-dev/local/history/manifest.json";
+  const original = await files.read(manifest, 65_536);
+  await log(home, "second", binding.root, [message("two", "user", "沿用项目日志")]);
+  const result = (await prepareProject(binding, { apply: true, include_recovery: false })).data as any;
+  assert.equal(result.history.state, "snapshot_available");
+  assert.equal(result.history_freshness.state, "not_checked");
+  assert.equal(await files.read(manifest, 65_536), original);
+  assert.equal((await service.scan({})).outcome, "ok");
+  assert.notEqual(JSON.parse(await files.read(manifest, 65_536)).source_cursor, JSON.parse(original).source_cursor);
+});
 
 test("history attributes exact projects, includes archives, excludes agents and metadata, and preserves dirty business work", async (t) => {
   const { fixture, home, binding, service, files } = await setup(t);

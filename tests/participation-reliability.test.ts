@@ -32,18 +32,19 @@ async function setup(t: test.TestContext) {
   return { fixture, home, settings, plugin, binding, call };
 }
 
-test("新安装默认自动参与；自然开发表达不再受关键词命中限制", async t => {
+test("会话入口自动提供开发工作流，日常提示免查询及重复注入", async t => {
   const s = await setup(t);
   assert.equal((await s.settings.current()).mode, "auto");
+  assert.ok(context(await s.call({ hook_event_name: "SessionStart" })).includes("Project Dev Agent"));
   for (const prompt of ["把录音下载按钮改成失败后可重试。", "把默认页大小从20改为50。", "按钮置灰后页面还是能重复提交，处理一下。", "继续"]) {
-    assert.ok(context(await s.call({ hook_event_name: "UserPromptSubmit", prompt })).includes("Project Dev Agent"), prompt);
+    assert.deepEqual(await s.call({ hook_event_name: "UserPromptSubmit", prompt }), {}, prompt);
   }
 });
 
 test("首次自动入口为自然请求提供初始化指引，不写业务文件或扩大范围", async t => {
   const s = await setup(t);
   await rm(join(s.home, "project-dev-agent/settings.json"));
-  const result = await s.call({ hook_event_name: "UserPromptSubmit", prompt: "把默认页大小从20改为50。" });
+  const result = await s.call({ hook_event_name: "SessionStart" });
   assert.ok(context(result).includes("project_prepare"));
   await assert.rejects(readFile(join(s.home, "project-dev-agent/settings.json")), { code: "ENOENT" });
 });

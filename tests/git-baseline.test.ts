@@ -43,13 +43,17 @@ test("binding requires a committed worktree root and shares identity across link
   assert.equal(binding.root, fixture.path);
   assert.equal(binding.head, fixture.head);
   assert.equal(binding.branch, "main");
+  const bare = join(fixture.root, "bare.git");
+  await git(fixture.path, ["init", "--template=", "--bare", bare]);
+  await assert.rejects(bindWorktree(bare), hasCode("NOT_GIT_WORKTREE"));
   await assert.rejects(bindWorktree("."), hasCode("PROJECT_PATH_INVALID"));
   await assert.rejects(bindWorktree(join(fixture.path, "src")), hasCode("WORKTREE_ROOT_REQUIRED"));
   const empty = join(fixture.root, "uncommitted");
   await mkdir(empty);
   await git(empty, ["init", "--template=", "--initial-branch=main"]);
   await assert.rejects(bindWorktree(empty), hasCode("NO_COMMITS"));
-  const linked = join(fixture.root, "linked-worktree");
+  // POSIX 路径含换行时仍须准确区分工作树和共享 Git 目录。
+  const linked = join(fixture.root, process.platform === "win32" ? "linked-worktree" : "linked\nworktree");
   await git(fixture.path, ["worktree", "add", "--detach", linked]);
   const linkedBinding = await bindWorktree(linked);
   assert.equal(linkedBinding.repo_identity, binding.repo_identity);

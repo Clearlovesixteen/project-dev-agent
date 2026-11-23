@@ -245,6 +245,40 @@ export class TaskService {
       }
       if (request.resolution_source && request.task_kind !== "merge_recovery")
         throw new AppError("MERGE_RECOVERY_INTENT_REQUIRED", "resolution_source 仅用于明确的 task_kind:merge_recovery 任务");
+      const interaction = currentInteraction();
+      // 先处理宿主重试幂等性，再进入需求组解析；否则同一操作重试会被
+      // “当前工作树已有活跃任务”规则误判成并发新需求。
+      const operationKey = interaction?.operation_id
+        ? createHash("sha256")
+            .update(
+              JSON.stringify([
+                interaction.session_id,
+                interaction.actor_id ?? "main",
+                interaction.operation_id,
+              ]),
+            )
+            .digest("hex")
+        : undefined;
+      const operationFingerprint = interaction?.operation_id
+        ? createHash("sha256").update(JSON.stringify(request)).digest("hex")
+        : undefined;
+      if (operationKey) {
+        const existing = await this.store.findByOperationKey(operationKey);
+        if (existing) {
+          assertTaskOwner(existing);
+          if (existing.operation_fingerprint !== operationFingerprint)
+            throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
+          // 已落盘的操作重试复用原基线，仍核对当前工作树、分支和可达性。
+          await assertBaseline(current, existing);
+          const sync = await this.syncRequirementGroup(existing, "register");
+          return {
+            outcome: "ok",
+            code: "TASK_REUSED",
+            data: sync.task,
+            diagnostics: [...coordinationDiagnostics, ...sync.diagnostics],
+          };
+        }
+      }
       const recovery = request.task_kind === "merge_recovery" ? await captureMergeRecovery(current, request.resolution_source) : undefined;
       if (recovery && request.scope_paths?.some(path => !recovery.conflicts.some(item => item.path === path)))
         throw new AppError("MERGE_RECOVERY_SCOPE", "恢复任务范围只能包含当前 merge 的原冲突文件，不接管其他改动");
@@ -273,38 +307,6 @@ export class TaskService {
           "纠正版本、ID或关联验收不匹配，请重新查询当前范围",
         );
       const now = new Date().toISOString();
-      const interaction = currentInteraction();
-      // 先处理宿主重试幂等性，再进入需求组解析；否则同一操作重试会被
-      // “当前工作树已有活跃任务”规则误判成并发新需求。
-      const operationKey = interaction?.operation_id
-        ? createHash("sha256")
-            .update(
-              JSON.stringify([
-                interaction.session_id,
-                interaction.actor_id ?? "main",
-                interaction.operation_id,
-              ]),
-            )
-            .digest("hex")
-        : undefined;
-      const operationFingerprint = interaction?.operation_id
-        ? createHash("sha256").update(JSON.stringify(request)).digest("hex")
-        : undefined;
-      if (operationKey) {
-        const existing = await this.store.findByOperationKey(operationKey);
-        if (existing) {
-          assertTaskOwner(existing);
-          if (existing.operation_fingerprint !== operationFingerprint)
-            throw new AppError("TASK_OPERATION_CONFLICT", "同一操作标识不能对应不同需求");
-          const sync = await this.syncRequirementGroup(existing, "register");
-          return {
-            outcome: "ok",
-            code: "TASK_REUSED",
-            data: sync.task,
-            diagnostics: [...coordinationDiagnostics, ...sync.diagnostics],
-          };
-        }
-      }
       const spec = request.spec_input ? validateSpecification(request.spec_input, ["task-request", ...(request.requirement_sources ?? []).map(source => source.id)]) : undefined;
       const taskId = randomUUID();
       const requirementSources = await recordRequirementSources(
@@ -844,13 +846,29 @@ export class TaskService {
         return {
           outcome: "ok",
           code: "NO_ACTIVE_TASK",
-          data: { project: this.binding.root, active_task: null },
+          data: { project: this.binding.root, active_task: null, ...(request.mode === "resume" ? { mode: "resume" } : {}) },
           diagnostics: [],
         };
       const task_id = task.id;
-      if (!request.task_id) assertTaskOwner(task);
+      if (!request.task_id || request.mode === "resume") assertTaskOwner(task);
       if (task.repo_identity !== this.binding.repo_identity)
         throw new AppError("TASK_BINDING_MISMATCH", "该任务属于其他仓库");
+      // 续接只确认任务、归属与当前基线；冲突恢复任务允许仍存在已登记的冲突。
+      // 此路径不签发快照、不改变已验收计数，终端验证和交付仍需完整审查。
+      if (request.mode === "resume") {
+        if (request.include_evaluation) throw new AppError("INVALID_INPUT", "项目评估应使用 review 模式");
+        if (task.phase !== "active") return {
+          outcome: "incomplete", code: "TASK_INACTIVE", data: { mode: "resume", task_id, revision: task.revision, phase: task.phase },
+          diagnostics: [{ code: "TASK_INACTIVE", message: "此任务已结束或挂起，不能在本轮直接续接。" }],
+        };
+        await assertBaseline(this.binding, task);
+        return { outcome: "ok", code: "TASK_CONTINUATION_READY", data: {
+          mode: "resume", task_id, revision: task.revision, phase: task.phase, requirement: task.requirement,
+          task_kind: task.workspace_baseline?.merge_recovery ? "merge_recovery" : "development",
+          planned_paths: task.change_items.filter(item => item.action === "modify").map(item => item.target_path),
+          quality_checked: false,
+        }, diagnostics: [] };
+      }
       if (task.phase !== "active") {
         return {
           outcome: "incomplete",
@@ -922,25 +940,18 @@ export class TaskService {
       const unexpected = changed.filter((path) => !expected.has(path));
       const stale = staleReviews(task, snapshot),
         outdated = Object.values(stale).some((ids) => ids.length);
-      const reuse = await requestReuseReview(this.binding, task, changed);
-      const implementation = await implementationBasisReview(
-        this.binding,
-        task,
-        snapshot,
-      );
+      // 同一快照上的独立只读检查分组执行，限制并发。业务计划必须使用真实验证结果。
+      const [reuse, implementation, execution] = await Promise.all([
+        requestReuseReview(this.binding, task, changed),
+        implementationBasisReview(this.binding, task, snapshot),
+        validationReview(this.binding, task, snapshot, changed),
+      ]);
       const nextActions = implementationReviewActions(implementation);
-      const execution = await validationReview(
-        this.binding,
-        task,
-        snapshot,
-        changed,
-      );
-      const businessPlan = await businessPlanReview(this.binding, task, snapshot, changed, execution);
-      const businessDelta = await businessDeltaReview(
-        this.binding,
-        task,
-        snapshot,
-      );
+      const [businessPlan, businessDelta, feedback] = await Promise.all([
+        businessPlanReview(this.binding, task, snapshot, changed, execution),
+        businessDeltaReview(this.binding, task, snapshot),
+        feedbackReview(this.binding, task, snapshot),
+      ]);
       // 这里只判断记录、复用保护和文件覆盖，不能独立判断业务语义。
       const basisReviewed =
         !implementation.required || implementation.state === "checked";
@@ -950,12 +961,11 @@ export class TaskService {
       const deltaReviewed = ["checked", "not_applicable"].includes(
         businessDelta.state,
       );
-      const feedback = await feedbackReview(this.binding, task, snapshot);
-      const requirements = await requirementReview(this.binding, task),
-        business_assessment = await businessAssessmentReview(
-          this.binding,
-          task,
-        );
+      const [requirements, business_assessment, quality] = await Promise.all([
+        requirementReview(this.binding, task),
+        businessAssessmentReview(this.binding, task),
+        qualityReview(this.binding, task, changed, snapshot),
+      ]);
       const reviewed =
         (!requirements.required || requirements.state === "checked") &&
         (!business_assessment.required ||
@@ -1043,7 +1053,7 @@ export class TaskService {
           stale_evidence: stale,
           next_actions: nextActions,
           quality: {
-            ...(await qualityReview(this.binding, task, changed, snapshot)),
+            ...quality,
             reuse,
             implementation,
             execution,

@@ -21,6 +21,7 @@ let diagnostic: DiagnosticContext | undefined;
 const pluginRoot = process.env.PROJECT_DEV_PLUGIN_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** 内部预算到期时返回合法拒绝，不用空 JSON 把未完成的修改检查误当成功。 */
 function unavailable(reason: string) {
+  if (pendingInput?.hook_event_name === "UserPromptSubmit") return {};
   if (activeMode === "manual" || activeMode === "observe") return {};
   // 项目发现或摘要读取过慢时保留轻量入口；它不声称范围已核对或资料已准备。
   // 只有已读到 auto 才能注入，不能越过损坏配置或用户的关闭选择。

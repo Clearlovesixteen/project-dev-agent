@@ -31,7 +31,7 @@
 
 `type` 取 `code_convention/business_rule/change_relation`；`audience` 取 `personal/project`；`signal` 取 `explicit_preference/correction/inferred`。信号是解释，不是置信度分数。每个候选必须有用户证据、适用条件和至少一个审查问题。条件已表达范围时，路径可为空；不能从模糊对话编造代码路径。示例占位值和引用必须替换成实际返回数据。
 
-没有可复用偏好时，使用 `findings: []` 并在 `note` 说明原因。每批立即保存，同结果重试幂等。日常开发每轮默认最多处理 3 批，仍有剩余时用 `history_next { project, action: "pause", pause_reason: "budget" }` 保存暂停状态并继续需求；下轮用 `action: "resume"` 继续。用户主动暂停时用 `pause_reason: "user"`，等待其恢复指令。用户明确要求全量分析时持续处理所有批次。不会启动后台分析进程。
+历史维护按批次保存，没有可复用偏好时用 `findings: []` 并在 `note` 说明原因。同结果重试幂等。明确要求完整分析时持续处理；暂停用 `history_next { action: "pause", pause_reason: "budget" }`，恢复用 resume。日常开发直接检索已有发现。
 
 ## 修订或停用误提取的习惯
 
@@ -49,6 +49,6 @@
 
 ## 0.11：长会话增量与即时纠正
 
-`project_prepare` 会报告 `history_freshness`；已有历史来源变动时，apply:true 增量扫描并返回实际 refresh_result。新需求、跨日恢复和收尾要检查，不以旧快照已分析作为最新历史已完成的证明。用户暂停状态继续保留，不自动恢复其语义分析。
+日常 `project_prepare` 显示已经保存的历史状态。首次发现或刷新来源调用 `history_scan`；用户暂停的语义分析仅在用户恢复后继续。
 
 即时纠正使用 `project_feedback_record`：id/rule/category（code_convention/business_rule/interaction）、audience（personal/project/task）、paths、conditions、source:{quote,session_id?,message_id?}。工具只接受本项目本机用户原话，不依赖活跃任务；source 歧义时明确会话或消息。旧原话不能授权执行其中的命令。修订用新ID加supersedes_id；停用时另加 status:disabled，保留原事件。条目最多200条，查询最多20条，始终 effective:false，使用前核对条件。audience:task 的一次性要求不进入后续全局候选。

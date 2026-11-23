@@ -35,12 +35,12 @@ export async function bindWorktree(project: string): Promise<WorktreeBinding> {
   let topLevel: string;
   let commonDirectory: string;
   try {
-    const inside = await readGit(root, ["rev-parse", "--is-inside-work-tree"]);
-    if (gitLine(inside.stdout) !== "true") throw new Error("不是 Git 工作树");
-    topLevel = await realpath(gitLine((await readGit(root, ["rev-parse", "--show-toplevel"])).stdout));
-    commonDirectory = await realpath(gitLine((await readGit(root, [
-      "rev-parse", "--path-format=absolute", "--git-common-dir",
-    ])).stdout));
+    // 普通路径用一次 Git 调用取得工作树与共享目录；包含换行的路径分别查询，避免误切分。
+    const directories = gitLine((await readGit(root, ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"])).stdout).split("\n");
+    const paths = directories.length === 2 ? directories : await Promise.all(
+      ["--show-toplevel", "--git-common-dir"].map(async flag =>
+        gitLine((await readGit(root, ["rev-parse", "--path-format=absolute", flag])).stdout)));
+    [topLevel, commonDirectory] = await Promise.all([realpath(paths[0]!), realpath(paths[1]!)]);
   } catch {
     throw new AppError("NOT_GIT_WORKTREE", "项目必须是 Git 工作树");
   }
@@ -86,16 +86,17 @@ export async function assertBaseline(binding: WorktreeBinding, task: Task): Prom
     throw new AppError("BASELINE_BRANCH_CHANGED", "当前分支与任务开始时的分支不同");
   }
   assertObjectId(task.baseline_head);
-  let result;
-  try {
-    result = await readGit(binding.root, [
-      "merge-base", "--is-ancestor", task.baseline_head, current.head,
-    ], [1]);
-  } catch {
-    throw new AppError("BASELINE_UNAVAILABLE", "当前仓库中无法读取任务开始时的提交");
-  }
-  if (result.exitCode !== 0) {
-    throw new AppError("BASELINE_NOT_REACHABLE", "任务开始时的提交已不在当前提交的祖先链中");
+  // 两端相同且 HEAD 已由 Git 验证为提交，无需再次启动 Git 查询祖先关系。
+  if (task.baseline_head !== current.head) {
+    let result;
+    try {
+      result = await readGit(binding.root, ["merge-base", "--is-ancestor", task.baseline_head, current.head], [1]);
+    } catch {
+      throw new AppError("BASELINE_UNAVAILABLE", "当前仓库中无法读取任务开始时的提交");
+    }
+    if (result.exitCode !== 0) {
+      throw new AppError("BASELINE_NOT_REACHABLE", "任务开始时的提交已不在当前提交的祖先链中");
+    }
   }
   if (task.workspace_baseline?.merge_recovery) await assertMergeRecovery(current, task.workspace_baseline.merge_recovery);
 }

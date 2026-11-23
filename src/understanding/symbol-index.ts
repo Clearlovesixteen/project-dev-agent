@@ -16,40 +16,43 @@ function parseCode(path: string, text: string, tokens = false) {
   return parse(text, { sourceType: "unambiguous", tokens, plugins, errorRecovery: false });
 }
 
+/** 从同一棵语法树提取声明位置，边界检查可同时读取这次解析生成的词法单元。 */
+function collectSymbols(ast: ReturnType<typeof parse>, text: string) {
+  const symbols: CodeSymbol[] = [];
+  let inspected = 0;
+  const walk = (node: unknown, scope: string[], depth: number, wrapper?: { start: number; end: number }) => {
+    if (++inspected > 80_000 || depth > 100) throw new Error("SYMBOL_LIMIT");
+    if (!isNode(node)) return;
+    let name: string | undefined;
+    if (["FunctionDeclaration", "ClassDeclaration", "TSInterfaceDeclaration", "TSTypeAliasDeclaration", "TSEnumDeclaration"].includes(node.type)) name = identifier(node.id);
+    else if (node.type === "VariableDeclarator") name = identifier(node.id);
+    else if (["ClassMethod", "ObjectMethod", "ClassProperty", "ObjectProperty", "TSPropertySignature"].includes(node.type) && !node.computed) name = identifier(node.key);
+    else if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && identifier(node.source))
+      name = `${node.type === "ImportDeclaration" ? "import" : "export"}:${identifier(node.source)}`;
+    const qualified = name ? [...scope, name] : scope;
+    if (name && typeof node.start === "number" && typeof node.end === "number")
+      symbols.push({ name: qualified.join("."), start: wrapper?.start ?? node.start, end: wrapper?.end ?? node.end,
+        sha256: digest(text.slice(wrapper?.start ?? node.start, wrapper?.end ?? node.end)) });
+    for (const [key, child] of Object.entries(node)) {
+      if (["loc", "extra", "comments", "leadingComments", "trailingComments", "tokens"].includes(key)) continue;
+      const outer = typeof node.start === "number" && typeof node.end === "number"
+        && (key === "declaration" && /^Export/.test(node.type) || key === "declarations" && node.type === "VariableDeclaration" && Array.isArray(child) && child.length === 1)
+        ? wrapper ?? { start: node.start, end: node.end } : undefined;
+      if (Array.isArray(child)) {
+        for (const item of child) if (isNode(item)) walk(item, qualified, depth + 1, outer);
+      } else if (isNode(child)) walk(child, qualified, depth + 1, outer);
+    }
+  };
+  walk(ast.program, [], 0);
+  return { state: "parsed" as const, symbols, ...moduleReferences(ast.program.body) };
+}
+
 /** 有界静态解析，保持词法作用域限定名；不能把重名、动态属性或解析失败当作唯一定位。 */
 export function codeSymbols(path: string, text: string) {
   const unsupported = { state: "unsupported" as const, symbols: [] as CodeSymbol[], references: [] as SymbolReference[], exports: new Set<string>() };
   if (!supported(path, text)) return unsupported;
-  const symbols: CodeSymbol[] = [];
-  let inspected = 0;
-  try {
-    const ast = parseCode(path, text);
-    const walk = (node: unknown, scope: string[], depth: number, wrapper?: { start: number; end: number }) => {
-      if (++inspected > 80_000 || depth > 100) throw new Error("SYMBOL_LIMIT");
-      if (!isNode(node)) return;
-      let name: string | undefined;
-      if (["FunctionDeclaration", "ClassDeclaration", "TSInterfaceDeclaration", "TSTypeAliasDeclaration", "TSEnumDeclaration"].includes(node.type)) name = identifier(node.id);
-      else if (node.type === "VariableDeclarator") name = identifier(node.id);
-      else if (["ClassMethod", "ObjectMethod", "ClassProperty", "ObjectProperty", "TSPropertySignature"].includes(node.type) && !node.computed) name = identifier(node.key);
-      else if (["ImportDeclaration", "ExportNamedDeclaration", "ExportAllDeclaration"].includes(node.type) && identifier(node.source))
-        name = `${node.type === "ImportDeclaration" ? "import" : "export"}:${identifier(node.source)}`;
-      const qualified = name ? [...scope, name] : scope;
-      if (name && typeof node.start === "number" && typeof node.end === "number")
-        symbols.push({ name: qualified.join("."), start: wrapper?.start ?? node.start, end: wrapper?.end ?? node.end,
-          sha256: digest(text.slice(wrapper?.start ?? node.start, wrapper?.end ?? node.end)) });
-      for (const [key, child] of Object.entries(node)) {
-        if (["loc", "extra", "comments", "leadingComments", "trailingComments", "tokens"].includes(key)) continue;
-        const outer = typeof node.start === "number" && typeof node.end === "number"
-          && (key === "declaration" && /^Export/.test(node.type) || key === "declarations" && node.type === "VariableDeclaration" && Array.isArray(child) && child.length === 1)
-          ? wrapper ?? { start: node.start, end: node.end } : undefined;
-        if (Array.isArray(child)) {
-          for (const item of child) if (isNode(item)) walk(item, qualified, depth + 1, outer);
-        } else if (isNode(child)) walk(child, qualified, depth + 1, outer);
-      }
-    };
-    walk(ast.program, [], 0);
-    return { state: "parsed" as const, symbols, ...moduleReferences(ast.program.body) };
-  } catch { return unsupported; }
+  try { return collectSymbols(parseCode(path, text), text); }
+  catch { return unsupported; }
 }
 
 /** 只跟踪 AST 能直接说明的导入别名和重导出，动态选择及通配重导出保持未知。 */
@@ -95,21 +98,30 @@ function outsideStructure(node: unknown, isInside: (start: number, end: number) 
     .map(([key, value]) => [key, outsideStructure(value, isInside)]).filter(([, value]) => value !== undefined));
 }
 
+// 进程内仅保留输入和结果的摘要，每个条目大小固定。调用方仍从基线和实际工作树重新读取源码、授权符号。
+const boundaryFingerprints = new Map<string, string>();
+const boundaryFingerprintLimit = 128;
+
 /** 比较授权符号以外的真实词法内容。忽略排版空白，保留注释、字符串和模板内容的差异。 */
 export function outsideBindings(path: string, text: string, selectors: string[]): string | undefined {
   if (!supported(path, text)) return undefined;
+  const key = digest(JSON.stringify([path, text, selectors]));
+  const previous = boundaryFingerprints.get(key);
+  if (previous !== undefined) return previous;
   try {
-    const parsed = codeSymbols(path, text);
-    if (parsed.state !== "parsed") return undefined;
-    const ranges = selectors.flatMap(selector => parsed.symbols.filter(symbol => symbol.name === selector));
     const ast = parseCode(path, text, true), tokens = ast.tokens ?? [];
     if (tokens.length > 80_000) return undefined;
+    const parsed = collectSymbols(ast, text);
+    const ranges = selectors.flatMap(selector => parsed.symbols.filter(symbol => symbol.name === selector));
     const inside = (start: number, end: number) => ranges.some(range => start >= range.start && end <= range.end);
     const outside = tokens.filter(token => token.start! < token.end! && !inside(token.start!, token.end!))
       .map(token => text.slice(token.start!, token.end!));
     // 只比较 Program 的真实内容，避免整文件刚好落在某个授权声明范围内时删掉 Program 壳。
     const structure = [outsideStructure(ast.program.directives, inside), outsideStructure(ast.program.body, inside)];
-    return digest(JSON.stringify([outside, structure, outside.length ? ast.program.sourceType : null]));
+    const fingerprint = digest(JSON.stringify([outside, structure, outside.length ? ast.program.sourceType : null]));
+    if (boundaryFingerprints.size >= boundaryFingerprintLimit) boundaryFingerprints.delete(boundaryFingerprints.keys().next().value!);
+    boundaryFingerprints.set(key, fingerprint);
+    return fingerprint;
   } catch { return undefined; }
 }
 

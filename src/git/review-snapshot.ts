@@ -30,6 +30,8 @@ export async function reviewSnapshot(
     hash = createHash("sha256"),
     delta: string[] = [];
   let total = 0;
+  // 脏工作树的接入记录按路径查找一次，避免每个变化文件再遍历全部基线。
+  const initialEntries = new Map(initial?.entries.map(entry => [entry.path, entry]));
   hash.update(JSON.stringify(["review-v2", baseline, paths]));
   if (mergeState) hash.update(JSON.stringify(["merge-recovery-v1", mergeState]));
   for (const path of paths) {
@@ -42,7 +44,7 @@ export async function reviewSnapshot(
     else if (entry.kind === "symlink")
       hash.update(JSON.stringify([path, "symlink", entry.target]));
     else hash.update(JSON.stringify([path, "missing"]));
-    const before = initial?.entries.find((item) => item.path === path);
+    const before = initialEntries.get(path);
     if (!before || entryIdentity(before) !== entryIdentity(entry))
       delta.push(path);
   }

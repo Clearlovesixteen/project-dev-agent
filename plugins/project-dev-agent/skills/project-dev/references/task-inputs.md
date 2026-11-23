@@ -4,7 +4,9 @@
 
 工作目录模式下，每次调用都要补充 `"project": "/absolute/current/repository"`。先用 `project_prepare` 检查状态；授权开发时传 `"apply": true`，首次及切换项目时会精确登记当前仓库并准备本地忽略规则，新版主动配置的 workspace 限制除外。返回 `state_ignored`、`worktree_clean`、`ready_to_open` 和 `active_task`。准备过程保留未提交改动；0.11 起 task_open 捕获接入内容基线，无需先提交。未解决合并冲突阻止普通任务；用户明确要求修复当前 merge 冲突时使用下述恢复任务。
 
-新一轮继续先 `task_check` 核对当前分支任务和归属；没有任务返回 `NO_ACTIVE_TASK`。跨聊天不能自动接管。指定 ID 可查看历史或其他分支任务，但不代表原基线适用。更新使用最新修订号。`project_prepare.task_recovery` 列出保留的其他分支任务及挂起记录，截断时会标明。
+延续已有需求且需要恢复任务时，用 `task_check(mode:"resume")` 核对当前工作树的任务归属和修订号。需要完整复核或获取 `review_snapshot` 时用 `mode:"review"`。没有任务返回 `NO_ACTIVE_TASK`。跨聊天不能自动接管。指定 ID 查看历史任务时仍需核对工作树与原基线。更新使用最新修订号。
+
+MCP 创建或更新任务时可传 `response_view:"compact"`。成功后直接沿用回执中的 `id`、`revision` 和 `phase`。需要详情时按 `details_request` 读取。省略此参数或传 `"full"` 时返回原本的完整记录。
 
 同一分支独立需求可由所属会话显式挂起旧任务：`task_update` 只传 `task_id`、`expected_revision`、`phase:"suspended"`、`suspend_reason`。恢复只传最新修订号与 `phase:"active"`，须在原分支且没有其他活跃任务；中止仍用 `aborted` 和原因。生命周期操作不能同时改业务内容，历史只追加，原基线不重写。
 
@@ -23,20 +25,24 @@
 }
 ```
 
-### 项目实现依据（0.9）
+### 项目实现依据
 
 上例是需求与验收的最小形状。实际编码前，Agent 还要在同一 `task_open` 中附 `implementation_basis`，或建任务后通过 `task_update` 保存：
 
 ```json
 {
   "implementation_basis": {
-    "references": [{"id":"existing","path":"src/实际参考文件.ts","sha256":"实际64位哈希","line":1,"quote":"该行实际原文"}],
+    "references": [{"id":"existing","path":"src/实际参考文件.ts","quote":"已读取的一行源码中的原文"}],
     "decisions": [{"id":"boundary","constraint":"本次适用的职责、复用或代码约定","implementation":"本次具体怎样实现及原因","reference_ids":["existing"],"acceptance_id":"behavior"}]
   }
 }
 ```
 
-哈希、路径和行文均为形状示例，不能照抄。引用最多12条，决策最多20条，每条引用须被实际决策使用。用户要求或默认约束可有空 `reference_ids`，但不能伪造来源；已有项目依据仍应读取和引用。确实没有可参考实现时，`references: []`，填写至少20字的 `absence_reason` 说明实际检索范围、结果和采用最小结构的原因。不能用该字段跳过已有实现；它是执行者的解释，不是工具证明已扫清项目。
+MCP 会在当前工作树内核对实际原文，并计算整份文件的 SHA-256。仅当原文匹配唯一一行时才自动定位行号。多行均匹配时补 1 起算的 `line`。也可提交旧版完整引用 `{id,path,quote,line,sha256}`，显式提供的行号和哈希仍要通过服务核验。仓库外的 SDD 不能作为仓库实现依据。每条引用都须对应实际决策，决策要关联本任务已有的验收 ID。引用最多 12 条，决策最多 20 条。确实没有可参考实现时传 `references: []`，用至少 20 字的 `absence_reason` 描述实际检索范围、结果及采用该方案的原因。
+
+若旧调用只提供 `path/reason` 或 `id/decision`，服务返回 `TASK_INPUT_INVALID` 和需要修正的字段。读取实际源码，补齐引用、约束、实现选择与验收关联后再提交。相同错误参数再次提交会收到 `TASK_INPUT_RETRY_STOPPED`。保留当前任务和已有版本，仅修改参数。遇到 `IMPLEMENTATION_REFERENCE_INVALID` 时重新核对对应文件的当前行文及指纹。
+
+对源码、验收或任务状态相关的错误，同一请求重复失败时会保留原错误码，并返回 `retry_same_input:false` 和 `required_action`。先完成所列动作，再提交。服务每次都重新检查实际状态，因此修复源码或执行验证后可以继续使用仍有效的原参数。
 
 服务读取真实文件，核对哈希与指定行原文，检查验收 ID 是否存在。任务内 `implementation_bases` 是追加历史，`implementation_policy`、`timing`、记录时间与快照由服务生成，工具输入不能伪造。`before_changes` 仅表示记录时相对任务基线无改动；`after_changes` 如实表示已有改动，不证明先前读过代码。依据和理解是不同层次，真实引用不自动证明设计取舍正确。
 

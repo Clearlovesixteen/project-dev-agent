@@ -14,6 +14,7 @@ const State = z.object({
   schema_version: z.literal(1), generation: z.uuid(), updated_at: z.number(),
   branch: z.string().nullable(), guard_seen: z.boolean(),
   context_id: z.string().regex(/^[a-f0-9]{64}$/).nullable(), context_at: z.number().nullable(),
+  basis_receipt: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null),
   context_ready: z.boolean(), context_turn: z.string().nullable(), task_id: z.string().nullable(), phase: z.string().nullable(),
   write_calls: z.number().int().nonnegative(), checked_calls: z.number().int().nonnegative(),
   check_outcome: z.enum(["ok", "incomplete"]).nullable(),
@@ -44,7 +45,7 @@ export class ParticipationStore {
   }
   private fresh(branch: string | null): ParticipationState {
     return { schema_version: 1, generation: randomUUID(), updated_at: Date.now(), branch, guard_seen: false,
-      context_id: null, context_at: null, context_ready: false, context_turn: null, task_id: null, phase: null,
+      basis_receipt: null, context_id: null, context_at: null, context_ready: false, context_turn: null, task_id: null, phase: null,
       write_calls: 0, checked_calls: 0, check_outcome: null, pending_tools: [], completed_tools: [], last_turn: null };
   }
   async read(project: string, interaction: InteractionContext, branch: string | null): Promise<ParticipationState | undefined> {
@@ -75,6 +76,14 @@ export class ParticipationStore {
     } finally { await release(); }
   }
 
+  /** 清除宿主压缩前已交付的开发依据，保留仍在途的修改与验收计数。 */
+  async resetContext(project: string, interaction: InteractionContext, branch: string | null) {
+    if (!await this.read(project, interaction, branch)) return;
+    await this.change(project, interaction, branch, state => {
+      state.basis_receipt = null; state.context_ready = false; state.context_at = null; state.context_id = null; state.context_turn = null;
+    });
+  }
+
   /** 只接受成功/部分成功的本插件真实返回，不接受调用方自报“已经使用插件”。 */
   async observedTool(project: string, interaction: InteractionContext, branch: string | null, tool: string,
     value: { outcome?: string; data?: Record<string, unknown> }) {
@@ -97,9 +106,9 @@ export class ParticipationStore {
       const taskId = typeof data.id === "string" ? data.id : typeof data.task_id === "string" ? data.task_id : undefined;
       if (tool.startsWith("task_") && taskId) {
         if (state.task_id !== taskId) {
-          state.write_calls = 0; state.checked_calls = 0; state.check_outcome = null; state.pending_tools = []; state.completed_tools = [];
+          state.basis_receipt = null; state.write_calls = 0; state.checked_calls = 0; state.check_outcome = null; state.pending_tools = []; state.completed_tools = [];
           // 新任务不能直接借用上一需求的查询记录。恢复同一任务仍按时间和本轮复核处理。
-          if (tool === "task_open" && state.context_turn !== interaction.turn_id) state.context_ready = false;
+          if (state.context_turn !== interaction.turn_id) state.context_ready = false;
         }
         state.task_id = taskId;
         if (typeof data.phase === "string") state.phase = data.phase;

@@ -117,6 +117,7 @@ export async function recordFeedback(
 }
 export async function feedbackRecords(
   files: ProjectFiles,
+  maximumRecords?: number,
 ): Promise<FeedbackRecord[]> {
   let directory: string;
   try {
@@ -125,17 +126,24 @@ export async function feedbackRecords(
     if (hasCode(error, "ENOENT")) return [];
     throw error;
   }
-  const records = [];
+  const names: string[] = [];
   let count = 0;
   for await (const entry of await opendir(directory)) {
     if (++count > 205)
       throw new AppError("FEEDBACK_LIMIT", "即时纠正目录超出读取上限");
     if (!entry.name.endsWith(".json")) continue;
+    names.push(entry.name);
+    // 先计数，超过摘要预算时不读取任何正文，也不对部分数据计算版本。
+    if (maximumRecords !== undefined && names.length > maximumRecords)
+      throw new AppError("FEEDBACK_LOOKUP_REQUIRED", "请使用 knowledge_search 查询当前范围的纠正和版本");
+  }
+  const records = [];
+  for (const name of names) {
     const value = FeedbackRecordSchema.parse(
-      JSON.parse(await files.read(`${DIRECTORY}/${entry.name}`, 65536)),
+      JSON.parse(await files.read(`${DIRECTORY}/${name}`, 65536)),
     );
     if (
-      entry.name !== `${value.input.id}.json` ||
+      name !== `${value.input.id}.json` ||
       value.fingerprint !== digest(JSON.stringify([value.input, value.source]))
     )
       throw new AppError("FEEDBACK_CORRUPT", "纠正记录身份或内容哈希不一致");
@@ -148,8 +156,9 @@ export async function feedbackContext(
   files: ProjectFiles,
   query = "",
   paths: string[] = [],
+  maximumRecords?: number,
 ) {
-  const all = await feedbackRecords(files),
+  const all = await feedbackRecords(files, maximumRecords),
     replaced = new Set(
       all.flatMap((item) =>
         item.input.supersedes_id ? [item.input.supersedes_id] : [],

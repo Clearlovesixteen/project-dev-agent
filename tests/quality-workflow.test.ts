@@ -168,6 +168,21 @@ test("缓存命中后仍拒绝链接与新出现的嵌套仓库，不绕过来�
   assert.ok(!(await mapFiles(files)).some(entry => entry.path.startsWith("src/")));
 });
 
+test("前部文件增长使复用尾部超出扫描总预算时保留部分覆盖", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), service = new UnderstandingService(binding);
+  const text = " ".repeat(500_000), first = join(binding.root, "000.md");
+  await writeFile(first, "initial");
+  const folder = join(binding.root, "zz-docs");
+  await mkdir(folder);
+  for (let i = 0; i < 159; i++) await writeFile(join(folder, `${i}.md`), text);
+  assert.equal((await service.scan({})).outcome, "ok");
+  await writeFile(first, " ".repeat(512_000));
+  const result = await service.scan({});
+  assert.equal(result.outcome, "incomplete");
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === "PROJECT_SCAN_LIMIT"));
+});
+
 
 test("任务的真实评测分组不能在结果出来后改组，列表截断明确返回", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);

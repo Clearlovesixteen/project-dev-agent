@@ -4,7 +4,7 @@ import { assertBaseline, assertStateIgnored } from "../git/index.js";
 import { TaskStore } from "../storage/task-store.js";
 import { ParticipationStore } from "../workflow/participation.js";
 import { Interaction, interactionOwner, type InteractionContext } from "../workflow/interaction.js";
-import { implementationBasisReview } from "../quality/implementation-basis.js";
+import { checkWriteReferences } from "../quality/implementation-basis.js";
 import { denyWrite, type NativeHookInput } from "./contracts.js";
 import { projectTool, toolArguments, toolCommandDecision, writeKind } from "./tool-policy.js";
 import { mergeRecoveryWrite } from "./merge-recovery-gate.js";
@@ -80,11 +80,11 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
     return stop("CONTEXT_QUERY_REQUIRED", `${explanation ?? ""}修改前请用本工作树调用 project_context 并阅读 implementation_context；索引缺失或过期时先运行 project_scan。`);
   }
   if (!task) return stop("TASK_BINDING_REQUIRED", "本分支没有活跃任务。先 task_open 保存本次需求、验收和项目实现依据，再记录关联修改清单。");
-  if (state.task_id !== task.id) { diagnostic.task_state = "not_bound"; return stop("TASK_BINDING_REQUIRED", "本会话尚未核对当前任务。相关任务用 task_check 恢复；新需求不得直接沿用不相关任务。"); }
+  if (state.task_id !== task.id) { diagnostic.task_state = "not_bound"; return stop("TASK_BINDING_REQUIRED", "本会话尚未核对当前任务。相关任务用 task_check(mode:\"resume\") 恢复；新需求不得直接沿用不相关任务。"); }
   diagnostic.stage = "turn";
   if (!interaction.turn_id || state.last_turn !== interaction.turn_id) {
     diagnostic.task_state = "not_confirmed_this_turn";
-    return stop("TASK_TURN_REVIEW_REQUIRED", "本轮尚未核对任务。继续同一需求先 task_check；范围变化重新查询 project_context 并更新影响清单，独立需求另建任务。");
+    return stop("TASK_TURN_REVIEW_REQUIRED", "本轮尚未核对任务。继续同一需求先 task_check(mode:\"resume\")；范围变化重新查询 project_context 并更新影响清单，独立需求另建任务。");
   }
   diagnostic.stage = "baseline";
   try { await assertBaseline(binding, task); diagnostic.baseline_state = "valid"; }
@@ -93,9 +93,9 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
   const basis = task.implementation_bases?.at(-1);
   if (!basis) diagnostic.basis_state = "missing";
   if (!basis) return stop("IMPLEMENTATION_BASIS_REQUIRED", "先读取现有能力，使用 task_update.implementation_basis 保存复用、模块化和本次实现选择及原文依据；不要另起已有封装。");
-  const review = await implementationBasisReview(binding, task, basis.review_snapshot);
-  diagnostic.basis_state = review.references.some(reference => reference.state === "stale") ? "stale" : "ready";
-  if (review.references.some(reference => reference.state === "stale"))
+  const references = await checkWriteReferences(binding, task, state.basis_receipt);
+  diagnostic.basis_state = references.valid ? "ready" : "stale";
+  if (!references.valid)
     return stop("IMPLEMENTATION_REFERENCE_STALE", "实现依据来源已失效。重新读取当前源码并追加 implementation_basis，保留原记录。");
   const recoveryGate = await mergeRecoveryWrite(input, binding, task, pluginRoot, diagnostic, targets);
   if (recoveryGate) return stop(recoveryGate.reason, recoveryGate.instruction);
@@ -125,7 +125,7 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
     diagnostic.target_scope = "within";
   }
   await store.change(binding.root, interaction, binding.branch, next => {
-    next.guard_seen = true;
+    next.guard_seen = true; next.basis_receipt = references.receipt;
     if (input.tool_use_id && !next.pending_tools.includes(input.tool_use_id)) next.pending_tools.push(input.tool_use_id);
   });
   diagnostic.stage = "ready"; diagnostic.decision = "allow"; diagnostic.required_action = "none";

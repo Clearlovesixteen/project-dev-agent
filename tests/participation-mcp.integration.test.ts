@@ -163,6 +163,48 @@ test("原生身份 → 实际 MCP 上下文与任务 → 修改前检查 → 修
   assert.match((nextTurn.hookSpecificOutput as any)?.permissionDecisionReason, /本轮尚未核对任务/);
 });
 
+test("正常写入复用当前源码的依据，配置变化和会话压缩分别撤销旧资格", async t => {
+  const s = await setup(t);
+  await prepareAuthWrite(s);
+  const store = new ParticipationStore(s.home), binding = await bindWorktree(s.fixture.path);
+  const guard = (id: string) => s.hook({ hook_event_name: "PreToolUse", tool_name: "apply_patch",
+    tool_use_id: id, tool_input: { patch: patchFor("src/auth.js") } });
+  assert.equal(denied(await guard("one")), false);
+  const first = await store.read(binding.root, s.session, binding.branch);
+  assert.match(first!.basis_receipt!, /^[0-9a-f]{64}$/);
+  assert.equal(denied(await guard("two")), false);
+  assert.equal((await store.read(binding.root, s.session, binding.branch))?.basis_receipt, first!.basis_receipt);
+  // 同一任务、同一个缓存：项目配置已排除原证据时必须拒绝。
+  await writeFile(join(s.fixture.path, ".project-dev/project.yaml"), 'schema_version: 1\nexclude_paths: ["AGENTS.md"]\n');
+  assert.match(JSON.stringify(await guard("excluded")), /依据来源已失效/);
+  await s.hook({ hook_event_name: "SessionStart", source: "compact" });
+  const compacted = await store.read(binding.root, s.session, binding.branch);
+  assert.equal(compacted?.context_ready, false); assert.equal(compacted?.basis_receipt, null);
+  assert.deepEqual(compacted?.pending_tools, ["one", "two"]);
+  assert.match(JSON.stringify(await guard("compact")), /project_context/);
+});
+
+test("跨轮续接不触发完整审查；保留待验收计数和范围，正式检查独立执行", async t => {
+  const s = await setup(t); await prepareAuthWrite(s);
+  const patch = { tool_name: "apply_patch", tool_use_id: "plan-write", tool_input: { patch: patchFor("src/auth.js") } };
+  assert.equal(denied(await s.hook({ hook_event_name: "PreToolUse", ...patch })), false);
+  await s.hook({ hook_event_name: "PostToolUse", ...patch, tool_response: "Success" });
+  s.session.turn_id = "another-turn";
+  const resume = await s.call("task_check", { mode: "resume" });
+  assert.equal(resume.code, "TASK_CONTINUATION_READY");
+  assert.equal((resume.data as any).quality_checked, false);
+  assert.equal((resume.data as any).review_snapshot, undefined);
+  const status = await new ParticipationStore(s.home).status(s.fixture.path, s.session);
+  assert.equal(status.state, "check_required"); assert.equal(status.checked_write_tool_calls, 0);
+  assert.equal(denied(await s.hook({ hook_event_name: "PreToolUse", ...patch, tool_use_id: "continued" })), false);
+  assert.equal(denied(await s.hook({ hook_event_name: "PreToolUse", ...patch, tool_input: { patch: patchFor("unplanned.txt") } })), true);
+  const review = await s.call("task_check");
+  assert.equal(typeof (review.data as any).review_snapshot, "string");
+  const events = (await new DiagnosticWriter(s.home).read()).events;
+  assert.ok(events.some(event => event.reason_code === "TASK_CONTINUATION_READY" && event.event_name === "tool.finished"));
+  assert.ok(!events.some(event => event.reason_code === "TASK_CONTINUATION_READY" && event.event_name === "quality.checked"));
+});
+
 test("只补本插件身份，拒绝伪装会话；旧 manual 自动迁移后保留新版停用选择", async t => {
   const s = await setup(t);
   const other = await s.hook({ hook_event_name: "PreToolUse", tool_name: "mcp__other__task_open", tool_input: { text: "other plugin" } });

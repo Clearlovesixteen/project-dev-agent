@@ -120,7 +120,7 @@ export class RuntimeSettings {
         hook_execution: "requires_host_verification",
         next_step: config?.mode === "manual" && config.activation_policy_version < ACTIVATION_POLICY_VERSION
           ? "新版首次运行会自动将旧 manual 升级为 auto，无需手动切换；若尚未完成，核对配置权限或锁后由下次启动重试。"
-          : "宿主须信任当前钩子定义；project_prepare 返回当前项目及本轮参与状态。" },
+          : "宿主信任钩子后，auto 在新会话及上下文压缩后交付开发入口。普通提示直接返回，实际修改前核对工作树与任务。" },
       diagnostics: { local: config?.diagnostics.local ?? true, upload: config?.diagnostics.upload ?? false,
         notice_version: config?.diagnostics.notice_version ?? null, endpoint: config?.diagnostics.endpoint ?? null,
         credential_configured: !!config?.diagnostics.write_token,

@@ -2,13 +2,11 @@ import { baselineContent } from "../git/workspace-baseline.js";
 import type { WorktreeBinding } from "../git/index.js";
 import type { Task } from "../domain/task.js";
 import { AppError } from "../domain/error.js";
-import { RelativePathSchema } from "../domain/common.js";
 import { ProjectFiles, hasCode } from "../storage/project-files.js";
 import { loadConfig } from "../knowledge/config.js";
 import { digest } from "../knowledge/document.js";
-import { readGit, decodeGitOutput } from "../git/command.js";
 import { mapFiles, readMap } from "../understanding/store.js";
-import { excluded, safeSource, MAX_SOURCE } from "../understanding/scan.js";
+import { excluded, safeSource } from "../understanding/scan.js";
 import {
   implementationContext,
   programFile,
@@ -28,7 +26,7 @@ export async function captureImplementationBaseline(binding: WorktreeBinding) {
         truncated: false,
       });
     const { config } = await loadConfig(files);
-    const entries = (await mapFiles(files)).filter(
+    const entries = (await mapFiles(files, map)).filter(
       (entry) => !excluded(entry.path, config),
     );
     const context = await implementationContext(files, entries, config);
@@ -58,21 +56,6 @@ export async function captureImplementationBaseline(binding: WorktreeBinding) {
   }
 }
 
-/** Git 基线读取不执行项目代码；仅允许已列出的真实项目路径，并继续遵循排除和容量限制。 */
-async function baselineText(
-  binding: WorktreeBinding,
-  head: string,
-  path: string,
-  tracked: Set<string>,
-): Promise<string> {
-  RelativePathSchema.parse(path);
-  if (!tracked.has(path)) return "";
-  const result = await readGit(binding.root, ["show", `${head}:${path}`]);
-  if (result.stdout.length > MAX_SOURCE)
-    throw new AppError("FILE_LIMIT", "基线文件超出复用检查容量");
-  return new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
-}
-
 /** 比较新增底层请求用法与任务开始前的统一入口，不能把本次新增封装作为“已有能力”。 */
 export async function requestReuseReview(
   binding: WorktreeBinding,
@@ -100,25 +83,7 @@ export async function requestReuseReview(
       truncated: false,
       limitation: "本次没有需要检查的生产代码路径。",
     };
-  const tracked = new Set(
-    decodeGitOutput(
-      (
-        await readGit(binding.root, [
-          "ls-tree",
-          "-r",
-          "--name-only",
-          "-z",
-          task.baseline_head,
-        ])
-      ).stdout,
-    )
-      .split("\0")
-      .filter(Boolean),
-  );
-  for (const entry of task.workspace_baseline?.entries ?? []) {
-    if (entry.kind === "file") tracked.add(entry.path);
-    else tracked.delete(entry.path);
-  }
+  // baselineContent 逐路径核对初始改动或固定提交，无需为每次审查枚举整个 Git 树。
   const baselineCache = new Map<string, Promise<string>>();
   const before = (path: string) => {
     let pending = baselineCache.get(path);
@@ -146,7 +111,7 @@ export async function requestReuseReview(
       const context = await implementationContext(
         files,
         (
-          await mapFiles(files)
+          await mapFiles(files, map)
         ).filter((entry) => !excluded(entry.path, config)),
         config,
         candidates,
@@ -158,8 +123,7 @@ export async function requestReuseReview(
             ...context.request_entries
               .filter(
                 (entry) =>
-                  entry.role === "shared_request_entry" &&
-                  tracked.has(entry.path),
+                  entry.role === "shared_request_entry",
               )
               .map((entry) => ({ path: entry.path, sha256: entry.sha256 })),
           ].map((entry) => [entry.path, entry]),
@@ -170,7 +134,7 @@ export async function requestReuseReview(
   }
   const established = [];
   for (const entry of entries) {
-    if (excluded(entry.path, config) || !tracked.has(entry.path)) continue;
+    if (excluded(entry.path, config)) continue;
     const original = await before(entry.path);
     if (httpUsage(original).size)
       established.push({ path: entry.path, sha256: digest(original) });
