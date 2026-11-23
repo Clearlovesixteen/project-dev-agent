@@ -1,5 +1,5 @@
 {
-  "version": "0.15.0-rc.1",
+  "version": "0.15.0",
   "node": ">=18.19.0",
   "business_model_mode": "writer",
   "dependencies": [
@@ -122,8 +122,8 @@
   "files": [
     {
       "path": ".codex-plugin/plugin.json",
-      "bytes": 946,
-      "sha256": "5c2d464955da21beecca0b360f12b37e157fc92e5532f29b0f83b376f7c82611"
+      "bytes": 941,
+      "sha256": "e345e2a416341f20bb8bf1915003ba05ef879855ee5f4145fff33d57f991fa90"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -202,13 +202,13 @@
     },
     {
       "path": "package.json",
-      "bytes": 337,
-      "sha256": "e49123be55e692aa3ba183d0cacf83148004b8e388c4e330b58ca3554d862390"
+      "bytes": 332,
+      "sha256": "4503574659ad22dd02106d7c025fbd05a3b1db0b7944f120595c2b34c65048d5"
     },
     {
       "path": "README.md",
-      "bytes": 2128,
-      "sha256": "9726437eb661df314caf31e7dfaf2e9b7739dbc8acf224f7962880cf054ff732"
+      "bytes": 2123,
+      "sha256": "e993bf8e5b2922a5b20d54977557b00c91f45d543538323206fa492cd315db59"
     },
     {
       "path": "runtime/behavior-reporter.mjs",
@@ -217,13 +217,13 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1869709,
-      "sha256": "ea1ddba17a2c50a36a0e6dc2cfc2fe9811242a451324c1f95946ed0778a4140e"
+      "bytes": 1869704,
+      "sha256": "d85dc303db5a9fa1fba70d898b808eab8a64b029112538b440006cf2fe072657"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 786243,
-      "sha256": "0dd76cf7400c565544c91e719832986f41eb76e11c6949bcc1e8991abc2a6db8"
+      "bytes": 786238,
+      "sha256": "4e0a0ee1a1b36b66317926d1180d1eafbfb4bf65ee33fa89d09c905a4853c719"
     },
     {
       "path": "runtime/symbol-index.mjs",
