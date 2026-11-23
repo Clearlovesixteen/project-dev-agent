@@ -56,6 +56,9 @@ test("调用样例保留真实导入、别名用法、当前 hash 和一基位�
   const consumer = "import {unrelated} from './other';\nimport {normalizeAddress as normalize} from '../shared/address';\nexport function saveAddress(input) {\n  return normalize(input);\n}\n";
   await f.add("src/checkout/form.ts", consumer, [{ specifier: "../shared/address", target: "src/shared/address.ts", line: 2 }]);
   const result = await implementationCandidates(f.files, f.entries, DEFAULT_CONFIG, ["src/refunds/new"], "normalizeAddress");
+  assert.equal(result.eligible_count, result.candidates.length);
+  assert.equal(result.truncated, false);
+  assert.equal(result.coverage_unknown, false);
   const item = result.candidates[0]!, example = item.consumers[0]!;
   assert.equal(item.position?.column, 17); assert.equal(example.sha256, digest(consumer)); assert.equal(example.source_state, "current");
   assert.equal(example.import_line, 2); assert.equal(example.usage?.line, 4); assert.equal(example.usage?.quote, "return normalize(input);");
@@ -79,6 +82,7 @@ test("无词法命中降级为结构线索，容量有限且不宣称不存在�
   for (let index = 0; index < 12; index++) await f.add(`src/shared/item-${index}.ts`, `export const sharedItem${index} = value => value;\n`, [], "shared");
   const result = await implementationCandidates(f.files, f.entries, DEFAULT_CONFIG, [], "完全没有的业务词");
   assert.equal(result.state, "structural_fallback"); assert.equal(result.candidates.length, 8); assert.equal(result.truncated, true);
+  assert.equal(result.eligible_count - result.candidates.length, 4); assert.equal(result.coverage_unknown, false);
   assert.ok(result.candidates.every(item => item.match_reasons[0]?.kind === "structural_fallback"));
   assert.match(result.limitations, /不证明.*不存在/);
   const empty = await implementationCandidates(f.files, [], DEFAULT_CONFIG, [], "未命中"); assert.equal(empty.state, "no_index_match");
@@ -92,4 +96,13 @@ test("project_context 普通查询也利用符号，全新目录上下文复用�
   assert.ok(normal.files.some((entry: any) => entry.path === "src/kernel.ts"));
   const added = (await service.context({ paths: ["src/modules/brand-new"], query: "calculateShipmentWindow" })).data as any;
   assert.equal(added.implementation_context.implementation_candidates.candidates[0]?.path, "src/kernel.ts");
+});
+
+
+test("空检索结果准确报告已知省略与未知覆盖", async t => {
+  const f = await fixture(t);
+  const result = await implementationCandidates(f.files, [], DEFAULT_CONFIG, [], "采购同步");
+  assert.equal(result.eligible_count, 0);
+  assert.equal(result.truncated, false);
+  assert.equal(result.coverage_unknown, false);
 });

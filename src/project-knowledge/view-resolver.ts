@@ -87,6 +87,11 @@ export function resolveKnowledgeView(input: { source_stamp: SourceStamp; snapsho
         ...compareFingerprints(candidate.value.dependency_fingerprints, sources),
         ...compareFingerprints(candidate.value.configuration_fingerprints, configuration),
       ];
+      // 新增配置也会改变模块解析或构建行为。旧格式没有完整配置基线，只检查已记录路径。
+      if (candidate.value.provenance) {
+        const known = new Set(candidate.value.configuration_fingerprints.map(item => item.path));
+        for (const [path, digest] of configuration) if (digest && !known.has(path)) reasons.push(`configuration_added:${path}`);
+      }
       if (candidate.value.source_fingerprints.length === 0) reasons.push("source_evidence_missing");
       return { ...candidate, reasons };
     });

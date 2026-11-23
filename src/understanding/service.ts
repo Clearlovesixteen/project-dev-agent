@@ -11,10 +11,12 @@ import { projectContext } from "./context.js";
 import { provideContext } from "../context/provider.js";
 import { renderProjectReport } from "./report.js";
 import { buildModel } from "./model-record.js";
-import { publishModelShadow, readModelSnapshot, readProjectKnowledge } from "../project-knowledge/service.js";
+import type { ModuleSnapshot } from "../project-knowledge/view-resolver.js";
+import { publishModelShadow, readProjectKnowledge } from "../project-knowledge/service.js";
 import { modelVisible, readWorktreeModels, worktreeModel } from "../project-knowledge/worktree-models.js";
 import { loadConfig } from "../knowledge/config.js";
 import { SavedModelSchema } from "./model-contracts.js";
+import { commonSnapshot, mergeModelPatch } from "./model-merge.js";
 
 const MODEL_SYNC_DIR = ".project-dev/local/model-sync";
 const ModelSyncMarkerSchema = z.object({
@@ -103,10 +105,11 @@ export class UnderstandingService {
   /** 保存有源码依据的模型候选；引用匹配只证明来源，不把语义结论自动确认为规则。 */
   async record(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
-      const request = ModelRecordInput.parse(input); await assertStateIgnored(this.binding);
+      let request = ModelRecordInput.parse(input); await assertStateIgnored(this.binding);
       return locked(this.files, async () => {
         const recoveryDiagnostics = await recoverModelSync(this.files);
-        const currentKnowledge = await readProjectKnowledge(this.binding);
+        const snapshotById = new Map<string, ModuleSnapshot>();
+        const currentKnowledge = await readProjectKnowledge(this.binding, { reviewedSnapshots: snapshotById });
         if (request.knowledge_view_token && request.knowledge_view_token !== currentKnowledge.view_token)
           throw new AppError("PROJECT_KNOWLEDGE_VIEW_STALE", "共享项目知识视图已变化，请重新查询 project_context 后再记录模型");
         if (currentKnowledge.state === "unavailable" || currentKnowledge.state === "needs_review" && !currentKnowledge.view_token)
@@ -122,14 +125,31 @@ export class UnderstandingService {
         const reviewed = [...new Set([request.base_snapshot_id, ...request.reviewed_snapshot_ids ?? []]
           .filter((id): id is string => !!id))];
         let nextRevision = request.expected_revision + 1;
+        let reviewedParents: typeof existing = [];
         if (reviewed.length) {
+          // 只沿本次已校验事务中的父链遍历，避免每走一层重新打开仓库并扫描整个对象索引。
+          const load = async (id: string) => {
+            const snapshot = snapshotById.get(id);
+            if (snapshot?.model_id !== request.id)
+              throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "此快照不属于当前项目事务及指定业务模型");
+            return snapshot;
+          };
           const parents = await Promise.all(reviewed.map(async id => {
-            const snapshot = await readModelSnapshot(this.binding, request.id, id);
+            const snapshot = await load(id);
             const model = worktreeModel(this.binding.root, snapshot.content, request.id);
             if (!model || !modelVisible(model, config))
               throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "复核快照内容不在当前项目可用范围");
             return model;
           }));
+          if (parents.length > 1) {
+            const ancestor = await commonSnapshot(reviewed, load);
+            const base = worktreeModel(this.binding.root, ancestor.content, request.id);
+            const modern = parents.filter(parent => parent.schema_version !== 1);
+            if (!base || base.schema_version === 1 || modern.length !== parents.length || !modelVisible(base, config))
+              throw new AppError("PROJECT_MODEL_MERGE_BASE", "合并必须使用可见且具备稳定规则 ID 的共同基线及父快照");
+            request = mergeModelPatch(request, base, modern);
+            reviewedParents = modern.slice(1);
+          }
           const local = existing.findIndex(model => model.id === request.id);
           if (local >= 0) existing.splice(local, 1);
           existing.push(parents[0]!);
@@ -137,7 +157,7 @@ export class UnderstandingService {
         } else if (shared.snapshotIds.has(request.id)) {
           reviewed.push(shared.snapshotIds.get(request.id)!);
         }
-        const model = await buildModel(this.files, this.binding, request, existing, nextRevision);
+        const model = await buildModel(this.files, this.binding, request, existing, nextRevision, reviewedParents);
         const serialized = model as unknown as Record<string, unknown>;
         const prior = existing.find(entry => entry.id === request.id);
         const persisted = await publishModelShadow(this.binding, serialized, {

@@ -44,18 +44,11 @@ async function behaviorReview(files: ProjectFiles, task: Task, record: BusinessP
   return cases;
 }
 
-/** 已验证的模型可以回写草案。范围、来源或真实行为不通过时，关闭和模型发布共用同一门槛。 */
-export async function businessPlanReview(binding: WorktreeBinding, task: Task, snapshot: string, changed: string[], execution: Execution) {
-  const record = task.business_plans?.at(-1);
+/** 查询中的已登记范围与最终验收使用相同的来源、规则修订和依赖检查。 */
+export async function businessPlanIssues(binding: WorktreeBinding, task: Task, record: BusinessPlanRecord,
+  knowledge: Awaited<ReturnType<typeof loadWorktreeModels>>["knowledge"],
+  all: Awaited<ReturnType<typeof loadWorktreeModels>>["models"]) {
   const deltas = activeBusinessDeltas(task);
-  const required = !!record || task.business_model_policy === 1 || deltas.some(delta => enhancedBusinessDelta(delta.input)
-    || !!SavedRuleV3.safeParse(delta.before_rule).data?.semantics);
-  if (!required && !task.acceptance_criteria.some(item => item.business_check)) return { state: "not_applicable" as const, required: false };
-  const files = new ProjectFiles(binding.root);
-  const { knowledge, models: all } = await loadWorktreeModels(binding, files);
-  const enhancedAcceptance = task.acceptance_criteria.some(item => item.business_check && all.some(model => model.id === item.business_check!.model_id
-    && model.schema_version === 3 && model.rules.some(rule => rule.id === item.business_check!.rule_id && !!rule.semantics)));
-  if (!record) return required || enhancedAcceptance ? { state: "missing" as const, required: true } : { state: "not_applicable" as const, required: false };
   const issues: string[] = [];
   if (knowledge.state === "unavailable") issues.push("project_knowledge_unavailable");
   if (knowledge.modules?.some(item => ["ambiguous", "partial"].includes(item.state) && record.input.rules.some(rule => rule.model_id === item.model_id)))
@@ -74,10 +67,33 @@ export async function businessPlanReview(binding: WorktreeBinding, task: Task, s
         || !delta && current && saved.dependency_fingerprint !== dependencyFingerprint(current)) issues.push(`rule_changed:${ruleKey(ref)}`);
     } catch { issues.push(`rule_unavailable:${ruleKey(ref)}`); }
   }
+  return issues;
+}
+
+/** 已验证的模型可以回写草案。范围、来源或真实行为不通过时，关闭和模型发布共用同一门槛。 */
+export async function businessPlanReview(binding: WorktreeBinding, task: Task, snapshot: string, changed: string[], execution: Execution) {
+  const record = task.business_plans?.at(-1);
+  const deltas = activeBusinessDeltas(task);
+  const required = !!record || task.business_model_policy === 1 || deltas.some(delta => enhancedBusinessDelta(delta.input)
+    || !!SavedRuleV3.safeParse(delta.before_rule).data?.semantics);
+  if (!required && !task.acceptance_criteria.some(item => item.business_check)) return { state: "not_applicable" as const, required: false };
+  const files = new ProjectFiles(binding.root);
+  const focusRules = new Set(record?.input.rules.map(rule => rule.model_id + "/" + rule.rule_id));
+  const { knowledge, models: all } = await loadWorktreeModels(binding, files, focusRules);
+  const enhancedAcceptance = task.acceptance_criteria.some(item => item.business_check && all.some(model => model.id === item.business_check!.model_id
+    && model.schema_version === 3 && model.rules.some(rule => rule.id === item.business_check!.rule_id && !!rule.semantics)));
+  if (!record) return required || enhancedAcceptance ? { state: "missing" as const, required: true } : { state: "not_applicable" as const, required: false };
+  const issues = await businessPlanIssues(binding, task, record, knowledge, all);
   const boundary = await businessBoundary(binding, task, record, changed);
   const scenarios = await behaviorReview(files, task, record, execution, snapshot);
   const passed = !issues.length && boundary.state === "checked" && scenarios.every(item => item.state === "passed");
-  return { state: passed ? "checked" as const : "pending" as const, required: true, issues, boundary, scenarios,
+  // 业务计划会主动修改部分依据；给出排障入口即可，实际门槛继续使用已有计划和命名测试。
+  const pending = knowledge.rule_reviews;
+  const relevant = pending?.items.filter(item => focusRules.has(item.model_id + "/" + item.rule_id)) ?? [];
+  return { ...(pending ? { advisory: { rule_reviews: {
+    current_task: relevant.map(({ review_id, model_id, rule_id, kind, path }) => ({ review_id, model_id, rule_id, kind, path })),
+    remaining: pending.items.length + pending.omitted - relevant.length,
+  } } } : {}), state: passed ? "checked" as const : "pending" as const, required: true, issues, boundary, scenarios,
     plan_fingerprint: record.fingerprint, input_items: record.input.input_items.map(({ id, kind, source_id, acceptance_ids }) => ({ id, kind, source_id, acceptance_ids })),
     limitation: "范围检查覆盖任务基线与已绑定代码位置。场景结果以当前快照上的命名测试为依据，断言是否完整仍需核对。" };
 }

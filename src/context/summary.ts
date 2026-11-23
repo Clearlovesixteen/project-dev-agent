@@ -22,16 +22,30 @@ export function compactContext(data: Record<string, any>) {
       unresolved: (data.project_knowledge.unresolved ?? []).slice(0, 8),
     } : undefined,
     business_links: (data.business_graph?.edges ?? []).slice(0, 4),
-    truncated: true,
+    truncated: false,
   };
 }
 
 /** JSON 始终保持完整；按条目裁剪，不能截出半条业务规则或半个 UTF-8 字符。 */
 export function boundedSummary(data: Record<string, any>, maximum = 4_000): string {
   const summary = compactContext(data);
-  for (const list of [summary.business_links, summary.implementation.candidates, summary.implementation.request_entries, summary.implementation.shared_entries,
-    summary.files, summary.implementation.examples, summary.models, summary.implementation.project_instructions]) {
-    while (Buffer.byteLength(JSON.stringify(summary)) > maximum && list.length) list.pop();
+  const source = data.implementation_context ?? {};
+  const groups = [
+    [summary.implementation.examples, source.examples], [summary.files, data.files],
+    [summary.implementation.shared_entries, source.shared_entries], [summary.implementation.request_entries, source.request_entries],
+    [summary.implementation.candidates, source.implementation_candidates?.candidates], [summary.business_links, data.business_graph?.edges],
+    [summary.models, data.models], [summary.implementation.project_instructions, source.project_instructions],
+  ];
+  summary.truncated = !!(data.files_truncated || data.next_model_offset != null || data.business_graph?.truncated || source.truncated
+    || source.implementation_candidates?.truncated || groups.some(([items, original]) => items.length < (original?.length ?? 0))
+    || (data.models ?? []).some((model: any) => (model.rule_count ?? model.rules?.length ?? 0) > 2)
+    || (data.project_knowledge?.unresolved?.length ?? 0) > 8);
+  // 先保留每类首个来源，再按剩余预算裁剪。按整条裁剪，不能截断符号或半条业务依据。
+  for (const reserve of [1, 0]) for (const [items] of groups) {
+    while (items.length > reserve && Buffer.byteLength(JSON.stringify(summary)) > maximum) {
+      items.pop();
+      summary.truncated = true;
+    }
   }
   return JSON.stringify(summary);
 }

@@ -36,6 +36,10 @@ function wrapped(words: ShellWord[], depth: number): CommandDecision | undefined
 /** 静态读取链要求每个片段都只读；任何写入或未知片段都不能借读取前缀获得放行。 */
 export function classifyCommand(command: unknown, dialect: ShellDialect, depth = 0): CommandDecision {
   if (typeof command !== "string" || depth > 3) return decision("unknown", "COMMAND_UNKNOWN_LIMIT", dialect);
+  // 仅识别单个 rg --files 后的一组静态子目录。无选项、变量、嵌套、范围表达式或命令链。
+  if (dialect === "posix" && command.length <= 4096 &&
+    /^rg[ \t]+--files[ \t]+(?:[A-Za-z0-9_][\w.-]*\/)+\{[A-Za-z0-9_][\w.-]*(?:,[A-Za-z0-9_][\w.-]*){1,31}\}$/.test(command))
+    return decision("read_only", "COMMAND_READ_ONLY_SINGLE", dialect);
   const syntax = shellSyntax(command, dialect);
   if (syntax.state === "unknown") return decision("unknown", `COMMAND_UNKNOWN_${syntax.reason}`, dialect);
   if (syntax.tokens.some(token => token.kind === "operator" && token.value.includes(">"))) return decision("write", "COMMAND_WRITE_REDIRECTION", dialect);

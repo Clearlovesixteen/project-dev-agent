@@ -38,6 +38,8 @@ import {
 } from "./quality/business-deltas.js";
 import { BusinessDeltaApplyInputSchema, enhancedBusinessDelta } from "./quality/business-delta-contracts.js";
 import { assertEnhancedModelWrites } from "./runtime/business-model-release.js";
+import { guidanceEnabled } from "./runtime/guidance-release.js";
+import { VERSION } from "./version.js";
 import { IdSchema } from "./domain/common.js";
 import { validationRuns } from "./quality/validation-store.js";
 import {
@@ -66,7 +68,7 @@ import {
   TaskUpdateInputSchema,
 } from "./tools/inputs.js";
 import { ProjectFiles } from "./storage/project-files.js";
-import { loadKnowledge, sourceStates } from "./knowledge/repository.js";
+import { loadKnowledge, knowledgeSourceChecker } from "./knowledge/repository.js";
 import { reviewSnapshot } from "./git/review-snapshot.js";
 import { captureMergeRecovery, assertMergeResolved, assertMergeRecovery } from "./git/merge-recovery.js";
 import { RequirementGroupStore } from "./coordination/requirement-groups.js";
@@ -214,7 +216,8 @@ export class TaskService {
           ? "INVALID_INPUT"
           : "OPERATION_FAILED";
       const message = error instanceof Error ? error.message : String(error);
-      return { outcome: "error", code, diagnostics: [{ code, message }] };
+      return { outcome: "error", code, diagnostics: [{ code, message }],
+        ...(error instanceof AppError && error.data ? { data: error.data } : {}) };
     }
   }
 
@@ -430,7 +433,7 @@ export class TaskService {
   }
 
   /** 校验任务更新；实际落盘、版本递增和并发互斥由 TaskStore 负责。 */
-  async update(input: unknown): Promise<ToolResult> {
+  async update(input: unknown, includeClosureReceipt = false): Promise<ToolResult> {
     return this.execute(async () => {
       const request = TaskUpdateInputSchema.parse(input);
       const prior = await this.store.load(request.task_id);
@@ -467,6 +470,7 @@ export class TaskService {
       if (request.knowledge_versions?.length) {
         const files = new ProjectFiles(this.binding.root);
         const loaded = await loadKnowledge(files);
+        const checkSources = knowledgeSourceChecker(files, loaded.config);
         for (const version of request.knowledge_versions) {
           // 已使用版本是历史依据，源码修改后仍保留；新引入的知识版本必须重新核验。
           if (
@@ -488,7 +492,7 @@ export class TaskService {
             );
           if (
             entry.knowledge.status !== "confirmed" ||
-            (await sourceStates(files, entry.knowledge)).some(
+            (await checkSources(entry)).some(
               (source) => !["current", "attested"].includes(source.state),
             )
           ) {
@@ -521,6 +525,8 @@ export class TaskService {
       }
       // 先在任务文件锁外完成 Git、模型、验证和需求审查。提交阶段只做修订号
       // 与不可变字段核验，避免一个慢任务把同一工作树的恢复/读取全部阻塞。
+      // 只从本次实际执行的关闭审查摘取结果，任务持久化及完整响应沿用原结构。
+      let closureReceipt: Record<string, unknown> | undefined;
       const candidate = await (async (current) => {
           if (request.phase !== "aborted") assertEnhancedModelWrites(!!request.business_plan || !!current.business_model_policy
             || !!current.business_plans?.length || !!current.business_deltas?.some(delta => enhancedBusinessDelta(delta.input)));
@@ -660,6 +666,7 @@ export class TaskService {
               throw new AppError(
                 "IMPLEMENTATION_BASIS_REVIEW_REQUIRED",
                 `请在本次 task_update 将受影响的验收项重开为 pending，再保存依据并复核：${blocking.map(item => item.id).join("、")}`,
+                { acceptance_ids: blocking.map(item => item.id) },
               );
             }
             if ((bases?.length ?? 0) >= 10)
@@ -786,9 +793,16 @@ export class TaskService {
             }
             const execution = await validationReview(this.binding, next, snapshot.hash, snapshot.paths);
             assertValidationReview(execution);
-            assertBusinessPlan(await businessPlanReview(this.binding, next, snapshot.hash, snapshot.paths, execution));
+            const business = await businessPlanReview(this.binding, next, snapshot.hash, snapshot.paths, execution);
+            assertBusinessPlan(business);
             await assertFeedback(this.binding, next, snapshot.hash);
             await assertRequirementReview(this.binding, next);
+            if (includeClosureReceipt && guidanceEnabled()) closureReceipt = {
+              version: VERSION, review_snapshot: snapshot.hash, repository: this.binding.repo_identity, worktree: this.binding.root,
+              branch: this.binding.branch, validation_state: execution.state,
+              plan_version: execution.plan_version, business_plan_state: business.state,
+              checks: execution.checks.map(check => ({ id: check.id, state: check.state, run_id: check.run_id })),
+            };
           }
           return next;
         })(prior);
@@ -797,7 +811,9 @@ export class TaskService {
       return {
         outcome: "ok",
         code: "TASK_UPDATED",
-        data: sync.task,
+        data: closureReceipt ? { ...sync.task, closure_receipt_v1: {
+          ...closureReceipt, task_id: sync.task.id, revision: sync.task.revision,
+        } } : sync.task,
         diagnostics: sync.diagnostics,
       };
     });

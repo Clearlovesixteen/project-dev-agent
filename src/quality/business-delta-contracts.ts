@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IdSchema, ReviewSnapshotSchema, TextSchema } from "../domain/common.js";
 import { BusinessRuleV3, ModelMetadata, ModelSource, SavedRule, SavedRuleV3 } from "../understanding/model-contracts.js";
+import { ScenarioRetirement } from "../understanding/scenario-retirement.js";
 
 export const BusinessDeltaCheckSchema = z.object({ delta_id: IdSchema, delta_fingerprint: ReviewSnapshotSchema, scenario_id: IdSchema }).strict();
 export type BusinessDeltaCheck = z.infer<typeof BusinessDeltaCheckSchema>;
@@ -14,7 +15,10 @@ export const BusinessDeltaInputSchema = z.object({
   supersedes_id: IdSchema.optional(), reason: TextSchema,
   acceptance_ids: z.array(IdSchema).min(1).max(20),
   proposed_rule: BusinessRuleV3.optional(), sources: z.array(ModelSource).min(1).max(10),
+  scenario_retirements: z.array(ScenarioRetirement).max(30).optional(),
 }).strict().superRefine((input, ctx) => {
+  if (input.scenario_retirements?.some(item => input.operation !== "modify" || item.rule_id !== input.rule_id ||
+    !input.sources.some(source => source.id === item.source_id))) ctx.addIssue({ code: "custom", message: "场景退役须关联本次修改的规则和草案需求来源" });
   if (new Set(input.acceptance_ids).size !== input.acceptance_ids.length || new Set(input.sources.map(source => source.id)).size !== input.sources.length) ctx.addIssue({ code: "custom", message: "草案验收和来源 ID 不能重复" });
   if (input.sources.some(source => source.kind === "code")) ctx.addIssue({ code: "custom", message: "草案需求来源使用文档或任务原文，代码前镜像由服务读取" });
   if (input.operation === "remove" ? input.proposed_rule !== undefined : !input.proposed_rule) ctx.addIssue({ code: "custom", message: "新增或修改需要预期规则；删除不填写预期规则" });

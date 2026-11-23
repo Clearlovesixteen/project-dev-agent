@@ -20,6 +20,9 @@
 
 `project_context` 和 `knowledge_search` 优先返回与当前源码唯一匹配的共享版本。遇到歧义时用 `model_snapshot_id` 查看历史候选；人工核对后以 `base_snapshot_id` 及 `reviewed_snapshot_ids` 记录修订来源，携带当前 `knowledge_view_token`。修订号用于并发校验和追溯，不代表跨分支的适用顺序。来源保留仓库身份、来源工作树、提交与证据版本；查询仍读取当前工作树源码核对哈希、原文和代码绑定。分支不同本身不等于失效，提交相同也不证明未提交改动一致。`needs_review` 是当前证据需要核对，不能解释成模型不存在，也不能靠重新扫描或换哈希宣告适用。
 
+- 需要复核时，从详细 `project_context.project_knowledge.rule_reviews.items` 获取规则、路径、符号线索、关联场景和两个版本的指纹。相同工作树再次读取同一变化会得到相同 `review_id`。收尾时优先查看 `task_check.quality.business_plan.advisory.rule_reviews.current_task`。索引按当前证据派生，来源恢复或修订核验后重新计算。
+- 整合多个已核对的快照时，服务沿父链寻找共同基线，再按规则、关系及场景 ID 合入独立变更。出现 `PROJECT_MODEL_MERGE_CONFLICT` 时，沿错误中的条目核对各候选和当前代码，在 patch 中明确提交选择。
+
 ## 先查相关内容
 
 - `project_scan { project }` 刷新结构索引，重复扫描复用未变化的提取结果；不会重写业务规则或清除待复核状态。
@@ -100,6 +103,7 @@ v1 模型按需完整迁移到 v2 或 v3，沿用 ID 和最新 `expected_revisio
 示例空数组必须换成实际更新项；空修订会被拒绝。只提交本次实际核对的完整条目，省略的条目保留：
 
 - `upsert_rules` / `remove_rule_ids`：按稳定 ID 更新或删除规则。
+- 修改现有规则时保留原有 cases 和 preserves。规格明确要求删除或改名时，随 patch 或业务草案提交 `scenario_retirements`，每项填写 `rule_id`、`kind`（case 或 preserve）、原 `id`、`reason` 和 `source_id`；改名另填新条目的 `replacement_id`。业务草案的来源应定位到本次规格或任务原文，并为退役项单独绑定验收。
 - `upsert_relations` / `remove_relation_ids`：更新或删除业务关系。
 - `upsert_sources` / `remove_source_ids`：更新或删除来源；被规则或关系引用的来源不能直接删除。
 - `metadata`：只包含需修订的 `module/title/scope/summary/entities/flows/related_paths/questions`。其中数组是该字段的完整新值，先读旧值再合并，不能丢失既有例外或问题。

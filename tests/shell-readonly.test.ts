@@ -38,6 +38,7 @@ test("只读命令链、宿主 shell 包装和 Git 工作目录参数不会进�
     'sed -n \'1,20p\' src/index.js | head -n 3',
     'nl -ba src/index.js', 'cat src/index.js | sed -n \'1,20p\'',
     'nl -ba src/index.js | sed -n \'1,20p\'', 'git status --short && nl -ba src/index.js',
+    'rg --files src/{hooks,context}', 'sed -n \'4,9p;12,19p\' src/main.ts',
     'bash -lc \'nl -ba src/index.js | head -n 20\'',
   ]) await t.test(command, () => assert.equal(kind(command), undefined));
 });
@@ -45,6 +46,8 @@ test("只读命令链、宿主 shell 包装和 Git 工作目录参数不会进�
 test("管道中含写入、重定向和执行扩展时仍进入修改检查", async t => {
   for (const command of [
     'rg "load|invoke" src > result.txt', 'rg load src | tee result.txt',
+    'rg --files src/{hooks,context} > out.txt', 'rg --files src/{hooks,$dir}',
+    "sed -n '1,4p;w out.txt' src/main.ts",
     'cat src/index.js; rm src/index.js', 'cat src/index.js && node -e "write()"',
     'rg --pre=node load src', 'rg --pre node load src',
     'rg --hostname-bin=/tmp/script load src', 'sed -i "s/a/b/" src/index.js',

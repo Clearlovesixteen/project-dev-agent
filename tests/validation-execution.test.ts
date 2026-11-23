@@ -9,6 +9,7 @@ import { bindWorktree } from "../src/git/index.js";
 import { TaskService } from "../src/task-service.js";
 import { TaskSchema } from "../src/domain/task.js";
 import { runValidation } from "../src/quality/validation-runner.js";
+import { compactTaskReceipt } from "../src/tools/task-receipt.js";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 import { withImplementationBasis } from "./helpers/implementation-basis.js";
 const execute = promisify(execFile);
@@ -20,13 +21,13 @@ async function setup(t: {after(action: () => Promise<void>): void}, code = "cons
   await writeFile(join(fixture.path,"src/new-business.js"), "// 业务入口沿用既有职责边界。\nexport const entry = 1;\n");
   return {fixture,binding,service,task};
 }
-async function close(service: TaskService, task: any) {
+async function close(service: TaskService, task: any, receipt = false) {
   const checked = (await service.check({})).data as any;
   const review = {status:"checked", reviewed_by:"fixture", evidence:[{kind:"manual",reference:"src/new-business.js",summary:"人工检查当前职责与代码"}]};
   return service.update({task_id:task.id,expected_revision:task.revision,phase:"closed",review_snapshot:checked.review_snapshot,
     acceptance_criteria:task.acceptance_criteria.map((item:any)=>({...item,...review})),
     change_items:checked.changed_paths.map((path:string,index:number)=>({id:`change-${index}`,target_path:path,action:"modify",requirement:"当前改动",rationale:"明确涉及本次需求",sources:[{kind:"code",reference:path}],...review})),
-    validations:[{id:"fake",description:"调用方自报不能替代运行",outcome:"passed",evidence:review.evidence}]});
+    validations:[{id:"fake",description:"调用方自报不能替代运行",outcome:"passed",evidence:review.evidence}]}, receipt);
 }
 
 test("真实检查未运行时，自报 passed 和完整验收不能关闭生产代码任务", async t => {
@@ -43,7 +44,16 @@ test("CLI 执行器实际运行并保存真实退出码，MCP 可核对并用于
   assert.equal(result.code,"VALIDATION_PASSED"); assert.equal(result.data.exit_code,0);assert.match(result.data.output,/检查确实执行/);
   const saved=JSON.parse(await readFile(result.data.log_reference,"utf8"));assert.equal(saved.id,result.data.id);
   assert.equal(((await service.check({})).data as any).quality.execution.state,"checked");
-  assert.equal((await close(service,task)).outcome,"ok");
+  const closure = compactTaskReceipt(await close(service,task,true));
+  assert.equal(closure.outcome,"ok");
+  const receipt = (closure.data as any).closure_receipt_v1;
+  assert.equal(receipt.task_id,task.id); assert.equal(receipt.revision,task.revision+1);
+  assert.equal(receipt.review_snapshot,result.data.end_snapshot); assert.equal(receipt.validation_state,"checked");
+  assert.equal(receipt.plan_version,result.data.plan_version); assert.equal(receipt.worktree,result.data.worktree_path);
+  assert.deepEqual(receipt.checks,[{id:"syntax",state:"passed",run_id:result.data.id}]);
+  // 回执本身不进入任务历史，日后重新打开工作树仍须按当时的快照核验。
+  const stored = JSON.parse(await readFile(join(fixture.path,".project-dev/local/tasks",task.id+".json"),"utf8"));
+  assert.equal(stored.closure_receipt_v1,undefined);
 });
 test("非零退出、超时与启动失败如实保留，不能通过任务验收",async t=>{
   for(const [code,state,timeout] of [["process.exit(7)","failed",10000],["setTimeout(()=>{},10000)","timed_out",100]] as const){

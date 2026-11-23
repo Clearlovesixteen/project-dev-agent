@@ -40,7 +40,9 @@ export function compactKnowledge(result: ToolResult | undefined, support?: Suppo
   const historyLookup = !!history && (history.truncated || hints.truncated || history.hints.some(hint => hint.potential_conflicts.length));
   const feedbackLookup = !!feedback && (feedback.truncated || corrections.truncated);
   const lookup = rulesLookup || historyLookup || feedbackLookup;
-  return { state, results: rules.items, notices: notices.items, rules_lookup_required: rulesLookup,
+  const truncated = !!source?.truncated || !!source?.notices_truncated || rules.truncated || notices.truncated
+    || !!history?.truncated || hints.truncated || !!feedback?.truncated || corrections.truncated;
+  return { state, truncated, results: rules.items, notices: notices.items, rules_lookup_required: rulesLookup,
     history: { state: history?.state ?? state, hints: hints.items, lookup_required: historyLookup },
     feedback: { state: feedback?.state ?? state, version: excludedPaths ? null : feedback?.version ?? null, items: corrections.items,
       ...(excludedPaths ? { excluded_path_count: excludedPaths, scope_action: "当前范围含项目排除路径，所列纠正仅针对允许路径；请核对任务范围后再取版本。" } : {}),

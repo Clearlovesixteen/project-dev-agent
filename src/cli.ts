@@ -98,7 +98,11 @@ const HELP = `project-dev-agent — Codex 插件 v${VERSION}
     将历史候选导出到现有的显式知识审查流程。
   knowledge search --project <工作区绝对路径> --query <关键词>
     查找当前有效的已确认项目知识，并提示来源过期的待审查内容。
-  knowledge review --project <工作区绝对路径> --file <Markdown 相对路径> --reviewer <姓名>
+  team-rules enable --project <工作区绝对路径>
+    创建此仓库的团队规则启用标记，由维护者通过 Git 共享。
+  team-rules export --project <工作区绝对路径> --model-id <模型 ID> --rule-id <规则 ID>
+    选定一条已观察的模型规则，输出可供审核的本地草稿。
+  knowledge review --project <工作区绝对路径> --file <相对路径> --reviewer <审查者代号>
     审查者显式操作：确认已解决疑问的草稿，并为本地来源生成快照。
   sample create --destination <新目录>
     创建独立的 Git 示例，不修改现有项目。
@@ -345,6 +349,16 @@ async function main(): Promise<void> {
   ) {
     if (!values.project) throw new Error("project init 需要 --project 参数");
     print(await initializeProject(values.project, values.apply));
+    return;
+  }
+  // 团队规则配置和导出都是维护者操作，不加入日常 MCP 工具调用。
+  if (positionals.length === 2 && positionals[0] === "team-rules") {
+    if (!values.project) throw new Error("team-rules 需要 --project");
+    const { enableTeamRules, exportTeamRule } = await import("./knowledge/team-rule-export.js");
+    if (positionals[1] === "enable") print(await enableTeamRules(values.project));
+    else if (positionals[1] === "export" && values["model-id"] && values["rule-id"]?.length === 1)
+      print(await exportTeamRule(values.project, values["model-id"], values["rule-id"][0]!));
+    else throw new Error("请使用 team-rules enable 或 team-rules export --model-id <模型ID> --rule-id <规则ID>");
     return;
   }
   if (

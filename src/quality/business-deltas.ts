@@ -47,6 +47,8 @@ import {
 } from "./business-delta-contracts.js";
 import { publishModelShadow, readModelSnapshot, readProjectKnowledge } from "../project-knowledge/service.js";
 import { loadWorktreeModels, modelVisible, worktreeModel } from "../project-knowledge/worktree-models.js";
+import { checkScenarioRetirements } from "../understanding/scenario-retirement.js";
+import { SavedRuleV3 } from "../understanding/model-contracts.js";
 
 export type BusinessDeltaTask = Pick<
   Task,
@@ -148,6 +150,8 @@ export function businessDeltaScenarios(record: BusinessDeltaRecord) {
           ...rule!.conditions.map((text) => ({ kind: "boundary", text })),
           ...rule!.exceptions.map((text) => ({ kind: "exception", text })),
         ];
+  for (const item of record.input.scenario_retirements ?? []) definitions.push({ kind: "retirement",
+    text: `核对${item.kind}/${item.id} 的退役：${item.reason}${item.replacement_id ? `；替代场景 ${item.replacement_id}` : ""}` });
   return definitions.map((definition, index) => ({
     kind: definition.kind,
     ...(definition.case_id ? { case_id: definition.case_id } : {}),
@@ -288,6 +292,8 @@ export async function recordBusinessDeltas(
         "BUSINESS_DELTA_CONFLICT",
         "草案基准修订或规则指纹不一致，请重新读取当前模型",
       );
+    if (raw.operation === "modify") checkScenarioRetirements(raw.rule_id, before ? [SavedRuleV3.parse(before).semantics].flatMap(item => item ?? []) : [],
+      raw.proposed_rule?.semantics, raw.scenario_retirements ?? [], new Set(raw.sources.map(item => item.id)));
     if (raw.proposed_rule?.semantics) {
       const semantics = raw.proposed_rule.semantics;
       const references = [semantics, ...semantics.cases, ...semantics.preserves, ...(raw.proposed_rule.bindings ?? [])];
@@ -786,7 +792,17 @@ export async function applyBusinessDelta(
         "该规则仍被业务关系引用，请先明确修订关联关系，不能隐式删除",
       );
     // 不重写其他规则共用的来源，避免局部回写改变其解释或偷偷刷新依据。
-    for (const source of input.sources) {
+    // 退役的规格依据随新修订保留，不能把代码观察冒充需求废止决定。
+    const retirements = prior ? [] : record.input.scenario_retirements ?? [];
+    const retirementIds = new Set(retirements.map(item => item.source_id));
+    const modelSources = [...input.sources];
+    for (const source of record.input.sources.filter(item => retirementIds.has(item.id))) {
+      const existingSource = modelSources.find(item => item.id === source.id);
+      if (existingSource && !same(existingSource, source))
+        throw new AppError("BUSINESS_DELTA_SOURCE_SHARED", "退役依据和实现依据的 ID 冲突，请使用独立 ID");
+      if (!existingSource) modelSources.push(source);
+    }
+    for (const source of modelSources) {
       const previous = model?.sources.find((item) => item.id === source.id);
       if (
         previous &&
@@ -831,7 +847,7 @@ export async function applyBusinessDelta(
     };
     await save(files, path, journal);
     // 删除后的复核只重新核对停用证据；不再次删除规则，也不扩大到模型退役。
-    const sourcePaths = input.sources.flatMap(source => sourcePath(source) ? [sourcePath(source)!] : []);
+    const sourcePaths = modelSources.flatMap(source => sourcePath(source) ? [sourcePath(source)!] : []);
     const published = removing && prior && model ? model : ((await recordModel(files, binding, {
             id: record.input.model_id,
             schema_version: initialModel || input.observed_rule?.semantics || input.observed_rule?.bindings?.length ? 3 : model?.schema_version ?? 2,
@@ -850,7 +866,8 @@ export async function applyBusinessDelta(
                       ]),
                     ],
                   },
-                  upsert_sources: input.sources,
+                  upsert_sources: modelSources,
+                  ...(retirements.length ? { scenario_retirements: retirements } : {}),
                   upsert_rules: [input.observed_rule!],
                 } }),
           }, all)) as ModernModel);

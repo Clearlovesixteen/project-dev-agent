@@ -56,7 +56,7 @@ export function commandCapability(words: string[], dialect: ShellDialect): Comma
     const rest = args[0] === "-n" ? args.slice(1) : args;
     // 数字范围的 p 只输出文本；无文件参数时读取 stdin，覆盖 nl | sed 的常见阅读方式。
     // 不放开其他脚本、执行/写文件指令或后续选项。
-    return /^\d+(?:,\d+)?p$/.test(rest[0] ?? "") && rest.slice(1).every(arg => !arg.startsWith("-")) ? "read_only" : "unknown";
+    return /^\d+(?:,\d+)?p(?:;[ \t]*\d+(?:,\d+)?p)*$/.test(rest[0] ?? "") && rest.slice(1).every(arg => !arg.startsWith("-")) ? "read_only" : "unknown";
   }
   return "unknown";
 }

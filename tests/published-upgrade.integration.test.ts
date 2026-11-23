@@ -112,6 +112,10 @@ test("linked worktree 从常规业务查询直接读取共享模型，冲突复�
   assert.equal(ambiguous.project_knowledge.modules?.[0]?.state, "ambiguous");
   assert.deepEqual(ambiguous.models, []);
   assert.equal((await integration.service.record(await input(integration, "未复核不能认领", 2))).code, "PROJECT_MODEL_REVIEW_REQUIRED");
+  // 只改摘要不能替用户决定两个父快照中同一规则的不同表述。
+  const unresolved = await input(integration, "未确认具体分歧", 2, aId, [bId]);
+  const conflict = await integration.service.record({ ...unresolved, patch: { metadata: unresolved.patch.metadata } });
+  assert.equal(conflict.code, "PROJECT_MODEL_MERGE_CONFLICT", JSON.stringify(conflict));
   const historical = await integration.context({ model_id: modelId, model_snapshot_id: bId });
   assert.equal(historical.models[0]?.historical_snapshot_id, bId);
   assert.equal(historical.state, "needs_review");
@@ -163,4 +167,97 @@ test("当前工作树排除共享修订的来源时，查询不会降级使用�
   assert.equal(current.models.length, 0);
   assert.equal(current.project_knowledge.selected_models?.length, 0);
   assert.equal((await a.service.context({ model_id: modelId })).code, "PROJECT_MODEL_NOT_FOUND");
+});
+
+// 同一规则在两个真实工作树中增加不同场景；保存新规则后仍需分别保留两份父快照供回看。
+test("同规则不同场景三方合并、旧场景遗漏和有依据的改名", async t => {
+  const { a, branch, baseline, input } = await modelFixture(t);
+  const left = await branch("delivery-ui"), right = await branch("delivery-api");
+  const first = await input(a, "场景基线", 1, baseline);
+  const rule = first.patch.upsert_rules[0]!;
+  const scenario = (id: string) => ({ id, description: id, facts: { done: true }, expected: "allowed", source_ids: ["code"] });
+  const retains = [{ id: "keep-old", description: "保留原状态", source_ids: ["code"] }];
+  const semantics = (names: string[], preserve = retains) => ({ subject: "order", action: "approve",
+    when: { field: "done", op: "eq", value: true }, expected: "已完成才可操作", cases: names.map(scenario), preserves: preserve, source_ids: ["code"] });
+  const seed = await a.service.record({ ...first, schema_version: 3, patch: { upsert_rules: [{ ...rule, semantics: semantics(["old"]) }] } });
+  assert.equal(seed.code, "PROJECT_MODEL_RECORDED", JSON.stringify(seed));
+  const idOf = (result: typeof seed) => (result.data as { snapshot_id: string }).snapshot_id;
+  const side = async (tree: typeof a, id: string) => {
+    const draft = await input(tree, "保留初始规则", 2, idOf(seed));
+    const result = await tree.service.record({ ...draft, schema_version: 3, patch: {
+      upsert_rules: [{ ...rule, semantics: semantics(["old", id]) }, { ...rule, id: 'new-' + id, description: id }] } });
+    assert.equal(result.code, "PROJECT_MODEL_RECORDED", JSON.stringify(result));
+    return idOf(result);
+  };
+  const ui = await side(left, "ui"), api = await side(right, "api");
+  const integration = await input(a, "同需求整合", 3, ui, [api]);
+  const joint = await a.service.record({ ...integration, schema_version: 3, patch: { metadata: { summary: "共同交付" } } });
+  assert.equal(joint.code, "PROJECT_MODEL_RECORDED", JSON.stringify(joint));
+  const repository = (await ProjectKnowledgeRepository.openExisting(a.binding.repo_identity))!;
+  const snapshot = (await repository.readObject(idOf(joint))).content as { parent_snapshot_ids: string[];
+    content: {rules: {id: string; semantics?: {cases: {id: string}[]}}[]} };
+  assert.deepEqual(snapshot.parent_snapshot_ids, [ui, api]);
+  assert.deepEqual(snapshot.content.rules.map(row => row.id).sort(), ["behavior", "new-api", "new-ui"]);
+  assert.deepEqual(snapshot.content.rules.find(row => row.id === "behavior")!.semantics!.cases.map(item => item.id).sort(), ["api", "old", "ui"]);
+  // 遗漏原场景、保留行为、引用无效替代项均阻止写入，并保留旧快照。
+  const edit = { ...await input(a, "规格将旧场景改名", 4, idOf(joint)), schema_version: 3 };
+  const patch = { upsert_rules: [{ ...rule, semantics: semantics(["renamed", "ui", "api"]) }] };
+  const removal = { rule_id: rule.id, kind: "case", id: "old", reason: "规格统一命名", source_id: "code", replacement_id: "renamed" };
+  const modify = async (body: object) => a.service.record({ ...edit, patch: body });
+  assert.equal((await modify(patch)).code, "PROJECT_MODEL_SCENARIO_MISSING");
+  assert.equal((await modify({ upsert_rules: [{ ...rule, semantics: semantics(["old","ui","api"], []) }] })).code, "PROJECT_MODEL_SCENARIO_MISSING");
+  for (const invalid of [{ source_id: "missing" }, { replacement_id: "ghost" }])
+    assert.equal((await modify({ ...patch, scenario_retirements: [{ ...removal, ...invalid }] })).code, "PROJECT_MODEL_RETIREMENT_INVALID");
+  const rename = await modify({ ...patch, scenario_retirements: [removal] });
+  assert.equal(rename.code, "PROJECT_MODEL_RECORDED", JSON.stringify(rename));
+  const renamed = (await repository.readObject(idOf(rename))).content as {content:{scenario_retirements: unknown[]}};
+  assert.deepEqual(renamed.content.scenario_retirements, [removal]);
+});
+
+test("工作树来源变化形成稳定复核项，已恢复或被排除的来源不继续提示", async t => {
+  const { a, branch, git } = await modelFixture(t), b = await branch("unrelated-work");
+  await a.set("edited");
+  const first = await readProjectKnowledge(a.binding), second = await readProjectKnowledge(a.binding);
+  assert.equal(first.rule_reviews?.items.length, 1);
+  const review = first.rule_reviews!.items[0]!;
+  assert.equal(review.rule_id, "behavior");
+  assert.equal(review.path, sourcePath);
+  assert.equal(review.kind, "source");
+  assert.ok(review.current_sha256 && review.previous_sha256 !== review.current_sha256);
+  assert.deepEqual(first.rule_reviews, second.rule_reviews);
+  assert.equal((await readProjectKnowledge(b.binding)).rule_reviews, undefined);
+  await b.set("edited");
+  assert.notEqual((await readProjectKnowledge(b.binding)).rule_reviews?.items[0]?.review_id, review.review_id);
+  await a.set("initial");
+  assert.equal((await readProjectKnowledge(a.binding)).rule_reviews, undefined);
+  await git(a.binding.root, "mv", sourcePath, "src/renamed-status.js");
+  const moved = (await readProjectKnowledge(a.binding)).rule_reviews?.items[0];
+  assert.equal(moved?.change, "rename_unresolved");
+  assert.equal(moved.path, sourcePath);
+  await git(a.binding.root, "mv", "src/renamed-status.js", sourcePath);
+  assert.equal((await readProjectKnowledge(a.binding)).rule_reviews, undefined);
+  await writeFile(join(a.binding.root, "tsconfig.json"), '{"compilerOptions":{"strict":true}}');
+  const changed = await readProjectKnowledge(a.binding);
+  const config = changed.rule_reviews?.items.find(item => item.kind === "configuration" && item.path === "tsconfig.json");
+  assert.ok(config, JSON.stringify(changed.modules));
+  await writeFile(join(a.binding.root, ".project-dev/project.yaml"), `schema_version: 1\nexclude_paths:\n  - ${sourcePath}\n`);
+  assert.equal((await readProjectKnowledge(a.binding)).rule_reviews, undefined);
+});
+
+test("同文件的证据刷新只解除已复核规则，其余规则仍有独立定位的复核项", async t => {
+  const { a, baseline, input } = await modelFixture(t);
+  const seed = await input(a, "其他规则也读取相同状态", 1, baseline);
+  const result = await a.service.record({ ...seed, patch: {
+    upsert_rules: [{ ...seed.patch.upsert_rules[0]!, id: "separate-decision" }] } });
+  assert.equal(result.code, "PROJECT_MODEL_RECORDED", JSON.stringify(result));
+  await a.set("changed");
+  const patch = await input(a, "已重新核对初始规则", 2, (result.data as {snapshot_id: string}).snapshot_id);
+  const next = await a.service.record(patch);
+  assert.equal(next.code, "PROJECT_MODEL_RECORDED", JSON.stringify(next));
+  const knowledge = await readProjectKnowledge(a.binding);
+  // 源码HEAD和模型视图可匹配，而同一份模型中未复核的兄弟规则仍使用旧来源版本。
+  assert.equal(knowledge.state, "matched");
+  assert.deepEqual(knowledge.rule_reviews?.items.map(item => [item.rule_id, item.fingerprint_kind]), [["separate-decision", "source_record"]]);
+  const repeat = await readProjectKnowledge(a.binding);
+  assert.deepEqual(repeat.rule_reviews, knowledge.rule_reviews);
 });

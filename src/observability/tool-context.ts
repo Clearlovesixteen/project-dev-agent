@@ -1,3 +1,4 @@
+import { observedAction } from "./projection-metrics.js";
 import { DiagnosticContext } from "./diagnostic-context.js";
 import type { InteractionContext } from "../workflow/interaction.js";
 import { implementationContextReady, isImplementationQuery } from "../context/implementation-status.js";
@@ -86,6 +87,8 @@ export function toolDiagnosticContext(tool: string, input: DiagnosticContext | u
   }
   // 只有成功的 prepare 才能说明已接入；异常不把初始推测当成已观测成功。
   if (tool === "project_prepare" && result.outcome === "error" && value.scope_state === "enrolled") delete value.scope_state;
+  const action = observedAction(data);
+  if (action) value.required_action = action;
   const checked = DiagnosticContext.safeParse(value);
   return checked.success ? checked.data : { version: 1 };
 }

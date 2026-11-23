@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { interactionStorage } from "../src/workflow/interaction.js";
 import { TaskSchema } from "../src/domain/task.js";
 import { bindWorktree } from "../src/git/index.js";
 import { digest } from "../src/knowledge/document.js";
@@ -54,7 +55,7 @@ test('详情保持可读', () => assert.equal(detail(), 'details'));
 `;
 }
 
-for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通原文、范围、真实场景和模型回写`, async t => {
+for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通原文、范围、真实场景和模型回写`, async t => interactionStorage.run({ session_id: "business-flow-owner" }, async () => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const binding = await bindWorktree(fixture.path), files = new ProjectFiles(binding.root);
   const service = new TaskService(binding), understanding = new UnderstandingService(binding);
@@ -70,7 +71,11 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   ];
   const code = (id: string, text: string, line = 1) => ({ id, kind: "code", path: policyFile, sha256: digest(text), line, quote: text.split("\n")[line - 1] });
   const original = semanticRule("old", "observed", bound("old"), true);
+  const retired = { rule_id: ruleId, kind: "case", id: "legacy-sync", reason: "废止旧同步失败场景", source_id: "retirement-spec" };
+  const criteriaIds = existing ? [...acceptance, "retired"] : acceptance;
   if (existing) {
+    // 原规则多一个旧入口；规格更新需要把该场景的消失纳入真实验收和模型回写。
+    original.semantics!.cases.push({ ...original.semantics!.cases[0]!, id: retired.id });
     await put(policyFile, oldPolicy);
     await put(consumerFile, "export { canSync } from './purchase-policy.mjs';\n");
     await understanding.scan({});
@@ -80,13 +85,13 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
     assert.equal(recorded.outcome, "ok", JSON.stringify(recorded));
   }
   const specFile = `.project-dev/local/requirements/purchase-${input}.txt`;
-  const spec = `${requestQuote}\n${preserveQuote}\n${existing ? "沿用采购列表已有权限函数。\n" : ""}`;
+  const spec = `${requestQuote}\n${preserveQuote}\n${existing ? "沿用采购列表已有权限函数。废止旧同步失败场景。\n" : ""}`;
   await put(specFile, spec);
   const { validation_plan, ...open } = await withImplementationBasis(binding.root, {
     requirement: `按附件 ${input.toUpperCase()} 落地采购申请同步功能`, business_model_policy: 1,
     scope_paths: ["src", "test"], spec_input: { kind: input, source_ids: ["spec"] },
     requirement_sources: [{ id: "spec", kind: "document", path: specFile, quote: requestQuote }],
-    acceptance_criteria: acceptance.map(id => ({ id, description: `核对 ${id}`, requirement_check: { kind: "business", source_ids: ["spec"] } })),
+    acceptance_criteria: criteriaIds.map(id => ({ id, description: `核对 ${id}`, requirement_check: { kind: "business", source_ids: ["spec"] } })),
   });
   let task = TaskSchema.parse((await service.open(open)).data);
   const update = async (changes: object, expected = "ok") => {
@@ -98,10 +103,13 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   const quality = async () => ((await service.check({ task_id: task.id })).data as any).quality;
   assert.equal((await quality()).business_plan.state, "missing");
   const draft = semanticRule("spec-evidence", "intended", bound("spec-evidence", !existing));
-  await update({ business_deltas: [{ id: deltaId, model_id: modelId, rule_id: ruleId, base_revision: existing ? 1 : 0,
+  const delta = { id: deltaId, model_id: modelId, rule_id: ruleId, base_revision: existing ? 1 : 0,
     ...(existing ? { expected_rule_fingerprint: ruleFingerprint(original) } : { new_model: modelInfo }),
-    operation: existing ? "modify" : "add", reason: "按有效文档记录本轮预期行为", acceptance_ids: acceptance,
-    proposed_rule: draft, sources: [{ id: "spec-evidence", kind: "task", task_id: task.id, requirement_source_id: "spec", quote: requestQuote }] }],
+    operation: existing ? "modify" : "add", reason: "按有效文档记录本轮预期行为", acceptance_ids: criteriaIds,
+    proposed_rule: draft, sources: [{ id: "spec-evidence", kind: "task", task_id: task.id, requirement_source_id: "spec", quote: requestQuote }] };
+  if (existing) await update({ business_deltas: [delta] }, "PROJECT_MODEL_SCENARIO_MISSING");
+  await update({ business_deltas: [{ ...delta, ...(existing ? { scenario_retirements: [retired],
+    sources: [...delta.sources, { ...delta.sources[0]!, id: retired.source_id, quote: retired.reason }] } : {}) }],
     business_assessment: { state: "changed", reason: "同步权限按有效文档扩展，单独核对详情兼容", model_ids: [modelId], delta_ids: [deltaId] } });
   const stored = task.business_deltas![0]!;
   assert.equal(stored.before_rule === null, !existing);
@@ -117,7 +125,7 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
     decisions: bound("spec-evidence", !existing).map(item => ({ id: item.id, model_id: modelId, rule_id: ruleId, binding_id: item.id,
       action: item.id === "detail" && existing ? "protect" : "modify", reason: "同步权限变化，详情按原要求保留", acceptance_ids: acceptance })),
     related_checks: existing ? [{ path: consumerFile, action: "verify", reason: "列表复用同一个权限入口，核对无需修改", acceptance_ids: ["completed"] }] : [],
-    scenarios: definitions.map((item, index) => ({ id: `case-${index}`, model_id: modelId, rule_id: ruleId,
+    scenarios: definitions.filter(item => item.kind !== "retirement").map((item, index) => ({ id: `case-${index}`, model_id: modelId, rule_id: ruleId,
       ...(item.case_id ? { case_id: item.case_id } : { preserve_id: item.preserve_id! }),
       acceptance_id: acceptance[index]!, check_id: "scenarios", test_file: testFile, test_name: names[index]! })),
     supporting_changes: [{ path: testFile, reason: "用独立命名测试核对业务场景", acceptance_ids: acceptance }],
@@ -129,9 +137,29 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
     requirement: "采购同步权限与行为验证", rationale: "改动范围来自已核对的规则与测试", sources: [{ kind: "code", reference: path }], status: "pending" }));
   await update({ acceptance_criteria: criteria, business_plan: plan, change_items: changeItems });
   assert.equal(task.business_plans![0]!.targets[0]!.bindings[0]!.initial.resolution, existing ? "resolved" : "planned");
+  // 用同一份已登记计划核对 PRD、SDD 的修改位置。另一会话应得到正常只读摘要与缺口。
+  const projection = async () => {
+    const result = await understanding.context({ view: "compact", query: "采购同步", task_id: task.id });
+    assert.equal(result.outcome, "ok", JSON.stringify(result));
+    assert.ok(Buffer.byteLength(JSON.stringify(result.data)) <= 12_000);
+    return (result.data as any).implementation_view_v1;
+  };
+  if (!existing) await understanding.scan({});
+  const active = await projection();
+  assert.ok(active.modify.items.some((item: any) => item.path === policyFile && item.symbol === "canSync"), JSON.stringify(active));
+  assert.equal(active.input_kind, input);
+  assert.ok(active.verify.items.some((item: any) => item.check_id === "scenarios"));
+  if (existing) assert.ok(active.protect.items.some((item: any) => item.symbol === "detail"));
+  const other = await interactionStorage.run({ session_id: "unrelated-chat" }, projection);
+  assert.deepEqual(other.modify.items, []);
+  assert.ok(other.gaps.includes("TASK_SESSION_MISMATCH"));
+  await put(specFile, spec + "已修改需求\n");
+  assert.equal((await projection()).modify.items.length, 0);
+  await put(specFile, spec);
   await put(policyFile, newPolicy + "export const unrelated = 42;\n");
   if (existing) await put(consumerFile, "export const canSync = () => true;\n");
   const bad = (await quality()).business_plan;
+  if (existing) assert.ok(bad.advisory.rule_reviews.current_task.some((item: { rule_id: string }) => item.rule_id === ruleId));
   assert.ok(bad.boundary.issues.some((item: any) => item.state === "outside_symbols"), JSON.stringify(bad));
   if (existing) {
     assert.ok(bad.boundary.issues.some((item: any) => item.path === consumerFile && item.state === "outside_plan"));
@@ -140,7 +168,7 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   await put(policyFile, newPolicy);
   await put(testFile, tests(existing, true));
   const check = { id: "scenarios", description: "运行采购同步的命名场景", command: "node", args: ["--test", testFile],
-    behavior_report: "node-test", acceptance_ids: acceptance };
+    behavior_report: "node-test", acceptance_ids: criteriaIds };
   await update({ validation_plan: { checks: [{ ...check, args: ["-e", "process.exit(0)"] }] } }, "BUSINESS_TEST_ADAPTER_COMMAND");
   await update({ validation_plan: { checks: [check] } });
   const skipped = await runValidation(binding, task.id, check.id);
@@ -180,6 +208,10 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   assert.equal(model?.schema_version, 3);
   assert.equal(model?.revision, existing ? 2 : 1);
   assert.equal(model?.rules[0]?.basis, "observed");
+  if (existing) {
+    assert.deepEqual(model.scenario_retirements, [retired]);
+    assert.equal(model.sources.find(source => source.id === retired.source_id)?.kind, "task");
+  }
   task = TaskSchema.parse(((await service.check({ task_id: task.id })).data as any).recorded_task);
   const repeated = await service.applyBusiness({ ...publication, expected_revision: task.revision });
   assert.equal(repeated.outcome, "ok", JSON.stringify(repeated));
@@ -187,4 +219,4 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   task = TaskSchema.parse(((await service.check({ task_id: task.id })).data as any).recorded_task);
   await update({ phase: "closed", review_snapshot: token });
   assert.equal(task.phase, "closed");
-});
+}));

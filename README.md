@@ -8,6 +8,20 @@
 
 **诊断默认开启，可关闭。** 新安装首次运行插件 MCP 或已信任钩子时，会自动向本插件维护者 Clearlovesixteen 的 Cloudflare 接收端发送运行元数据，用于修复插件。**不发送源码、PRD/SDD、对话正文、命令或真实路径。** 无需配置服务器或凭证，也没有前端页面。关闭方法：`$project-dev-setup 关闭远程诊断上报`。已保存的关闭状态和自定义接收配置不会因更新被覆盖。
 
+## 内部联合试点 · 0.15.0-rc.1
+
+候选版在独立 Codex 配置中试用。日常安装继续使用上面的正式通道。
+
+| 开发中遇到的情况 | 在 Codex 中的用法 |
+| --- | --- |
+| 实施依据的引用被拒绝、任务修订号已变化 | 查看本次紧凑回执给出的修复动作，按提示补齐来源或刷新修订号后重试。关闭回执携带本次已经完成的验收结果。 |
+| 提供 PRD 或 SDD 后需要确定落点 | 同一个聊天调用 `project_context`，传 `view:"compact"` 和当前 `task_id`。查看已登记修改、可复用实现、应保护的旧行为、测试和待查位置。缺少计划时仍可按仓库线索阅读。 |
+| 修改 Vue 单文件组件 | 可定位普通 `script` 和 `script setup` 中明确的 JS/TS 声明。模板、相邻声明、样式仍受修改范围检查。同名歧义和外部脚本需要另行核实。 |
+| 两个工作树各改一部分业务规则 | 对共同祖先核对两个版本的规则和场景。存在互斥解释时保留分歧；有来源的退役记录用于核对消失的旧场景。源码变化可通过规则复核项定位。 |
+| 两台机器要复用同一条规则 | 维护者选定规则导出草稿，团队通过 Git 审查。另一份 clone 重新核对本地来源后使用。命令见文末团队规则小节。 |
+
+`implementation_view_v1` 中的 `inspect` 只提供阅读线索，`modify` 需要当前任务的有效计划与当前代码证据。返回的 `omitted` 是确实省略的条目数，`coverage_unknown` 提示索引或证据可能不完整。团队试点可在隔离进程设置 `PROJECT_DEV_IMPLEMENTATION_VIEW=off` 或 `PROJECT_DEV_GUIDANCE=off` 分别关闭这两项输出扩展。
+
 ## v0.14.2 开发链路性能修复
 
 日常开发按当前工作树读取项目资料。同一需求跨轮继续时，Codex 可以直接找回任务和当前修改范围。
@@ -776,3 +790,24 @@ npm run check
 - [验证记录与边界](docs/verification.html)
 
 实现入口：[Skill](skills/project-dev/SKILL.md)、[CLI](src/cli.ts)、[MCP 服务](src/server.ts)、[业务模型字段](src/understanding/contracts.ts)、[业务模型校验与保存](src/understanding/service.ts)、[模型检索与来源检查](src/understanding/context.ts)。
+
+## 与其他 clone 共享已审核的业务规则
+
+同一 clone 下的工作树继续使用 Git 公共目录里的模型。当同事使用独立 clone 时，维护者可以从当前工作树选一条已观察、源码可核实的规则，生成适合团队 PR 审查的记录。普通开发者沿用原有 `project_context` 和 `knowledge_search`。
+
+以下使用本插件安装目录中的 `runtime/cli.mjs`。`PLUGIN_ROOT` 指向当前安装版本，`REPO` 是业务仓库绝对根目录。
+
+```sh
+# 团队首次启用，生成 .project-dev/team-rules.json 项目标识。
+node "$PLUGIN_ROOT/runtime/cli.mjs" team-rules enable --project "$REPO"
+
+# 替换为当前业务模型与规则 ID，逐条生成 Git 忽略的本地草稿。
+node "$PLUGIN_ROOT/runtime/cli.mjs" team-rules export --project "$REPO" --model-id procurement --rule-id sync-eligible
+
+# 阅读上一步返回的 file，核实条件、例外和来源，再使用团队审查代号。
+node "$PLUGIN_ROOT/runtime/cli.mjs" knowledge review --project "$REPO" --file "<返回的草稿相对路径>" --reviewer "采购维护组"
+```
+
+由维护者将启用标记和最后一步返回的 `.rule.json` 纳入业务仓库 PR。默认共享目录为 `.project-dev/knowledge/`。导出的字段包括规则标识、模型修订、含义、适用条件、例外、仓库相对路径、来源指纹和可用的代码定位。草稿留在本机。含任务或对话来源的规则需先用项目文件重新核实，文本中的敏感信息由维护者在 PR 前复核。
+
+其他 clone 会核验启用标记、文件指纹和代码定位。若本工作树已有同一模型规则，还会比对含义、条件和例外。来源变更、缺失、符号失效或本树模型与团队记录有分歧时，查询会返回原因并提示复核。撤回一条规则可在 Git 中删除其记录。删除启用标记可停用该仓库的所有团队模型规则。更新工作树后，下次查询即按当前文件重新判断。

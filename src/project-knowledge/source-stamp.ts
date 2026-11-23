@@ -137,9 +137,9 @@ async function readEntry(root: string, path: string, status: StatusKind[], total
 /** 可影响业务模型实现的项目配置和依赖声明。 */
 export function isConfigurationPath(path: string): boolean { return /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|tsconfig(?:\.[^/]+)?\.json)$/.test(path); }
 
-async function capture(binding: WorktreeBinding, scope?: readonly string[]): Promise<Capture> {
+async function capture(binding: WorktreeBinding, scope?: readonly string[], scopedStatuses = new Map<string, StatusKind[]>()): Promise<Capture> {
   const beforeHead = gitLine((await readGit(binding.root, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout);
-  const candidates = scope ? { paths: scope, statuses: new Map<string, StatusKind[]>(), statusRaw: Buffer.alloc(0), excludedCount: 0 }
+  const candidates = scope ? { paths: scope, statuses: scopedStatuses, statusRaw: Buffer.alloc(0), excludedCount: 0 }
     : await candidatePaths(binding);
   const total = { bytes: 0 }, entries: SourceEntry[] = [];
   for (const path of candidates.paths) entries.push(await readEntry(binding.root, path, candidates.statuses.get(path) ?? ["tracked"], total));
@@ -157,17 +157,20 @@ export async function collectSourceStamp(binding: WorktreeBinding, options: { on
   if (scoped) for (const path of options.paths!) if (!excluded(path)) addPath(scoped, path);
   // 模型读取通常只传入 related_paths。把配置候选加入同一份源码快照，
   // 才能在不扫描全部业务文件的情况下发现依赖声明或 TypeScript 路径变化。
+  let scopedStatuses: Map<string, StatusKind[]> | undefined;
   if (scoped && options.includeConfiguration) {
     // 这里只枚举路径来寻找少量配置文件，不读取其余内容，也不因仓库总文件数
     // 超过源码快照上限而拒绝一次局部模型核验。
     const candidates = await candidatePaths(binding, { allowOverLimit: true });
+    // 复用此次 Git 状态区分待暂存、已暂存及重命名；规则是否适用仍由两次内容读取决定。
+    scopedStatuses = candidates.statuses;
     for (const path of candidates.paths) if (isConfigurationPath(path)) scoped.add(path);
   }
   if (scoped && scoped.size > MAX_FILES) throw new AppError("SOURCE_STAMP_LIMIT", "当前模型依赖文件超过核对上限");
   const paths = scoped ? [...scoped].sort() : undefined;
-  const first = await capture(binding, paths);
+  const first = await capture(binding, paths, scopedStatuses);
   await options.onCaptured?.();
-  const second = await capture(binding, paths);
+  const second = await capture(binding, paths, scopedStatuses);
   if (first.signature !== second.signature || JSON.stringify(first.stamp.entries) !== JSON.stringify(second.stamp.entries)) throw new AppError("VIEW_CHANGED", "生成源码视图期间工作树发生变化，请重新读取");
   const stamp = { ...first.stamp, stamp_id: digest(JSON.stringify(first.stamp)) };
   return SourceStampSchema.parse(stamp);

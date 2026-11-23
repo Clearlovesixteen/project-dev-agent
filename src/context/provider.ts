@@ -33,7 +33,7 @@ export async function provideContext(files: ProjectFiles, input: unknown) {
   let allowedPaths: string[] = [];
   if (request.query || request.paths.length || request.modules.length) {
     try {
-      const scoped = await scopedKnowledgeSearch(files, { query: request.query, paths: request.paths, modules: request.modules, limit: 3 });
+      const scoped = await scopedKnowledgeSearch(files, { query: request.query, paths: request.paths, modules: request.modules, limit: 3 }, project_knowledge ? async () => project_knowledge! : undefined);
       knowledge = scoped.result;
       allowedPaths = scoped.paths;
     } catch (error) {
@@ -47,14 +47,26 @@ export async function provideContext(files: ProjectFiles, input: unknown) {
     const support = knowledge && knowledge.code !== "PATHS_EXCLUDED" && knowledge.outcome !== "error"
       ? await searchSupportContext(files, request.query, allowedPaths, 3, true) : undefined;
     const knowledge_context = compactKnowledge(knowledge, support, support ? request.paths.length - allowedPaths.length : 0);
-    const unindexed = previewEntries(context.unindexed_paths ?? [], 1_200);
-    const compact = JSON.parse(boundedSummary(data, 11_350 - Buffer.byteLength(JSON.stringify(knowledge_context)) - Buffer.byteLength(JSON.stringify(unindexed.items))));
+    const indexed = "implementation_context" in context ? context : undefined;
+    const unindexed = previewEntries(indexed?.unindexed_paths ?? [], 1_200);
+    const view = indexed?.implementation_view_v1;
+    const viewBytes = view ? Buffer.byteLength(JSON.stringify(view)) : 0;
+    const compact = JSON.parse(boundedSummary(data, 10_850 - viewBytes - Buffer.byteLength(JSON.stringify(knowledge_context)) - Buffer.byteLength(JSON.stringify(unindexed.items))));
     const { candidates, ...implementation } = compact.implementation;
+    const original = indexed?.implementation_context?.implementation_candidates;
+    const omitted = Math.max(0, (original?.eligible_count ?? 0) - candidates.length);
+    const coverageUnknown = !!original?.coverage_unknown || indexed?.snapshot?.coverage.complete !== true || data.state === "needs_rescan" || !!indexed?.unindexed_paths?.length;
+    const reviews = project_knowledge?.rule_reviews;
+    const viewTruncated = view && [view.modify, view.reuse, view.protect, view.verify, view.inspect, view.preserved_behaviors].some(group => group.omitted > 0);
     const summary = { state: data.state, scan_id: compact.scan_id, context_query_kind,
-      ...(context.implementation_context ? { implementation_context: { ...implementation, implementation_candidates: { candidates, truncated: true } } } : {}),
+      ...(view ? { implementation_view_v1: view } : {}),
+      ...(indexed?.implementation_context ? { implementation_context: { ...implementation, implementation_candidates: { candidates, shown: candidates.length,
+        omitted, coverage_unknown: coverageUnknown, truncated: omitted > 0 } } } : {}),
       files: compact.files, models: compact.models, knowledge_context, business_links: compact.business_links,
       unindexed_paths: unindexed.items, unindexed_paths_truncated: unindexed.truncated, project_knowledge: compact.project_knowledge,
-      truncated: true, next_step: context.next_step ?? "核对候选的源码。使用 model_id 展开条件、例外与证据；需要更多结果时缩小 paths 或使用 view:full。"};
+      ...(reviews ? { rule_reviews: { review_ids: reviews.items.slice(0, 2).map(item => item.review_id), omitted: reviews.omitted + Math.max(0, reviews.items.length - 2) } } : {}),
+      projection: "compact", coverage_unknown: coverageUnknown, truncated: compact.truncated || unindexed.truncated || knowledge_context.truncated || !!viewTruncated || omitted > 0 || !!reviews && reviews.items.length + reviews.omitted > 2,
+      next_step: context.next_step ?? "先读命中位置。涉及业务规则时按 model_id 与 rule_ids 展开对应条件和依据。"};
     return { ...summary, provider_version: 1, context_id: digest(JSON.stringify(summary)) };
   }
   return { ...data, provider_version: 1, context_id: digest(JSON.stringify(data)) };

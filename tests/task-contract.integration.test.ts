@@ -33,10 +33,29 @@ test("任务 MCP 汇总旧格式错误，精简引用绑定真实原文，纠正
   const legacy = { references: [{ path: "/outside", reason: "private legacy string" }], decisions: [{ id: "d", decision: "旧格式" }] };
   const failed = await call("task_open", { ...open, implementation_basis: legacy });
   assert.equal(failed.code, "TASK_INPUT_INVALID");
+  assert.equal((failed.data as any).guidance_v1, undefined);
   assert.equal(failed.diagnostics.length, 1);
   assert.match(failed.diagnostics[0]!.message, /quote/);
   assert.doesNotMatch(JSON.stringify(failed), /private legacy string/);
   assert.equal((await call("task_open", { implementation_basis: legacy, ...open })).code, "TASK_INPUT_RETRY_STOPPED");
+  // 已交付的静态说明可以压缩。每次都列出真实缺项；其他会话、项目、工具或遗失标识要回全文。
+  const broken = { ...open, implementation_basis: legacy, response_view: "compact", project: fixture.path,
+    interaction: { session_id: "owner", turn_id: "turn" } };
+  const initial = await call("task_open", broken);
+  const guide = (initial.data as any).guidance_v1;
+  assert.equal(guide.contract_state, "full"); assert.match(guide.contract_id, /^[a-f0-9]{64}$/);
+  assert.deepEqual(guide.reference_issues[0], { index: 0, fields: ["id", "path", "quote", "reason"], reason: "invalid_fields" });
+  const usingContract = { ...broken, guidance_contract_id: guide.contract_id };
+  const repeated = await call("task_open", usingContract);
+  assert.equal(repeated.code, "TASK_INPUT_RETRY_STOPPED");
+  assert.equal((repeated.data as any).guidance_v1.contract_state, "reference");
+  assert.deepEqual((repeated.data as any).guidance_v1.reference_issues, guide.reference_issues);
+  assert.ok(repeated.diagnostics[0]!.message.length < initial.diagnostics[0]!.message.length);
+  for (const args of [{ ...usingContract, interaction: { session_id: "other" } },
+    { ...usingContract, project: join(fixture.root, "other") }, { ...broken, guidance_contract_id: "0".repeat(64) }, broken]) {
+    assert.equal(((await call("task_open", args)).data as any).guidance_v1.contract_state, "full");
+  }
+  assert.equal(((await call("task_update", usingContract)).data as any).guidance_v1.contract_state, "full");
   assert.equal((await call("task_check", {})).code, "NO_ACTIVE_TASK");
 
   const path = "AGENTS.md", text = await readFile(join(fixture.path, path), "utf8");
@@ -51,11 +70,25 @@ test("任务 MCP 汇总旧格式错误，精简引用绑定真实原文，纠正
   assert.equal((await call("task_update", { ...update, implementation_basis: legacy })).code, "TASK_INPUT_RETRY_STOPPED");
   assert.equal((await call("task_update", { ...update, surprise: true })).code, "TASK_INPUT_INVALID");
   const fixed = { references: [{ ...ref, line: index + 1 }], decisions };
+  const conflict = await call("task_update", { ...update, expected_revision: opened.revision + 1, response_view: "compact" });
+  assert.equal(conflict.code, "REVISION_CONFLICT");
+  assert.equal((conflict.data as any).guidance_v1.task_revision, opened.revision);
   assert.equal((await call("task_update", { ...update, implementation_basis: { ...fixed, references: [{ ...ref, sha256: "0".repeat(64) }] } })).code,
     "IMPLEMENTATION_REFERENCE_INVALID");
   await writeFile(join(fixture.path, path), text + "\n" + ref.quote + "\n");
   const request = { ...update, implementation_basis: { references: [ref], decisions }, response_view: "compact" };
-  assert.equal((await call("task_update", request)).code, "IMPLEMENTATION_REFERENCE_INVALID");
+  const first = await call("task_update", request);
+  assert.equal(first.code, "IMPLEMENTATION_REFERENCE_INVALID");
+  assert.deepEqual((first.data as any).guidance_v1.reference_issues, [
+    { index: 0, id: "convention", fields: ["line"], reason: "ambiguous_quote" },
+  ]);
+  const secondRef = { ...ref, id: "missing", quote: "does not occur in the fixture" };
+  const validRef = { ...ref, id: "unchanged", line: index + 1 };
+  const batch = await call("task_update", { ...request, implementation_basis: {
+    references: [ref, secondRef, validRef], decisions: [{ ...decisions[0], reference_ids: [ref.id, secondRef.id, validRef.id] }],
+  } });
+  assert.deepEqual((batch.data as any).guidance_v1.reference_issues.map((item: { reason: string }) => item.reason), ["ambiguous_quote", "quote_not_found"]);
+  assert.deepEqual((batch.data as any).guidance_v1.verified_reference_ids, [validRef.id]);
   const retry = await call("task_update", request);
   assert.equal(retry.code, "IMPLEMENTATION_REFERENCE_INVALID");
   assert.equal((retry.data as { retry_same_input: boolean }).retry_same_input, false);
@@ -69,6 +102,20 @@ test("任务 MCP 汇总旧格式错误，精简引用绑定真实原文，纠正
 });
 
 // 启动以后包可能被替换或清理；目录内的清单不能冒充正在运行的进程身份。
+test("关闭候选指引后紧凑错误沿用旧合同，真实校验仍然拒绝无效输入", async t => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const home = join(fixture.root, "codex"); await mkdir(home);
+  const client = new Client({ name: "guidance-rollback", version: "1" }); t.after(() => client.close());
+  const script = fileURLToPath(new URL("../src/cli.js", import.meta.url));
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [script, "serve", "--project", fixture.path],
+    env: { HOME: home, CODEX_HOME: home, PATH: process.env.PATH ?? "", PROJECT_DEV_GUIDANCE: "off" }, stderr: "pipe" }));
+  const invoke = async (name: string, args: Record<string, unknown>) => ToolResultSchema.parse((await client.callTool({ name, arguments: args })).structuredContent);
+  const invalid = await invoke("task_open", { response_view: "compact", requirement: "缺少验收", other: "旧参数" });
+  assert.equal(invalid.code, "TASK_INPUT_INVALID"); assert.equal((invalid.data as any).guidance_v1, undefined);
+  assert.equal((await invoke("task_check", {})).code, "NO_ACTIVE_TASK");
+});
+
+// 版本回执取自实际进程身份，不能由当前目录中的新清单覆盖。
 test("版本回执识别原位替换、独立安装预期和旧目录移除", async t => {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
   const root = join(await realpath(fixture.root), "installed"); await mkdir(root);

@@ -92,8 +92,9 @@ export function createServer(
     project: workspace || plugin ? projectField : projectField.optional(),
     interaction: Interaction.optional().describe("自动上下文提供的会话/轮次关联；旧调用可省略，不能借此授予新权限"),
   };
-  // 这两个选项属于协议适配层；持久任务仍使用原有完整输入与严格的业务验证。
+  // 协议选项只控制返回格式，不能进入持久任务或改变业务验证。
   const taskScope = { ...scope, expected_version: ExpectedVersion.optional().describe("升级后已核实的安装版本"), response_view: z.enum(["compact", "full"]).optional(),
+    guidance_contract_id: z.string().regex(/^[a-f0-9]{64}$/).optional().describe("同一会话在 compact 错误回执中收到的静态说明标识；遗失时省略"),
     implementation_basis: WireBasis.optional() };
   // 兜底处理绑定失败及尚未由领域服务捕获的异常，保留 AppError 的稳定错误码。
   async function operation(action: () => Promise<ToolResult>) {
@@ -105,6 +106,7 @@ export function createServer(
       return mcpResult({
         outcome: "error",
         code,
+        ...(error instanceof AppError && error.data ? { data: error.data } : {}),
         diagnostics: [
           {
             code,
@@ -270,7 +272,7 @@ export function createServer(
         openWorldHint: false,
       },
     },
-    async ({ project, expected_version, response_view: _view, implementation_basis, ...input }) =>
+    async ({ project, expected_version, response_view: _view, guidance_contract_id: _contract, implementation_basis, ...input }) =>
       run(project, async (binding) => {
         if (plugin) await checkRuntime(expected_version);
         return new TaskService(binding).open(implementation_basis ? { ...input, implementation_basis: await completeBasis(binding, implementation_basis) } : input);
@@ -289,10 +291,10 @@ export function createServer(
         openWorldHint: false,
       },
     },
-    async ({ project, expected_version, response_view: _view, implementation_basis, ...input }) =>
+    async ({ project, expected_version, response_view: _view, guidance_contract_id: _contract, implementation_basis, ...input }) =>
       run(project, async (binding) => {
         if (plugin) await checkRuntime(expected_version);
-        return new TaskService(binding).update(implementation_basis ? { ...input, implementation_basis: await completeBasis(binding, implementation_basis) } : input);
+        return new TaskService(binding).update(implementation_basis ? { ...input, implementation_basis: await completeBasis(binding, implementation_basis) } : input, _view === "compact");
       }),
   );
   server.registerTool(

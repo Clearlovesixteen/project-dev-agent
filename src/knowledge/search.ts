@@ -4,7 +4,8 @@ import type { Knowledge } from "../domain/knowledge.js";
 import type { ToolResult } from "../domain/result.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { matchesPath, type ProjectConfig } from "./config.js";
-import { loadKnowledge, sourceStates } from "./repository.js";
+import type { ProjectKnowledgeStatus } from "../project-knowledge/service.js";
+import { loadKnowledge, knowledgeSourceChecker } from "./repository.js";
 
 export const KnowledgeSearchInputSchema = z.object({
   query: z.string().trim().max(2_000).default(""),
@@ -46,7 +47,7 @@ function matchExplanation(knowledge: Knowledge, modules: string[], paths: string
 }
 
 /** 所有来源共用此次配置快照的允许路径，避免第二次读取配置产生范围差异。 */
-export async function scopedKnowledgeSearch(files: ProjectFiles, input: unknown): Promise<{ result: ToolResult; paths: string[] }> {
+export async function scopedKnowledgeSearch(files: ProjectFiles, input: unknown, loadView?: () => Promise<ProjectKnowledgeStatus>): Promise<{ result: ToolResult; paths: string[] }> {
   const request = KnowledgeSearchInputSchema.parse(input);
   const { config, defaulted, entries, diagnostics } = await loadKnowledge(files);
   const paths = request.paths.filter((path) => !config.exclude_paths.some((pattern) => matchesPath(pattern, path)));
@@ -65,8 +66,9 @@ export async function scopedKnowledgeSearch(files: ProjectFiles, input: unknown)
   let resultBytes = 0;
   let truncated = false;
   let eligible = 0;
+  const checkSources = knowledgeSourceChecker(files, config, loadView);
   for (const entry of ranked) {
-    const states = await sourceStates(files, entry.knowledge);
+    const states = await checkSources(entry);
     const stale = states.some((state) => !["current", "attested"].includes(state.state));
     const status = entry.knowledge.status === "confirmed" && stale ? "needs_review" : entry.knowledge.status;
     const effective = status === "confirmed";

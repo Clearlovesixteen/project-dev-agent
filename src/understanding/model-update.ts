@@ -2,6 +2,7 @@ import { AppError } from "../domain/error.js";
 import { ModelContentV2, ModelContentV3, type ModernModel, type RecordRequest, type SavedModel, type SourceV2 } from "./model-contracts.js";
 import { sourcePath } from "./model-evidence.js";
 import { evaluateRule } from "./rule-predicates.js";
+import { checkScenarioRetirements } from "./scenario-retirement.js";
 
 /** 稳定 ID 保持引用一致；更新和删除必须明确，禁止静默丢弃未提交的规则。 */
 function mergeItems<T extends { id: string }>(prior: T[], upserts: T[] = [], removed: string[] = []): T[] {
@@ -17,7 +18,7 @@ function unique(ids: string[]): void {
   if (new Set(ids).size !== ids.length) throw new AppError("PROJECT_MODEL_DUPLICATE", "模型中的 ID、路径或名称不能重复");
 }
 
-export function prepareModel(request: RecordRequest, prior: SavedModel | undefined) {
+export function prepareModel(request: RecordRequest, prior: SavedModel | undefined, reviewedParents: SavedModel[] = []) {
   const patch = request.patch;
   if (patch && (!prior || prior.schema_version === 1)) throw new AppError("PROJECT_MODEL_MIGRATION_REQUIRED", "局部修订前需读取旧模型，补齐规则依据并完整迁移到 schema_version: 2 或 3");
   if (!patch && prior && prior.schema_version !== 1) throw new AppError("PROJECT_MODEL_PATCH_REQUIRED", "已有新版模型使用 patch 修订，以保留未复核条目及其证据");
@@ -37,6 +38,15 @@ export function prepareModel(request: RecordRequest, prior: SavedModel | undefin
   if ([...content.entities, ...content.flows].some((item) => !item.name.trim())) throw new AppError("PROJECT_MODEL_NAME", "新版模型的术语和流程需要明确名称");
   unique(content.related_paths); unique(content.scope);
   const sourceMap = new Map(content.sources.map((source) => [source.id, source]));
+  const retirements = patch?.scenario_retirements ?? [];
+  if (retirements.some(item => !patch?.upsert_rules?.some(rule => rule.id === item.rule_id)))
+    throw new AppError("PROJECT_MODEL_RETIREMENT_INVALID", "退役场景必须随同一规则的新修订提交");
+  for (const rule of patch?.upsert_rules ?? []) {
+    // 整合时两个来源都可能携带应保留的场景，不能只校验排在首位的父模型。
+    const originals = [old, ...reviewedParents].flatMap(parent => parent?.schema_version === 3
+      ? parent.rules.filter(item => item.id === rule.id).flatMap(item => item.semantics ?? []) : []);
+    checkScenarioRetirements(rule.id, originals, rule.semantics, retirements, new Set(sourceMap.keys()));
+  }
   for (const source of content.sources) {
     if (source.kind === "task" && source.requirement_source_id && request.schema_version !== 3)
       throw new AppError("PROJECT_MODEL_SCHEMA", "关联任务中保存的需求文档需要 schema_version: 3");

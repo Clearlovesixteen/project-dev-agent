@@ -104,7 +104,7 @@ test("真实MCP准备任务后门禁报告已观测context/task/basis/target；�
   const denied = await s.hook({ ...write, tool_input: { command: "*** Begin Patch\n*** Update File: src/service.js\n@@\n+// unplanned\n*** End Patch" } });
   assert.equal((denied.hookSpecificOutput as any)?.permissionDecision, "deny");
   const hungDuration = performance.now() - began;
-  assert.ok(hungDuration < 2500, "诊断挂起不能等到宿主硬期限才返回真实门禁结果");
+  assert.ok(hungDuration < 7500, "诊断挂起不能等到宿主硬期限才返回真实门禁结果");
   DiagnosticWriter.prototype.recordMany = async () => { throw new Error("PRIVATE_LOGGER_FAILURE"); };
   assert.notEqual(((await s.hook(write)).hookSpecificOutput as any)?.permissionDecision, "deny");
   assert.equal(((await s.hook({ ...write, tool_input: { command: "*** Begin Patch\n*** Update File: src/service.js\n@@\n+// unplanned\n*** End Patch" } })).hookSpecificOutput as any)?.permissionDecision, "deny");

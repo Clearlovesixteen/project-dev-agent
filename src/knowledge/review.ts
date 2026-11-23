@@ -10,6 +10,8 @@ import { loadKnowledge, snapshotSources } from "./repository.js";
 /** Explicit local reviewer action. This is intentionally not exposed as an MCP tool. */
 export async function reviewKnowledge(project: string, file: string, reviewer: string) {
   const binding = await bindWorktree(project);
+  // 共享模型规则必须以导出时的指纹审核，普通经验文档仍沿用原有审核方式。
+  if (file.endsWith(".rule.json")) return (await import("./team-rule-export.js")).reviewTeamRule(binding, file, reviewer);
   const files = new ProjectFiles(binding.root);
   const { config } = await loadConfig(files);
   await files.path(file);

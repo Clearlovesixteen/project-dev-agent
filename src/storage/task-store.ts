@@ -303,6 +303,7 @@ export class TaskStore {
         throw new AppError(
           "REVISION_CONFLICT",
           `预期修订号为 ${expectedRevision}，实际为 ${current.revision}`,
+          { task_revision: current.revision },
         );
       }
       const candidate = parseTask(await mutator(structuredClone(current)));

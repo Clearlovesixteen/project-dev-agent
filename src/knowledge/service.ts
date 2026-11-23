@@ -68,7 +68,10 @@ export class KnowledgeService {
   async search(input: unknown): Promise<ToolResult> {
     return this.execute(async () => {
       const request = KnowledgeSearchInputSchema.parse(input);
-      const { result, paths } = await scopedKnowledgeSearch(this.files, request);
+      // 共享规则冲突核验与业务上下文共用同一次工作树模型查询。
+      let view: ReturnType<typeof readProjectKnowledge> | undefined;
+      const currentView = () => view ??= readProjectKnowledge(this.binding);
+      const { result, paths } = await scopedKnowledgeSearch(this.files, request, currentView);
       // 主查询拒绝的路径不能借附加历史或模块查询重新进入结果。
       if (result.code === "PATHS_EXCLUDED") return result;
       // 附加线索不可用时暴露其状态或诊断，尽量保留已取得的知识查询结果。
@@ -79,7 +82,7 @@ export class KnowledgeService {
           paths: paths.slice(0, 30),
           modules: request.modules.slice(0, 20),
           limit: Math.min(request.limit, 5),
-        }, await readProjectKnowledge(this.binding));
+        }, await currentView());
       } catch (error) {
         understanding = {
           state: "unavailable",

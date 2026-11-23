@@ -11,6 +11,8 @@ import { mergeRecoveryWrite } from "./merge-recovery-gate.js";
 import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 import { diagnosticAction, diagnosticCause } from "./diagnostic-context.js";
 import { modificationScope } from "../quality/business-plan.js";
+import { domainGuidance } from "../tools/task-guidance.js";
+import { guidanceEnabled } from "../runtime/guidance-release.js";
 
 function inputStaging(input: NativeHookInput, targets: readonly string[]) {
   return input.tool_name === "apply_patch" && targets.length > 0
@@ -52,7 +54,9 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
   };
   diagnostic.stage = "state";
   try { await assertStateIgnored(binding); }
-  catch { return stop("PROJECT_SETUP_REQUIRED", "当前项目未就绪。先调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open。"); }
+  catch { return stop("PROJECT_SETUP_REQUIRED", guidanceEnabled()
+    ? "当前项目未就绪。先用本工作树调用 project_prepare(apply:true)，按准备结果继续。"
+    : "当前项目未就绪。先调用 project_prepare(apply:true)，再 project_scan、project_context 和 task_open。"); }
   // 正式 CLI 的工具输入文件是受控中转，不是任务存储。仅允许 inputs/*.json，
   // 不放行对 tasks、模型、检查结果或任意业务路径的直接写入。
   if (inputStaging(input, targets)) { diagnostic.decision = "allow"; diagnostic.required_action = "none"; return { output: {}, reason: "PLUGIN_INPUT_STAGING", ready: true, coverage: "partial" }; }
@@ -95,8 +99,11 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
   if (!basis) return stop("IMPLEMENTATION_BASIS_REQUIRED", "先读取现有能力，使用 task_update.implementation_basis 保存复用、模块化和本次实现选择及原文依据；不要另起已有封装。");
   const references = await checkWriteReferences(binding, task, state.basis_receipt);
   diagnostic.basis_state = references.valid ? "ready" : "stale";
-  if (!references.valid)
-    return stop("IMPLEMENTATION_REFERENCE_STALE", "实现依据来源已失效。重新读取当前源码并追加 implementation_basis，保留原记录。");
+  if (!references.valid) {
+    if (!guidanceEnabled()) return stop("IMPLEMENTATION_REFERENCE_STALE", "实现依据来源已失效。重新读取当前源码并追加 implementation_basis，保留原记录。");
+    const guidance = domainGuidance("task_update", "IMPLEMENTATION_REFERENCE_STALE", "", {});
+    return stop("IMPLEMENTATION_REFERENCE_STALE", `实现依据来源已失效。待复核引用：${references.stale_ids?.join("、") ?? "当前依据"}。${guidance.instruction} 使用 task_update 追加 implementation_basis。`);
+  }
   const recoveryGate = await mergeRecoveryWrite(input, binding, task, pluginRoot, diagnostic, targets);
   if (recoveryGate) return stop(recoveryGate.reason, recoveryGate.instruction);
   const plan = task.business_plans?.at(-1);

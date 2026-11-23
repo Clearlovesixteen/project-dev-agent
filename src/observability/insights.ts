@@ -34,7 +34,15 @@ export function summarizeEvents(events: TelemetryEvent[], coverage: { invalid: n
   const quantile = (ratio: number) => durations.length ? durations[Math.max(0, Math.ceil(durations.length * ratio) - 1)]! : null;
   const count = (name: string) => events.filter(event => event.event_name === name).length;
   const reasonCount = (reason: string) => events.filter(event => event.reason_code === reason).length;
-  return { schema_version: 1, generated_at: new Date().toISOString(), sample_events: events.length,
+  // 仅统计返回过候选计数的主调用；历史版本和未扫描查询单列，避免补成 0。
+  const lookups = events.filter(event => event.event_name === "tool.finished" && event.attributes.tool === "project_context");
+  const projections = lookups.filter(event => event.attributes.candidate_count !== undefined);
+  return { implementation_lookups: { total: lookups.length, measured: projections.length, without_projection_counts: lookups.length - projections.length,
+      truncated: projections.filter(event => event.attributes.truncated === true).length,
+      unknown_coverage: projections.filter(event => event.attributes.coverage === "unknown").length,
+      candidates_shown: projections.reduce((sum, event) => sum + (event.attributes.selected_count ?? 0), 0),
+      candidates_omitted: projections.reduce((sum, event) => sum + Math.max(0, event.attributes.candidate_count! - (event.attributes.selected_count ?? 0)), 0) },
+    schema_version: 1, generated_at: new Date().toISOString(), sample_events: events.length,
     observed_from: events.map(event => event.occurred_at).sort()[0] ?? null,
     observed_to: events.map(event => event.occurred_at).sort().at(-1) ?? null,
     coverage, signal_coverage: { raw_events: rawFailures.length, primary_signals: failures.length, excluded_derived_events: rawFailures.length - failures.length },

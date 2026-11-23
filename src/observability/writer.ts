@@ -1,3 +1,4 @@
+import { projectionMetrics } from "./projection-metrics.js";
 import { constants } from "node:fs";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { open, opendir, unlink } from "node:fs/promises";
@@ -228,7 +229,7 @@ export async function observeTool<T>(writer: DiagnosticWriter, tool: NonNullable
     await writer.record("tool.finished", { ...(project ? { project } : {}), ...(interaction ? { session: interaction.session_id } : {}), trace, call, ...(interaction?.operation_id ? { operation: interaction.operation_id } : {}), context, duration: performance.now() - started,
       ...(task ? { task } : {}),
       outcome: diagnosticOutcome(value.outcome),
-      reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK", attributes: { tool, transport } });
+      reason: value.code && /^[A-Z][A-Z0-9_]{0,79}$/.test(value.code) ? value.code : "OK", attributes: { tool, transport, ...projectionMetrics(tool, value.data ?? {}) } });
     const eventName = tool === "task_open" ? value.code === "TASK_OPENED" ? "workflow.bound" : undefined : tool === "task_update" ? "task.transitioned"
       : tool === "task_check" && value.data?.mode !== "resume" ? "quality.checked" : tool === "project_model_record" || tool === "project_model_apply" ? "model.changed"
       : tool === "project_feedback_record" || tool === "feedback_record" ? "feedback.recorded" : tool === "project_context" ? "context.lookup" : undefined;

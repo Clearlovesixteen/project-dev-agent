@@ -15,6 +15,7 @@ import {
   MAX_SOURCE,
 } from "../understanding/scan.js";
 import type { ImplementationBasisInput } from "./basis-contracts.js";
+import { referenceError, type ReferenceIssue } from "./reference-repair.js";
 
 type BasisReference = ImplementationBasisInput["references"][number];
 
@@ -68,16 +69,15 @@ export async function recordImplementationBasis(
   const before = await reviewSnapshot(binding, head, initial, options),
     files = new ProjectFiles(binding.root),
     { config } = await loadConfig(files);
-  for (const reference of basis.references) {
+  const issues: ReferenceIssue[] = [], verified: string[] = [];
+  for (const [index, reference] of basis.references.entries()) {
     const prior = previous?.references.find(item => item.id === reference.id);
     const baseline = prior && JSON.stringify(prior) === JSON.stringify(reference) ? { binding, head, workspace: initial } : undefined;
     if (await referenceState(files, config, reference, baseline) === "stale") {
-      throw new AppError(
-        "IMPLEMENTATION_REFERENCE_INVALID",
-        `请实际读取并核对实现依据的路径、哈希及行文：${reference.path}`,
-      );
-    }
+      issues.push({ index, id: reference.id, fields: ["path", "line", "quote", "sha256"], reason: "stale_reference" });
+    } else verified.push(reference.id);
   }
+  if (issues.length) throw referenceError(issues, verified);
   // 避免引用读取期间代码变化，使记录的时机和快照与引用不属于同一工作树状态。
   if ((await reviewSnapshot(binding, head, initial, options)).hash !== before.hash)
     throw new AppError(
@@ -116,17 +116,18 @@ export async function checkWriteReferences(binding: WorktreeBinding, task: Task,
     const receipt = digest(JSON.stringify([binding.root, binding.repo_identity, binding.branch, binding.head,
       task.id, task.revision, record.basis, config]));
     if (receipt === prior) return { valid: true, receipt };
-    const valid = references.every(ref => containsQuote(sources.get(ref.path)!.text, ref));
-    return { valid, receipt: valid ? receipt : null };
+    const stale = references.filter(ref => !containsQuote(sources.get(ref.path)!.text, ref));
+    return stale.length ? { valid: false, receipt: null, stale_ids: stale.map(ref => ref.id) } : { valid: true, receipt };
   }
   // 合法的本任务内修改可改变引用文件，保留现有的不可变基线核验语义。
+  const staleIds = [];
   for (const reference of references) {
     const current = sources.get(reference.path);
     if (current?.sha256 === reference.sha256 && containsQuote(current.text, reference)) continue;
     if (!await baselineMatches(files, config, reference, { binding, head: task.baseline_head, workspace: task.workspace_baseline }))
-      return { valid: false, receipt: null };
+      staleIds.push(reference.id);
   }
-  return { valid: true, receipt: null };
+  return staleIds.length ? { valid: false, receipt: null, stale_ids: staleIds } : { valid: true, receipt: null };
 }
 
 /** 约束、实施选择或引用发生变化时只重开对应验收，移除决策也要复核其原验收。 */

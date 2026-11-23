@@ -123,7 +123,8 @@ export async function implementationCandidates(files: ProjectFiles, entries: Map
       || (consumers.get(b.entry.path)?.length ?? 0) - (consumers.get(a.entry.path)?.length ?? 0) || a.entry.path.localeCompare(b.entry.path));
   const matched = queryTerms(query).length ? ranked.filter(value => value.match.score > 0) : ranked;
   const fallback = matched.length === 0;
-  const selected = (fallback ? ranked.filter(value => value.entry.role === "shared" || consumers.has(value.entry.path)) : matched).slice(0, 8);
+  const pool = fallback ? ranked.filter(value => value.entry.role === "shared" || consumers.has(value.entry.path)) : matched;
+  const selected = pool.slice(0, 8);
   const cache = new Map<string, { text: string; sha256: string } | null>(); let bytes = 0; let partial = false;
   const read = async (entry: MapFile) => {
     if (cache.has(entry.path)) return cache.get(entry.path)!;
@@ -152,6 +153,6 @@ export async function implementationCandidates(files: ProjectFiles, entries: Map
     if (source.sha256 !== entry.sha256 || examples.some(example => example.source_state !== "current")) partial = true;
   }
   return { provider: provider.name, state: partial ? "partial" : !candidates.length ? "no_index_match" : fallback || !queryTerms(query).length ? "structural_fallback" : "matched",
-    candidates, truncated: partial || (fallback ? ranked.length : matched.length) > selected.length,
+    candidates, eligible_count: pool.length, coverage_unknown: partial, truncated: pool.length > candidates.length,
     limitations: "词法命中和导入用法是阅读线索，不证明语义绑定、适用性或项目不存在其他实现；无命中时应继续换关键词、阅读源码或刷新索引。" };
 }

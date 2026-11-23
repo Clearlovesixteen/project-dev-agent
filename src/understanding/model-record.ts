@@ -31,7 +31,7 @@ async function verifyBindingSource(resolver: CodeBindingResolver, binding: Saved
 
 /** 调用方持有理解目录写锁。先校验证据和引用，最后才发布不可变修订及索引。 */
 export async function buildModel(files: ProjectFiles, binding: WorktreeBinding, request: RecordRequest,
-  existing: SavedModel[], nextRevision = request.expected_revision + 1): Promise<SavedModel> {
+  existing: SavedModel[], nextRevision = request.expected_revision + 1, reviewedParents: SavedModel[] = []): Promise<SavedModel> {
   assertEnhancedModelWrites(request.schema_version === 3);
   const map = await readMap(files), { config } = await loadConfig(files);
   if (!map || map.scan_id !== request.scan_id || map.repo_identity !== binding.repo_identity || map.config_hash !== await mapConfigHash(files, config)
@@ -57,7 +57,7 @@ export async function buildModel(files: ProjectFiles, binding: WorktreeBinding, 
     }
     model = SavedLegacyModel.parse({ ...content, ...metadata, schema_version: 1, related_versions });
   } else {
-    const { content, old, reviewedRules, reviewedRelations, updatedSources } = prepareModel(request, prior);
+    const { content, old, reviewedRules, reviewedRelations, updatedSources } = prepareModel(request, prior, reviewedParents);
     if (content.related_paths.some((path) => excluded(path, config))) throw new AppError("PROJECT_MODEL_SOURCE_SCOPE", "不能记录配置已排除的模型来源");
     const sources = new Map(content.sources.map((source) => [source.id, source]));
     const validated = new Set<string>();
@@ -65,6 +65,7 @@ export async function buildModel(files: ProjectFiles, binding: WorktreeBinding, 
       if (!validated.has(id)) { sources.set(id, await evidence.validate(sources.get(id)!)); validated.add(id); }
     };
     for (const id of updatedSources) await validateSource(id);
+    for (const item of request.patch?.scenario_retirements ?? []) await validateSource(item.source_id);
     const versions = async (ids: string[]) => {
       for (const id of ids) await validateSource(id);
       return ids.map((id) => ({ id, fingerprint: sourceFingerprint(sources.get(id)!) }));
@@ -109,7 +110,8 @@ export async function buildModel(files: ProjectFiles, binding: WorktreeBinding, 
       related_versions.push(previous && !refreshed.has(path) ? previous : { path, sha256: await evidence.currentPath(path) });
     }
     model = (request.schema_version === 3 ? SavedModelV3 : SavedModelV2).parse({ ...content, ...metadata, schema_version: request.schema_version, revision_reason: request.revision_reason,
-      sources: [...sources.values()], rules, relations, related_versions });
+      sources: [...sources.values()], rules, relations, related_versions,
+      ...(request.patch?.scenario_retirements?.length ? { scenario_retirements: request.patch.scenario_retirements } : {}) });
   }
   if (Buffer.byteLength(JSON.stringify(model) + "\n") > 65_536)
     throw new AppError("FILE_LIMIT", "模型超过 64 KiB，请按业务能力拆分并通过 target_model_id 复用公共模型");

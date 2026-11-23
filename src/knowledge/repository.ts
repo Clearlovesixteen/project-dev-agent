@@ -5,9 +5,11 @@ import type { Knowledge } from "../domain/knowledge.js";
 import { hasCode, ProjectFiles } from "../storage/project-files.js";
 import { loadConfig, type ProjectConfig } from "./config.js";
 import { digest, parseKnowledge } from "./document.js";
+import { ReviewedTeamRule, teamKnowledge, teamRuleId, teamRulePolicy, type TeamRule } from "./team-rule-contract.js";
+import type { ProjectKnowledgeStatus } from "../project-knowledge/service.js";
 
 export interface Diagnostic { code: string; message: string }
-export interface KnowledgeEntry { file: string; version: string; knowledge: Knowledge }
+export interface KnowledgeEntry { file: string; version: string; knowledge: Knowledge; teamRule?: TeamRule }
 export interface SourceState { reference: string; state: "current" | "changed" | "missing" | "untracked" | "attested" | "unverifiable"; message?: string }
 
 export async function loadKnowledge(files: ProjectFiles): Promise<{ config: ProjectConfig; defaulted: boolean; entries: KnowledgeEntry[]; diagnostics: Diagnostic[] }> {
@@ -16,6 +18,8 @@ export async function loadKnowledge(files: ProjectFiles): Promise<{ config: Proj
   const diagnostics: Diagnostic[] = [];
   let count = 0;
   let bytes = 0;
+  // 未使用团队规则的项目沿用原有读取链路，只有遇到规则文件时才读取一次启用标记。
+  let policy: ReturnType<typeof teamRulePolicy> | undefined;
   async function walk(relative: string, depth: number): Promise<void> {
     if (depth > 4) throw new AppError("KNOWLEDGE_LIMIT", "知识目录的嵌套深度超过四层");
     const directory = await opendir(await files.path(relative));
@@ -25,11 +29,19 @@ export async function loadKnowledge(files: ProjectFiles): Promise<{ config: Proj
       try {
         if (entry.isSymbolicLink()) throw new AppError("PATH_UNSAFE", `知识路径不能使用符号链接：${child}`);
         if (entry.isDirectory()) await walk(child, depth + 1);
-        else if (entry.name.endsWith(".md")) {
+        else if (entry.name.endsWith(".md") || entry.name.endsWith(".rule.json")) {
+          const isTeamRule = entry.name.endsWith(".rule.json");
+          const enabled = isTeamRule ? await (policy ??= teamRulePolicy(files)) : undefined;
+          if (isTeamRule && !enabled) continue;
           const text = await files.read(child);
           bytes += Buffer.byteLength(text);
           if (bytes > 2_000_000 || entries.length >= 200) throw new AppError("KNOWLEDGE_LIMIT", "知识超过 200 份文档或 2 MB");
-          entries.push({ file: child, version: digest(text), knowledge: parseKnowledge(text) });
+          if (enabled) {
+            const record = ReviewedTeamRule.parse(JSON.parse(text));
+            const id = teamRuleId(record.rule);
+            if (child !== `${config.knowledge_dir}/${id}.rule.json`) throw new AppError("TEAM_RULE_PATH_INVALID", "团队规则文件名与稳定标识不匹配");
+            entries.push({ file: child, version: digest(text), knowledge: teamKnowledge(config, record, enabled.project_key), teamRule: record.rule });
+          } else entries.push({ file: child, version: digest(text), knowledge: parseKnowledge(text) });
         }
       } catch (error) {
         if (error instanceof AppError && error.code === "KNOWLEDGE_LIMIT") throw error;
@@ -71,6 +83,16 @@ export async function sourceStates(files: ProjectFiles, knowledge: Knowledge): P
         message: error instanceof Error ? error.message : String(error) };
     }
   }));
+}
+
+/** 只有命中团队规则时才加载其核验器；同一次查询或任务登记复用来源与模型视图。 */
+export function knowledgeSourceChecker(files: ProjectFiles, config: ProjectConfig, loadView?: () => Promise<ProjectKnowledgeStatus>) {
+  let team: Promise<import("./team-rule-sources.js").TeamRuleVerifier> | undefined;
+  return async (entry: KnowledgeEntry): Promise<SourceState[]> => {
+    if (!entry.teamRule) return sourceStates(files, entry.knowledge);
+    team ??= import("./team-rule-sources.js").then(({ TeamRuleVerifier }) => new TeamRuleVerifier(files, config, loadView));
+    return (await team).check(entry.teamRule, entry.knowledge);
+  };
 }
 
 export async function snapshotSources(files: ProjectFiles, sources: Source[]): Promise<Source[]> {

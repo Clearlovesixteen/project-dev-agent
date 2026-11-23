@@ -27,6 +27,7 @@ export const MapSchema = z.object({
 export type ProjectMap = z.infer<typeof MapSchema>;
 export const ScanInput = z.object({}).strict();
 export const ContextInput = z.object({ query: z.string().trim().max(2_000).default(""), paths: z.array(ConcretePath).max(30).default([]),
+  task_id: IdSchema.optional().describe("紧凑实现视图中可传本聊天已知的活跃任务 ID，以便核对已登记的修改、保护和测试位置"),
   view: z.enum(["compact", "full"]).default("full").describe("日常实现查询使用 compact，只展开命中来源与模型入口；full 保留完整查询结构"),
   modules: z.array(z.string().max(200)).max(20).default([]), limit: z.number().int().min(1).max(20).default(10),
   model_offset: z.number().int().min(0).max(200).default(0).describe("模型列表的分页起点；使用上次返回的 next_model_offset"),
@@ -38,6 +39,8 @@ export const ContextInput = z.object({ query: z.string().trim().max(2_000).defau
   code_locations: z.array(z.object({ path: ConcretePath, symbol: z.string().trim().min(1).max(180) }).strict()).min(1).max(8).optional()
     .describe("单独查询指定符号的声明或显式导入、重导出路径，修改时使用实际声明位置"),
 }).strict().superRefine((value, ctx) => {
+  if (value.task_id && (value.view !== "compact" || value.model_id || value.code_locations))
+    ctx.addIssue({ code: "custom", message: "任务计划位置只随 compact 实现视图返回" });
   if ((value.rule_ids || value.model_snapshot_id) && !value.model_id) ctx.addIssue({ code: "custom", message: "按规则或快照读取需要 model_id" });
   if (value.code_locations && value.model_id) ctx.addIssue({ code: "custom", message: "代码位置查询与模型详情分开调用" });
 });

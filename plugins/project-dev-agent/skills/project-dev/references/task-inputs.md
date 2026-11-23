@@ -42,7 +42,9 @@ MCP 会在当前工作树内核对实际原文，并计算整份文件的 SHA-25
 
 若旧调用只提供 `path/reason` 或 `id/decision`，服务返回 `TASK_INPUT_INVALID` 和需要修正的字段。读取实际源码，补齐引用、约束、实现选择与验收关联后再提交。相同错误参数再次提交会收到 `TASK_INPUT_RETRY_STOPPED`。保留当前任务和已有版本，仅修改参数。遇到 `IMPLEMENTATION_REFERENCE_INVALID` 时重新核对对应文件的当前行文及指纹。
 
-对源码、验收或任务状态相关的错误，同一请求重复失败时会保留原错误码，并返回 `retry_same_input:false` 和 `required_action`。先完成所列动作，再提交。服务每次都重新检查实际状态，因此修复源码或执行验证后可以继续使用仍有效的原参数。
+调用任务工具时选用 `response_view:"compact"`。输入或领域校验首次失败时，读取 `data.guidance_v1`，按 action 和 tool 处理当前先决条件。`reference_issues` 给出原请求中待核对的引用、字段和原因，`verified_reference_ids` 表示本次已核实的条目。失败请求整体未写入。保留完整引用和验收集合，修正后再提交。
+
+携带项目与宿主会话身份时，结构错误回执可返回 `contract_id`。已理解该项静态说明后，同一工作树和会话的下一次任务操作可附 `guidance_contract_id`；上下文压缩或标识遗失时直接省略，服务会在下次格式失败时返回完整说明。当前失败字段、来源、任务归属和修订号仍逐次核对。关闭成功时，紧凑回执的 `closure_receipt_v1` 给出当前任务、工作树、代码快照以及实际执行的检查及运行 ID。工作树或代码变化后重新核验。
 
 服务读取真实文件，核对哈希与指定行原文，检查验收 ID 是否存在。任务内 `implementation_bases` 是追加历史，`implementation_policy`、`timing`、记录时间与快照由服务生成，工具输入不能伪造。`before_changes` 仅表示记录时相对任务基线无改动；`after_changes` 如实表示已有改动，不证明先前读过代码。依据和理解是不同层次，真实引用不自动证明设计取舍正确。
 

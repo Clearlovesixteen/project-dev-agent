@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { loadConfig } from "../knowledge/config.js";
+import { ProjectFiles } from "../storage/project-files.js";
+import { ruleReviews, type RuleReviews } from "./rule-reviews.js";
 import { AppError } from "../domain/error.js";
 import type { WorktreeBinding } from "../git/baseline.js";
 import { ProjectKnowledgeRepository } from "./repository.js";
@@ -32,6 +35,7 @@ export interface ProjectKnowledgeStatus {
   modules?: KnowledgeView["modules"];
   /** 当前源码确实匹配的共享模型正文；歧义/过期时不返回，避免 Codex 误用旧分支结论。 */
   selected_models?: Array<{ snapshot_id: string; model_id: string; module: string; basis: ModuleSnapshot["basis"]; content: unknown; provenance?: ModuleSnapshot["provenance"] }>;
+  rule_reviews?: RuleReviews;
   unresolved?: string[];
   coverage?: SourceStamp["coverage"];
   message?: string;
@@ -57,7 +61,7 @@ export async function readProjectKnowledgeLight(binding: WorktreeBinding): Promi
 }
 
 /** 读取项目共享知识的当前视图；普通查询只读，不会创建项目库或改写快照。 */
-export async function readProjectKnowledge(binding: WorktreeBinding): Promise<ProjectKnowledgeStatus> {
+export async function readProjectKnowledge(binding: WorktreeBinding, options: { reviewedSnapshots?: Map<string, ModuleSnapshot>; focusRules?: Set<string> } = {}): Promise<ProjectKnowledgeStatus> {
   let repository: ProjectKnowledgeRepository | undefined;
   let identity: ProjectIdentity | undefined;
   let pointer: SnapshotPointer | undefined;
@@ -71,9 +75,11 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
     if (!pointer) return { state: "empty", project_id: identity.project_id, snapshot_count: 0 };
     const objectIds = await opened.currentObjectIds(pointer);
     const objects = await Promise.all(objectIds.map((id) => opened.readObject(id)));
+    const snapshots = options.reviewedSnapshots ?? new Map<string, ModuleSnapshot>();
     const paths = objects.flatMap(object => {
       if (object.object_type !== "module_snapshot") return [];
       const snapshot = ModuleSnapshotSchema.parse(object.content);
+      snapshots.set(object.object_id, snapshot);
       return [...snapshot.source_fingerprints, ...snapshot.dependency_fingerprints, ...snapshot.configuration_fingerprints].map(item => item.path);
     });
     const source_stamp = await collectSourceStamp(binding, { paths, includeConfiguration: true });
@@ -84,10 +90,11 @@ export async function readProjectKnowledge(binding: WorktreeBinding): Promise<Pr
     const selected_models = matchedIds.map((id) => {
       const object = objects.find((item) => item.object_id === id);
       if (!object || object.object_type !== "module_snapshot") return undefined;
-      const snapshot = ModuleSnapshotSchema.parse(object.content);
+      const snapshot = snapshots.get(id)!;
       return { snapshot_id: id, model_id: snapshot.model_id, module: snapshot.module, basis: snapshot.basis, content: snapshot.content, ...(snapshot.provenance ? { provenance: snapshot.provenance } : {}) };
     }).filter((item): item is NonNullable<typeof item> => Boolean(item));
-    return { state, project_id: identity.project_id, transaction_id: pointer.transaction_id, snapshot_count: objectIds.length,
+    const reviews = view.modules.length ? ruleReviews(snapshots, view.modules, source_stamp, (await loadConfig(new ProjectFiles(binding.root))).config, options.focusRules) : undefined;
+    return { state, ...(reviews?.items.length ? { rule_reviews: reviews } : {}), project_id: identity.project_id, transaction_id: pointer.transaction_id, snapshot_count: objectIds.length,
       source_stamp_id: source_stamp.stamp_id, view_token: view.view_token, modules: view.modules, selected_models, unresolved: view.unresolved, coverage: source_stamp.coverage };
   } catch (error) {
     const common = { ...(identity?.project_id ? { project_id: identity.project_id } : {}), ...(pointer?.transaction_id ? { transaction_id: pointer.transaction_id } : {}), snapshot_count: pointer?.object_ids.length ?? 0 };

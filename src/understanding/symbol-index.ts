@@ -1,5 +1,6 @@
 import { parse, type ParserPlugin } from "@babel/parser";
 import { digest } from "../domain/digest.js";
+import { vueScriptBlocks } from "./vue-scripts.js";
 
 export interface CodeSymbol { name: string; start: number; end: number; sha256: string; }
 export interface SymbolReference { local: string; imported: string; specifier?: string; }
@@ -50,8 +51,24 @@ function collectSymbols(ast: ReturnType<typeof parse>, text: string) {
 /** 有界静态解析，保持词法作用域限定名；不能把重名、动态属性或解析失败当作唯一定位。 */
 export function codeSymbols(path: string, text: string) {
   const unsupported = { state: "unsupported" as const, symbols: [] as CodeSymbol[], references: [] as SymbolReference[], exports: new Set<string>() };
-  if (!supported(path, text)) return unsupported;
-  try { return collectSymbols(parseCode(path, text), text); }
+  try {
+    if (path.endsWith(".vue") && Buffer.byteLength(text) <= 512_000) {
+      const blocks = vueScriptBlocks(text);
+      if (!blocks.length) return unsupported;
+      const symbols: CodeSymbol[] = [], references: SymbolReference[] = [], names = new Set<string>();
+      for (const block of blocks) {
+        const script = text.slice(block.start, block.end);
+        const parsed = collectSymbols(parseCode(block.path, script), script);
+        for (const item of parsed.symbols) symbols.push({ ...item, start: item.start + block.start, end: item.end + block.start });
+        references.push(...parsed.references);
+        // setup 声明只在组件内可见，不能让其他模块把它当作命名导出。
+        if (!block.setup) for (const name of parsed.exports) names.add(name);
+      }
+      return { state: "parsed" as const, symbols, references, exports: names };
+    }
+    if (!supported(path, text)) return unsupported;
+    return collectSymbols(parseCode(path, text), text);
+  }
   catch { return unsupported; }
 }
 
@@ -104,6 +121,30 @@ const boundaryFingerprintLimit = 128;
 
 /** 比较授权符号以外的真实词法内容。忽略排版空白，保留注释、字符串和模板内容的差异。 */
 export function outsideBindings(path: string, text: string, selectors: string[]): string | undefined {
+  if (path.endsWith(".vue") && Buffer.byteLength(text) <= 512_000) {
+    try {
+      const blocks = vueScriptBlocks(text);
+      if (!blocks.length) return undefined;
+      // 标签、模板、样式和自定义块逐字保留，只在所属脚本中屏蔽唯一授权的声明。
+      const pieces: string[] = [], seen = new Set<string>();
+      let end = 0;
+      for (const block of blocks) {
+        const script = text.slice(block.start, block.end);
+        const parsed = codeSymbols(block.path, script);
+        if (parsed.state !== "parsed") return undefined;
+        const local = parsed.symbols.filter(item => selectors.includes(item.name)).map(item => item.name);
+        for (const name of local) {
+          if (seen.has(name)) return undefined;
+          seen.add(name);
+        }
+        const fingerprint = outsideBindings(block.path, script, local);
+        if (fingerprint === undefined) return undefined;
+        pieces.push(text.slice(end, block.start), JSON.stringify([local.sort(), fingerprint]));
+        end = block.end;
+      }
+      return digest(JSON.stringify([...pieces, text.slice(end)]));
+    } catch { return undefined; }
+  }
   if (!supported(path, text)) return undefined;
   const key = digest(JSON.stringify([path, text, selectors]));
   const previous = boundaryFingerprints.get(key);

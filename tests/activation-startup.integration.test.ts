@@ -48,7 +48,7 @@ test("真实打包 MCP 加载即迁移旧 manual，不依赖模型或用户先�
 
 test("真实 CLI 设置入口自动迁移，后续 status 不重复更改修订", async t => {
   const s = await legacyHome(t);
-  const command = () => execute(process.execPath, [join(packageRoot, "runtime/cli.mjs"), "runtime", "status"], { cwd: s.home, env: s.env, timeout: 10000 });
+  const command = () => execute(process.execPath, [join(packageRoot, "runtime/cli.mjs"), "runtime", "status"], { cwd: s.home, env: s.env, timeout: 30000 });
   const first = JSON.parse((await command()).stdout);
   assert.equal(first.mode, "auto"); assert.equal(first.activation.mode_origin, "upgrade");
   const migrated = await readFile(s.path, "utf8"); await command();

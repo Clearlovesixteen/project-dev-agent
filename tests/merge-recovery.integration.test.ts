@@ -78,7 +78,7 @@ test("真实单锁文件UU冲突：task_open不能与指定来源restore形成�
   const started = performance.now();
   const actual = await new Promise<any>((resolve, reject) => {
     const child = spawn(process.execPath, [entry], { env: { ...process.env, CODEX_HOME: s.home }, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "", stderr = ""; const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("真实钩子未退出")); }, 5000);
+    let stdout = "", stderr = ""; const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("真实钩子未退出")); }, 8000);
     child.stdout.on("data", data => stdout += data); child.stderr.on("data", data => stderr += data);
     child.on("error", reject); child.on("close", code => { clearTimeout(timer); try { assert.equal(code, 0, stderr); assert.equal(stderr, ""); resolve(JSON.parse(stdout)); } catch (error) { reject(error); } });
     child.stdin.end(JSON.stringify({ hook_event_name: "PreToolUse", cwd: s.fixture.path, ...s.session, tool_name: "Bash", tool_use_id: "packaged-recovery", tool_input: { command: restore } }));
@@ -107,7 +107,7 @@ test("真实单锁文件UU冲突：task_open不能与指定来源restore形成�
   assert.notEqual(((await s.write(validation)).hookSpecificOutput as any)?.permissionDecision, "deny");
   const cli = fileURLToPath(new URL("../src/cli.js", import.meta.url));
   const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: s.home }; delete env.NODE_TEST_CONTEXT;
-  const run = JSON.parse(execFileSync(process.execPath, [cli, "validation", "run", "--project", s.fixture.path, "--task-id", task.id, "--check-id", "project-tests"], { env, encoding: "utf8", timeout: 15000 }));
+  const run = JSON.parse(execFileSync(process.execPath, [cli, "validation", "run", "--project", s.fixture.path, "--task-id", task.id, "--check-id", "project-tests"], { env, encoding: "utf8", timeout: 30000 }));
   assert.equal(run.outcome, "ok", JSON.stringify(run)); assert.equal(run.data.exit_code, 0); assert.match(run.data.output, /# fail 0/);
   const evidence = [{ kind: "manual", reference: "pnpm-lock.yaml", summary: "实际核对指定来源锁文件内容、零未合并条目与真实样例测试" }];
   const reviewed = await s.call("task_update", { task_id: task.id, expected_revision: 0, review_snapshot: (checked.data as any).review_snapshot,

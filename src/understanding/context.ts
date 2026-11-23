@@ -18,6 +18,8 @@ import { businessGraph } from "./business-graph.js";
 import { codeLocations } from "./code-locations.js";
 import { readModelSnapshot, type ProjectKnowledgeStatus } from "../project-knowledge/service.js";
 import { modelVisible, readWorktreeModels, worktreeModel } from "../project-knowledge/worktree-models.js";
+import { ImplementationView } from "../context/implementation-view.js";
+import { addTaskLocations } from "../context/plan-locations.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -83,6 +85,9 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
   const worktree = await readWorktreeModels(files, knowledge);
   const eligibleModels = worktree.models.filter(model => modelVisible(model, config));
   const evidence = new ModelEvidence(files, config, new Map(entries.map((entry) => [entry.path, entry])), map.repo_identity);
+  const projection = request.view === "compact" && !request.model_id && process.env.PROJECT_DEV_IMPLEMENTATION_VIEW !== "off"
+    ? new ImplementationView() : undefined;
+  const visible = (path: string) => !excluded(path, config);
   const materialize = (model: typeof eligibleModels[number]) => materializeModel(model, evidence, eligibleModels);
   // 详情单独返回，容量由模型存储的 64 KiB 上限约束；不能借 ID 绕过来源排除规则。
   if (request.model_id) {
@@ -119,6 +124,12 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
       ...(request.rule_ids && !reviewOnly ? { business_checks: businessScenarios([detail]) } : {}),
       report: ".project-dev/local/understanding/report.html", limitations: "模型仍是候选。请核对当前源码、适用范围和待确认问题，不能把来源匹配当成业务结论已确认。" };
   }
+  const head = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout);
+  const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
+  if (projection && request.task_id && !stale && map.coverage.complete) {
+    try { await addTaskLocations(projection, files.root, request.task_id, eligibleModels, knowledge, evidence, visible); }
+    catch (error) { projection.gap(error instanceof AppError ? error.code : "task_plan_unavailable"); }
+  }
   const modelCandidates = eligibleModels.filter((model) => !paths.length
     || [...model.scope, ...model.related_paths, ...model.sources.flatMap((source) => { const path = sourcePath(source); return path ? [path] : []; })].some((candidate) => paths.some((path) => intersects(candidate, path))));
   const directModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
@@ -139,6 +150,8 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     const details_request = { model_id: model.id, model_revision: model.revision };
     // 给本页后续摘要预留容量，避免一个大模型截断整个列表，也不截掉业务流程的中间文本。
     const preview = modelPreview(full, request.query, paths);
+    if (projection && "rules" in preview && Array.isArray(preview.rules))
+      projection.addModel(view, new Set(preview.rules.map(rule => rule.id)), visible);
     const detail = { ...full, content_truncated: false, details_request };
     const remaining = page.length - modelResults.length - 1;
     const match_reason = directIds.has(model.id) ? "direct" : "business_relation";
@@ -148,11 +161,16 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     const item = worktree.snapshotIds.has(model.id) ? { ...result, current_snapshot_id: worktree.snapshotIds.get(model.id) } : result;
     modelResults.push(item); modelBytes += 1 + Buffer.byteLength(JSON.stringify(item));
   }
-  const head = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout);
-  const stale = head !== map.head || await mapConfigHash(files, config) !== map.config_hash || fileResults.some((entry) => entry.source_state !== "current");
   const modules = moduleSummary(entries);
+  const implementation = await implementationContext(files, entries, config, paths, request.query, ranking);
+  if (projection) {
+    projection.addRepository(implementation);
+    if (!eligibleModels.length) projection.gap("no_verified_business_model");
+    if (stale || !map.coverage.complete) projection.gap(stale ? "index_needs_rescan" : "index_coverage_partial");
+    if (knowledge && !["matched", "empty", "not_initialized"].includes(knowledge.state)) projection.gap("model_view_needs_review");
+  }
   return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-    implementation_context: await implementationContext(files, entries, config, paths, request.query, ranking),
+    implementation_context: implementation, ...(projection ? { implementation_view_v1: projection.result() } : {}),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     business_graph: graph,
     impact: impactCandidates(entries, eligibleModels, paths.length ? paths : selected.slice(0, request.limit).map(item => item.entry.path)),

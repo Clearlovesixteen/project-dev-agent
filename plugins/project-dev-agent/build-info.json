@@ -1,5 +1,5 @@
 {
-  "version": "0.14.2",
+  "version": "0.15.0-rc.1",
   "node": ">=18.19.0",
   "business_model_mode": "writer",
   "dependencies": [
@@ -11,6 +11,21 @@
     {
       "name": "@modelcontextprotocol/sdk",
       "version": "1.32.1",
+      "license": "MIT"
+    },
+    {
+      "name": "@vue/compiler-core",
+      "version": "3.5.46",
+      "license": "MIT"
+    },
+    {
+      "name": "@vue/compiler-dom",
+      "version": "3.5.46",
+      "license": "MIT"
+    },
+    {
+      "name": "@vue/shared",
+      "version": "3.5.46",
       "license": "MIT"
     },
     {
@@ -26,6 +41,16 @@
     {
       "name": "cross-spawn",
       "version": "7.0.6",
+      "license": "MIT"
+    },
+    {
+      "name": "entities",
+      "version": "7.0.1",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "estree-walker",
+      "version": "2.0.2",
       "license": "MIT"
     },
     {
@@ -64,6 +89,11 @@
       "license": "MIT"
     },
     {
+      "name": "source-map-js",
+      "version": "1.2.4",
+      "license": "BSD-3-Clause"
+    },
+    {
       "name": "undici",
       "version": "6.29.1",
       "license": "MIT"
@@ -92,8 +122,8 @@
   "files": [
     {
       "path": ".codex-plugin/plugin.json",
-      "bytes": 941,
-      "sha256": "d45308c9d2cd62ee47f71bdfa7190999635261a097c8a7ab9d3d024cba9a5f36"
+      "bytes": 946,
+      "sha256": "5c2d464955da21beecca0b360f12b37e157fc92e5532f29b0f83b376f7c82611"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -172,13 +202,13 @@
     },
     {
       "path": "package.json",
-      "bytes": 332,
-      "sha256": "0ef49157ca0a647da29defbb540d26340d7607e5e2c058097a8c38776ab671be"
+      "bytes": 337,
+      "sha256": "e49123be55e692aa3ba183d0cacf83148004b8e388c4e330b58ca3554d862390"
     },
     {
       "path": "README.md",
-      "bytes": 2123,
-      "sha256": "d9ed25616f26590ac69cfff2081721c4bff2f32c8ea6caad02120d40b9acead0"
+      "bytes": 2128,
+      "sha256": "9726437eb661df314caf31e7dfaf2e9b7739dbc8acf224f7962880cf054ff732"
     },
     {
       "path": "runtime/behavior-reporter.mjs",
@@ -187,18 +217,18 @@
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1827664,
-      "sha256": "9bcef5e9c01f125ee1cee29826e44679723ede85c39d374604ce4447ab66867e"
+      "bytes": 1869709,
+      "sha256": "ea1ddba17a2c50a36a0e6dc2cfc2fe9811242a451324c1f95946ed0778a4140e"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 779947,
-      "sha256": "9a49e8c37b88fa578665e4777d5acb9bb55a80a7317a502ea5398e7d700d5078"
+      "bytes": 786243,
+      "sha256": "0dd76cf7400c565544c91e719832986f41eb76e11c6949bcc1e8991abc2a6db8"
     },
     {
       "path": "runtime/symbol-index.mjs",
-      "bytes": 315849,
-      "sha256": "0b855939e47cc25d269350b2dde6b023a779f4b1f74bf95f4146430ced328059"
+      "bytes": 627095,
+      "sha256": "037e84c9b24f0858c15f648601093768ef6eb1a4c11d59aabb5bddd4332b263b"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
@@ -222,13 +252,13 @@
     },
     {
       "path": "skills/project-dev/references/task-inputs.md",
-      "bytes": 24839,
-      "sha256": "4faa3aa8ae1690545cc41ec57ddc3f57dab0f5d1362d615dad1d8379cf226d61"
+      "bytes": 25469,
+      "sha256": "4d88c68994e0ba41100a49f0a4c7a4f2a7842b7023857c569c174ace02fa9a4b"
     },
     {
       "path": "skills/project-dev/references/understanding-inputs.md",
-      "bytes": 19616,
-      "sha256": "d4e26437cb5bdbfd600d164d4ee0530e88a7d8365c88c899ef4133ddcfc74730"
+      "bytes": 20674,
+      "sha256": "23ce303ec90a19c6cdace26c6fbbbdfe8c8492555fcfe7435f5fffbdbccb714e"
     },
     {
       "path": "skills/project-dev/references/workflow.md",
@@ -237,8 +267,8 @@
     },
     {
       "path": "skills/project-dev/SKILL.md",
-      "bytes": 6663,
-      "sha256": "c59c1e7dbb006cec4685079f8b041beb7714fd9e372acfd72e075a50c13278ee"
+      "bytes": 6808,
+      "sha256": "01828d89eaa72a085046e8efd43bce47779af7b0a1702e3c503835eee2039bf4"
     },
     {
       "path": "skills/project-dev-setup/agents/openai.yaml",
@@ -632,8 +662,8 @@
     },
     {
       "path": "THIRD-PARTY-NOTICES.txt",
-      "bytes": 18518,
-      "sha256": "69d14e72db9df4267cbf2cde3db69ef37771acb55b3581dc135de0f0a1189532"
+      "bytes": 25954,
+      "sha256": "ba02e4d9532cf3eb10bb176ad28f64d0b718289578a50fee645e297358351057"
     }
   ]
 }

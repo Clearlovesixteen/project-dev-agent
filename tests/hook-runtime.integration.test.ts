@@ -16,7 +16,8 @@ import { DiagnosticWriter } from "../src/observability/writer.js";
 import { uploadDiagnostics } from "../src/observability/uploader.js";
 import { PUBLISHED_DIAGNOSTICS } from "../src/runtime/published-diagnostics.js";
 
-const entry = fileURLToPath(new URL("../../plugins/project-dev-agent/runtime/hooks.mjs", import.meta.url));
+const packagedRoot = fileURLToPath(new URL("../../plugins/project-dev-agent/", import.meta.url));
+const entry = join(packagedRoot, "runtime/hooks.mjs");
 async function run(home: string, input: string, end = true, extraEnv: NodeJS.ProcessEnv = {}, executable = entry) {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn(process.execPath, [executable], { env: { ...process.env, CODEX_HOME: home, ...extraEnv }, stdio: ["pipe", "pipe", "pipe"] });
@@ -41,14 +42,13 @@ test("独立钩子面对无效/超限/未结束输入都返回单个 JSON，不�
 });
 
 test("已打包的 UserPromptSubmit 使用独立轻量入口，其他四项仍指向真实运行时", async t => {
-  const root = fileURLToPath(new URL("../../plugins/project-dev-agent/", import.meta.url));
-  const config = JSON.parse(await readFile(join(root, "hooks/hooks.json"), "utf8"));
+  const config = JSON.parse(await readFile(join(packagedRoot, "hooks/hooks.json"), "utf8"));
   for (const name of ["SessionStart", "PreToolUse", "PostToolUse", "Stop"])
     assert.equal(config.hooks[name][0].hooks[0].command, 'node "${PLUGIN_ROOT}/runtime/hooks.mjs"');
   assert.equal(config.hooks.UserPromptSubmit[0].hooks[0].command, 'node "${PLUGIN_ROOT}/hooks/prompt.mjs"');
   const home = await mkdtemp(join(tmpdir(), "pda-prompt-only-")); t.after(() => rm(home, { recursive: true, force: true }));
   const result = await run(home, JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "长".repeat(60_000) }),
-    true, {}, join(root, "hooks/prompt.mjs"));
+    true, {}, join(packagedRoot, "hooks/prompt.mjs"));
   assert.equal(result.code, 0); assert.equal(result.stderr, ""); assert.equal(result.stdout, "{}\n");
   await assert.rejects(readFile(join(home, "project-dev-agent/runtime.json")), { code: "ENOENT" });
 });
@@ -83,7 +83,7 @@ test("真实运行包的修改前钩子会拒绝未查询上下文的补丁，�
 });
 
 test("发布钩子清单给 PreToolUse 保留足够的宿主预算", async () => {
-  const manifest = JSON.parse(await readFile(join(process.cwd(), "hooks/hooks.json"), "utf8"));
+  const manifest = JSON.parse(await readFile(join(packagedRoot, "hooks/hooks.json"), "utf8"));
   const preToolUse = manifest.hooks.PreToolUse[0].hooks[0];
   const sessionStart = manifest.hooks.SessionStart[0].hooks[0];
   const stop = manifest.hooks.Stop[0].hooks[0];

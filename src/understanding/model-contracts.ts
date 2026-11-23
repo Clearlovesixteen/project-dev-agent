@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RuleSemantics, CodeBindingInput, SavedCodeBinding } from "./semantic-contracts.js";
 import { IdSchema } from "../domain/common.js";
 import { ConcretePath, HASH, ShortText } from "./fields.js";
+import { ScenarioRetirement } from "./scenario-retirement.js";
 
 const Responsibility = z.enum(["frontend", "backend", "shared", "unknown"]);
 export const Basis = z.enum(["observed", "intended", "inferred"]);
@@ -65,6 +66,7 @@ export const SavedModelV2 = ModelContentV2.extend({
   rules: z.array(SavedRule).min(1).max(20), relations: z.array(SavedRelation).max(30),
 });
 export const SavedModelV3 = ModelContentV3.extend({ schema_version: z.literal(3), ...SavedMetadata, revision_reason: ShortText,
+  scenario_retirements: z.array(ScenarioRetirement).max(40).optional(),
   rules: z.array(SavedRuleV3).min(1).max(20), relations: z.array(SavedRelation).max(30) });
 export const SavedModelSchema = z.discriminatedUnion("schema_version", [SavedLegacyModel, SavedModelV2, SavedModelV3]);
 export type SavedModel = z.infer<typeof SavedModelSchema>;
@@ -78,6 +80,7 @@ export type RelationV2 = z.infer<typeof BusinessRelation>;
 
 /** 只提交实际复核的条目。未提交的条目及其证据版本原样保留，避免整份模型被误刷新。 */
 export const ModelPatch = z.object({
+  scenario_retirements: z.array(ScenarioRetirement).max(40).optional(),
   metadata: ModelMetadata.partial().optional(),
   upsert_sources: z.array(ModelSource).max(30).optional(), remove_source_ids: z.array(IdSchema).max(30).optional(),
   upsert_rules: z.array(BusinessRuleV3).max(20).optional(), remove_rule_ids: z.array(IdSchema).max(20).optional(),
