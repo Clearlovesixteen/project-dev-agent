@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
+import { runSlowSessionStart } from "./helpers/run-slow-session-start.js";
 import { DIAGNOSTIC_NOTICE, RuntimeSettings } from "../src/runtime/config.js";
 import { PluginSettings } from "../src/plugin-settings.js";
 import { DiagnosticWriter } from "../src/observability/writer.js";
@@ -57,12 +58,12 @@ test("真实打包入口在 auto 下输出路由，只有写出 stdout 才计 em
   const home = join(fixture.root, "codex-home"); await mkdir(home);
   await new PluginSettings(home).prepare(fixture.path, { apply: true });
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
-  const result = await run(home, JSON.stringify({ hook_event_name: "SessionStart", session_id: "entry-session", cwd: fixture.path, source: "startup" }));
-  assert.equal(result.code, 0); assert.equal(result.stderr, "");
-  const parsed = JSON.parse(result.stdout); assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
+  const parsed = runSlowSessionStart(home, { session_id: "entry-session", cwd: fixture.path, source: "startup" });
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes("Project Dev Agent"));
   const events = (await new DiagnosticWriter(home).read()).events;
   assert.equal(events.filter(event => event.event_name === "context.emitted").length, 1);
+  assert.deepEqual(events.filter(event => event.event_name === "hook.finished").map(event => event.outcome), ["ok"]);
   assert.equal((await new RuntimeSettings(home).current()).diagnostics.upload, false);
 });
 

@@ -192,8 +192,8 @@
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 779506,
-      "sha256": "7a43ae7529a8e86e03d7b3af584cab0a1826211a32ae6a02bfe7124969fce8ad"
+      "bytes": 779947,
+      "sha256": "9a49e8c37b88fa578665e4777d5acb9bb55a80a7317a502ea5398e7d700d5078"
     },
     {
       "path": "runtime/symbol-index.mjs",

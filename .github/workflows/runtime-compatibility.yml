@@ -43,33 +43,11 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          # 只展示测试名称、位置和断言，避免维护者为定位用例翻找整份作业日志。
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          report = Path(os.environ["RUNNER_TEMP"]) / "project-dev-runtime.tap"
-          if report.exists():
-              remaining = 0
-              details = []
-              for line in report.read_text(errors="replace").splitlines():
-                  if line.lstrip().startswith("not ok "):
-                      title = line.strip().replace("%", "%25")
-                      print(f"::error::{title}")
-                      details.append(line.strip())
-                      remaining = 35
-                  elif remaining:
-                      remaining -= 1
-                      if re.match(r"\s*(location:|error:|code:|operator:|expected:|actual:|at TestContext|duration_ms:)", line, re.I):
-                          detail = line.strip()[:350]
-                          details.append(detail)
-                          if detail.startswith(("at TestContext", "location:", "code:")):
-                              print("::notice::" + detail.replace("%", "%25"))
-              if details:
-                  with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-                      summary.write("#### 失败的测试\n\n````text\n" + "\n".join(details) + "\n````\n")
-          PY
+          # 检查页直接列出失败用例，具体诊断仍留在原始作业日志中。
+          report="$RUNNER_TEMP/project-dev-runtime.tap"
+          if [[ -f "$report" ]]; then
+            awk '/^[[:space:]]*not ok / { gsub(/%/, "%25"); print "::error::" $0 }' "$report"
+          fi
 
   windows-readonly:
     name: Windows PowerShell 与跨会话读取

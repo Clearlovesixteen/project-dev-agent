@@ -20,9 +20,13 @@ import { AppError } from "../domain/error.js";
 import { resolveWriteTargets } from "./write-targets.js";
 import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 
+/** 会话入口在 stdout 成功后提交本批事件；没有实际输出上下文时省略交付事件。 */
+export type FlushSessionDiagnostics = (emitted?: DiagnosticRecordInput) => Promise<void>;
+
 /** 原生钩子提供项目入口并检查支持的写入路径；不执行项目脚本、不覆盖其他专业流程。 */
 export async function handleHook(raw: unknown, pluginRoot: string, home?: string,
   control: { trace?: string; signal?: AbortSignal; onMode?: (mode: "manual" | "observe" | "auto") => void;
+    onSessionDiagnostics?: (flush: FlushSessionDiagnostics) => void;
     onDiagnostic?: (context: DiagnosticContext) => void } = {}): Promise<Record<string, unknown>> {
   const parsed = HookInput.safeParse(raw);
   if (!parsed.success) return {};
@@ -59,20 +63,26 @@ export async function handleHook(raw: unknown, pluginRoot: string, home?: string
     const snapshot = { ...diagnostic, ...data.context };
     pendingRecords.push({ name, input: { ...data, context: snapshot } });
   };
-  const flushRecords = async (required = false) => {
+  const flushRecords: FlushSessionDiagnostics = async emitted => {
+    // 先取走快照再等待写盘，重复回调不会重复产生准备或交付事件。
     if (!pendingRecords.length) return;
     const batch = pendingRecords.splice(0, pendingRecords.length);
-    if (required) {
+    if (emitted) batch.push({ name: "context.emitted", input: emitted });
+    if (input.hook_event_name === "Stop") {
       // Stop 后宿主可能马上结束，收尾事件必须在返回前完整落盘。
       await writer.recordMany(batch);
       return;
     }
-    // 普通输入钩子没有后续读取依赖，诊断只能短暂等待，不能拖住真实门禁。
-    // 后台写入即使继续完成，也不会与本轮上传或清理并发。
-    await bestEffort(() => writer.recordMany(batch), 50);
+    // 会话启动只写一批，给正常慢盘留出余量；写前等高频路径沿用短预算。
+    await bestEffort(() => writer.recordMany(batch), input.hook_event_name === "SessionStart" ? 350 : 50);
   };
   const complete = async (output: Record<string, unknown>) => {
-    await flushRecords(input.hook_event_name === "Stop");
+    if (input.hook_event_name === "SessionStart" && control.onSessionDiagnostics) {
+      control.onSessionDiagnostics(flushRecords);
+    } else {
+      // 直接调用 handleHook 没有宿主 stdout 回执，只落已观测的事件。
+      await flushRecords();
+    }
     return output;
   };
   const guard = () => { if (control.signal?.aborted) throw new Error("HOOK_DEADLINE"); };

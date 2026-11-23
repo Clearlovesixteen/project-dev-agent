@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
+import { runSlowSessionStart } from "./helpers/run-slow-session-start.js";
 import { RuntimeSettings, DIAGNOSTIC_NOTICE } from "../src/runtime/config.js";
 import { PluginSettings } from "../src/plugin-settings.js";
 import { handleHook } from "../src/hooks/handler.js";
@@ -27,12 +29,33 @@ test("自动钩子在工作范围外正常跳过，不把其他项目计作上�
   await new PluginSettings(home).configure({ workspace: fixture.path, apply: true, expected_revision: null });
   await new RuntimeSettings(home).configure({ apply: true, expected_revision: null, mode: "auto" });
   const prior = await readFile(join(home, "project-dev-agent/settings.json"), "utf8");
-  const output = await handleHook({ hook_event_name: "SessionStart", session_id: "outside-session", cwd: other.path, prompt: "修复这个项目" }, fixture.path, home);
+  const writer = new DiagnosticWriter(home);
+  const directSession = await writer.opaque("outside-direct"), packagedSession = await writer.opaque("outside-packaged");
+
+  // 直接调用没有子进程输出回调，原生 API 返回时仍应能读到这次跳过的诊断。
+  const recordMany = DiagnosticWriter.prototype.recordMany;
+  let pending: Promise<boolean> | undefined;
+  const slowWriter = t.mock.method(DiagnosticWriter.prototype, "recordMany", function (this: DiagnosticWriter, records: Parameters<typeof recordMany>[0]) {
+    pending = delay(120).then(() => recordMany.call(this, records));
+    return pending;
+  });
+  const direct = await handleHook({ hook_event_name: "SessionStart", session_id: "outside-direct", cwd: other.path }, fixture.path, home);
+  const atReturn = (await writer.read()).events.filter(event => event.session_id === directSession);
+  slowWriter.mock.restore();
+  await pending;
+  assert.match(String(direct.systemMessage), /未参与本轮/);
+  assert.equal(direct.hookSpecificOutput, undefined);
+  assert.deepEqual(atReturn.filter(event => event.event_name === "hook.finished").map(event => [event.outcome, event.reason_code]),
+    [["skipped", "PROJECT_OUTSIDE_WORKSPACE"]]);
+
+  const output = runSlowSessionStart(home, { session_id: "outside-packaged", cwd: other.path, prompt: "修复这个项目" });
   assert.match(String(output.systemMessage), /未参与本轮/);
+  assert.equal(output.hookSpecificOutput?.additionalContext, undefined);
   assert.equal(await readFile(join(home, "project-dev-agent/settings.json"), "utf8"), prior);
-  const event = (await new DiagnosticWriter(home).read()).events.find(event => event.event_name === "hook.finished");
-  assert.equal(event?.outcome, "skipped");
-  assert.equal(event?.reason_code, "PROJECT_OUTSIDE_WORKSPACE");
+  const { events } = await writer.read();
+  assert.deepEqual(events.filter(event => event.session_id === packagedSession && event.event_name === "hook.finished").map(event => [event.outcome, event.reason_code]),
+    [["skipped", "PROJECT_OUTSIDE_WORKSPACE"]]);
+  assert.equal(events.filter(event => event.event_name === "context.emitted").length, 0);
 });
 
 test("auto 首次使用 Git 项目能给出初始化入口，钩子本身不擅自保存项目配置", async t => {

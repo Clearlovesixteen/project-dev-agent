@@ -2,8 +2,8 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { handleHook } from "./handler.js";
-import { DiagnosticWriter } from "../observability/writer.js";
+import { handleHook, type FlushSessionDiagnostics } from "./handler.js";
+import { DiagnosticWriter, type DiagnosticRecordInput } from "../observability/writer.js";
 import { bestEffort } from "../runtime/best-effort.js";
 import type { TelemetryAttributes } from "../observability/contracts.js";
 import { HookInput, denyWrite, type NativeHookInput } from "./contracts.js";
@@ -33,21 +33,29 @@ function unavailable(reason: string) {
     ? denyWrite(`Project Dev Agent：修改前检查未完成（${reason}）。先核对项目准备及运行状态，再重试。`)
     : pendingInput ? { systemMessage: `Project Dev Agent：本轮辅助未完成（${reason}），不能记为插件已参与。` } : {};
 }
-function finish(result: Record<string, unknown>) {
+function finish(result: Record<string, unknown>, flushSession?: FlushSessionDiagnostics) {
   if (finished) return;
   finished = true;
   const serialized = JSON.stringify(result);
-  process.stdout.write(serialized + "\n", async () => {
+  // SessionStart 的宿主预算为 3 秒。给输出使用剩余时间，并为诊断及退出预留余量。
+  const outputDeadline = pendingInput?.hook_event_name === "SessionStart"
+    ? setTimeout(() => process.exit(1), Math.max(1, 2400 - (performance.now() - started))).unref() : undefined;
+  process.stdout.once("error", () => process.exit(1));
+  process.stdout.write(serialized + "\n", async error => {
+    clearTimeout(outputDeadline);
+    if (error) process.exit(1);
     // 只有实际写出 stdout 才记录 emitted；准备完成不能算成宿主已经接收到资料。
     const output = result.hookSpecificOutput as { additionalContext?: string; hookEventName?: TelemetryAttributes["event"] } | undefined;
+    let emitted: DiagnosticRecordInput | undefined;
     if (output?.additionalContext) {
       const contextId = /context_id=([a-f0-9]{64})/.exec(output.additionalContext)?.[1];
-      await bestEffort(() => new DiagnosticWriter().record("context.emitted", { ...correlation,
-        attributes: { transport: "hook", output_bytes: Buffer.byteLength(output.additionalContext!),
-          ...(output.hookEventName ? { event: output.hookEventName } : {}), ...(contextId ? { context_id: contextId } : {}) } }), 50);
+      emitted = { ...correlation, call: invocation,
+        attributes: { transport: "hook", output_bytes: Buffer.byteLength(output.additionalContext),
+          ...(output.hookEventName ? { event: output.hookEventName } : {}), ...(contextId ? { context_id: contextId } : {}) } };
     }
-    // 业务钩子事件已经在 handleHook 返回前完整落盘；此处只剩可选的
-    // context.emitted 诊断，保持原生钩子进程有界退出，不让宿主等待后台日志。
+    // 正常 SessionStart 在这里连同 skipped 或 emitted 一次落盘。超时降级只记录实际写出的输出。
+    if (flushSession) await flushSession(emitted);
+    else if (emitted) await bestEffort(() => new DiagnosticWriter().record("context.emitted", emitted), 50);
     process.exit(0);
   });
 }
@@ -86,8 +94,10 @@ try {
     const turn = "turn_id" in input && typeof input.turn_id === "string" && input.turn_id.length <= 200 ? input.turn_id : undefined;
     correlation = { session: input.session_id, trace: turn ?? invocation };
   }
+  let flushSession: FlushSessionDiagnostics | undefined;
   const output = await handleHook(input, pluginRoot, undefined, { trace: invocation, signal: controller.signal,
+    onSessionDiagnostics: flush => { flushSession = flush; },
     onMode: mode => { activeMode = mode; }, onDiagnostic: context => { diagnostic = context; } });
-  if (!expired) finish(output);
+  if (!expired) finish(output, flushSession);
 } catch { if (!expired) finish(unavailable("HOOK_RUNTIME_FAILED")); }
 finally { clearTimeout(softTimer!); if (!expired) clearTimeout(hardTimer!); }
