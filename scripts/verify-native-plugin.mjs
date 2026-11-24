@@ -2,6 +2,7 @@
 // Usage: node scripts/verify-native-plugin.mjs /absolute/path/to/codex [v0.10.0]
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -87,9 +88,23 @@ try {
     await writeFile(packagePath, JSON.stringify({ ...packageInfo, version: prior }));
     manifest.version = prior;
     await writeFile(manifestPath, JSON.stringify(manifest));
-    const bundle = await readFile(join(source, "runtime/cli.mjs"), "utf8");
+    // 运行时已经压缩成 tar，合成旧版本时同步改写包内 CLI 和启动器的版本指纹。
+    const runtimeArchive = join(source, "runtime/runtime-bundle.tgz");
+    const runtimeDirectory = join(temporary, "synthetic-runtime");
+    await mkdir(runtimeDirectory, { recursive: true });
+    await run("tar", ["-xzf", runtimeArchive, "-C", runtimeDirectory], temporary);
+    const bundlePath = join(runtimeDirectory, "cli.mjs");
+    const bundle = await readFile(bundlePath, "utf8");
     assert.equal(bundle.split(JSON.stringify(current)).length, 2, "Runtime version must occur exactly once");
-    await writeFile(join(source, "runtime/cli.mjs"), bundle.replace(JSON.stringify(current), JSON.stringify(prior)));
+    await writeFile(bundlePath, bundle.replace(JSON.stringify(current), JSON.stringify(prior)));
+    await run("tar", ["-czf", runtimeArchive, "-C", runtimeDirectory,
+      "cli.mjs", "hooks.mjs", "symbol-index.mjs", "behavior-reporter.mjs"], temporary);
+    const archive = await readFile(runtimeArchive);
+    const loaderPath = join(source, "runtime/loader.mjs");
+    const loader = await readFile(loaderPath, "utf8");
+    await writeFile(loaderPath, loader
+      .replace(/const VERSION = "[^"]+";/, `const VERSION = ${JSON.stringify(prior)};`)
+      .replace(/const ARCHIVE_SHA256 = "[^"]+";/, `const ARCHIVE_SHA256 = ${JSON.stringify(createHash("sha256").update(archive).digest("hex"))};`));
   }
   await git(["init", "-b", "main"]);
   const commit = async (message) => { await git(["add", "."]); await git(["-c", "user.name=Plugin test", "-c", "user.email=plugin-test@example.invalid", "commit", "-m", message]); };

@@ -1,8 +1,8 @@
-# Project Dev Agent 0.15.0
+# Project Dev Agent 0.15.1
 
 此目录是 Codex 插件发布产物，由 `npm run build:plugin` 生成，请修改源码后重新构建。
 
-运行环境：Node.js 18.19.0+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。
+运行环境：Node.js 18.19.0+ 和 Git。依赖已打包，无需 npm install。使用 Node 18.19+ 的业务项目可以直接使用，无需升级项目 Node。运行时采用压缩资产和轻量启动器，首次启动按版本与校验值解压到 Codex 用户缓存，后续复用缓存。
 
 安装、更新和迁移说明：[仓库 README](https://github.com/Clearlovesixteen/project-dev-agent#readme)。
 

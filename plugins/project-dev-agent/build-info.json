@@ -1,5 +1,5 @@
 {
-  "version": "0.15.0",
+  "version": "0.15.1",
   "node": ">=18.19.0",
   "business_model_mode": "writer",
   "dependencies": [
@@ -123,7 +123,7 @@
     {
       "path": ".codex-plugin/plugin.json",
       "bytes": 941,
-      "sha256": "e345e2a416341f20bb8bf1915003ba05ef879855ee5f4145fff33d57f991fa90"
+      "sha256": "3a44687ed145273ce57f37d43bdfb4fadcda0892fbb9a32a3dbab24ff15cb729"
     },
     {
       "path": "fixtures/sample-project-template/.gitignore",
@@ -203,32 +203,32 @@
     {
       "path": "package.json",
       "bytes": 332,
-      "sha256": "4503574659ad22dd02106d7c025fbd05a3b1db0b7944f120595c2b34c65048d5"
+      "sha256": "87d21815eb5e96c8d2b3150d912da5639e4f3da9946917a430af5d1920803b7d"
     },
     {
       "path": "README.md",
-      "bytes": 2123,
-      "sha256": "e993bf8e5b2922a5b20d54977557b00c91f45d543538323206fa492cd315db59"
-    },
-    {
-      "path": "runtime/behavior-reporter.mjs",
-      "bytes": 516,
-      "sha256": "6a7d3c760b7bbb2aa10bde17a8a51830572cfa95f83457dd654fe7da89570f50"
+      "bytes": 2256,
+      "sha256": "272fc2369b9e3ebde376f9751b8ad1b2d47b9c0e75ecefb5641a3823b93daac8"
     },
     {
       "path": "runtime/cli.mjs",
-      "bytes": 1869704,
-      "sha256": "d85dc303db5a9fa1fba70d898b808eab8a64b029112538b440006cf2fe072657"
+      "bytes": 316,
+      "sha256": "a8da62ce8ca206199e9c1b9e19f48f8cac20e19b3e2c0f173a0235949092bf6e"
     },
     {
       "path": "runtime/hooks.mjs",
-      "bytes": 786238,
-      "sha256": "4e0a0ee1a1b36b66317926d1180d1eafbfb4bf65ee33fa89d09c905a4853c719"
+      "bytes": 319,
+      "sha256": "12b1e2ed1e404e5fd6541f007048a147b11a6dd24aa474f3fad7aa134fe552ce"
     },
     {
-      "path": "runtime/symbol-index.mjs",
-      "bytes": 627095,
-      "sha256": "037e84c9b24f0858c15f648601093768ef6eb1a4c11d59aabb5bddd4332b263b"
+      "path": "runtime/loader.mjs",
+      "bytes": 4039,
+      "sha256": "ee230f3f3f31daa2c5a95616e3547744d9ff53bd8c13d98dffa8b740618e0c50"
+    },
+    {
+      "path": "runtime/runtime-bundle.tgz",
+      "bytes": 909395,
+      "sha256": "4e2f252931497741e89542acf5bcd7b44b3095ce573befef1ec41286dfd38855"
     },
     {
       "path": "skills/project-dev/agents/openai.yaml",
