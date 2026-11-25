@@ -7,7 +7,7 @@ import { dependencyFingerprint, ruleFingerprint } from "../understanding/model-e
 import { loadWorktreeModels } from "../project-knowledge/worktree-models.js";
 import { behaviorFiles } from "./behavior-execution.js";
 import { businessBoundary } from "./business-boundary.js";
-import { businessInputsCurrent, planFingerprint } from "./business-plan.js";
+import { businessInputsCurrent, modificationScope, planFingerprint } from "./business-plan.js";
 import type { BusinessPlanRecord } from "./business-plan-contracts.js";
 import { activeBusinessDeltas, planRule, relatedPaths, ruleKey } from "./business-plan-targets.js";
 import { readValidationRun } from "./validation-store.js";
@@ -50,9 +50,25 @@ export async function businessPlanIssues(binding: WorktreeBinding, task: Task, r
   all: Awaited<ReturnType<typeof loadWorktreeModels>>["models"]) {
   const deltas = activeBusinessDeltas(task);
   const issues: string[] = [];
-  if (knowledge.state === "unavailable") issues.push("project_knowledge_unavailable");
-  if (knowledge.modules?.some(item => ["ambiguous", "partial"].includes(item.state) && record.input.rules.some(rule => rule.model_id === item.model_id)))
+  const referencedModels = new Set(record.input.rules.map(rule => rule.model_id));
+  const newModelIds = new Set(activeBusinessDeltas(task).filter(delta => !!delta.input.new_model).map(delta => delta.input.model_id));
+  const existingModelIds = new Set([...referencedModels].filter(id => !newModelIds.has(id)));
+  const relevantModules = knowledge.modules?.filter(item => existingModelIds.has(item.model_id)) ?? [];
+  if (knowledge.state === "unavailable" || existingModelIds.size > 0 && (!relevantModules.length || relevantModules.some(item => item.state === "partial")))
+    issues.push("project_knowledge_unavailable");
+  const scope = modificationScope(record);
+  const expectedPath = (path: string) => scope.has(path);
+  const moduleReviews = relevantModules.filter(item => item.state !== "matched");
+  if (moduleReviews.some(item => item.state === "ambiguous" || item.state === "partial" || !item.reasons.length
+    || item.reasons.some(reason => !reason.startsWith("source_changed:") || !expectedPath(reason.slice("source_changed:".length)))))
     issues.push("project_model_review_required");
+  if (existingModelIds.size && knowledge.state === "needs_review" && !knowledge.modules?.length)
+    issues.push("project_model_review_required");
+  const focusedRules = new Set(record.input.rules.map(rule => `${rule.model_id}/${rule.rule_id}`));
+  const unplannedReviews = knowledge.rule_reviews?.items.filter(item => focusedRules.has(`${item.model_id}/${item.rule_id}`)
+    && (!expectedPath(item.path) || ["configuration", "evidence_revision"].includes(item.kind))) ?? [];
+  if (unplannedReviews.length)
+    issues.push("project_model_rule_review_required");
   if (record.fingerprint !== planFingerprint(record)) issues.push("plan_corrupt");
   if (!await businessInputsCurrent(binding, task, record)) issues.push("input_changed");
   if (record.input.input_items.some(item => item.kind === "unresolved")) issues.push("unresolved_requirement");
@@ -79,7 +95,9 @@ export async function businessPlanReview(binding: WorktreeBinding, task: Task, s
   if (!required && !task.acceptance_criteria.some(item => item.business_check)) return { state: "not_applicable" as const, required: false };
   const files = new ProjectFiles(binding.root);
   const focusRules = new Set(record?.input.rules.map(rule => rule.model_id + "/" + rule.rule_id));
-  const { knowledge, models: all } = await loadWorktreeModels(binding, files, focusRules);
+  const loaded = await loadWorktreeModels(binding, files, focusRules);
+  const { knowledge } = loaded;
+  const all = [...loaded.models, ...loaded.reviewCandidates];
   const enhancedAcceptance = task.acceptance_criteria.some(item => item.business_check && all.some(model => model.id === item.business_check!.model_id
     && model.schema_version === 3 && model.rules.some(rule => rule.id === item.business_check!.rule_id && !!rule.semantics)));
   if (!record) return required || enhancedAcceptance ? { state: "missing" as const, required: true } : { state: "not_applicable" as const, required: false };

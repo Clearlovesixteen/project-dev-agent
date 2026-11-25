@@ -110,9 +110,9 @@ export function selectModelRules(model: Awaited<ReturnType<typeof materializeMod
 }
 
 /** 默认只给有限摘要；规则的条件、异常和依据通过详情按需获取。 */
-export function modelPreview(model: Awaited<ReturnType<typeof materializeModel>>, query: string, paths: string[]) {
+export function modelPreview(model: Awaited<ReturnType<typeof materializeModel>> & { review_only?: boolean }, query: string, paths: string[]) {
   const base = { id: model.id, revision: model.revision, schema_version: model.schema_version, module: model.module, title: model.title,
-    summary: model.summary.slice(0, 200), status: model.status, effective: false, content_truncated: true,
+    summary: model.summary.slice(0, 200), status: model.status, effective: false, ...(model.review_only ? { review_only: true } : {}), content_truncated: true,
     related_path_count: model.related_paths.length, details_request: { model_id: model.id, model_revision: model.revision } };
   if (model.schema_version === 1) return base;
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);

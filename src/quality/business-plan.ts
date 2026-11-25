@@ -27,8 +27,8 @@ export function modificationScope(record: BusinessPlanRecord) {
   return paths;
 }
 
-export function planFingerprint(record: Pick<BusinessPlanRecord, "input" | "targets" | "source_versions" | "related_versions" | "recorded_snapshot">) {
-  return digest(JSON.stringify(["business-plan-v1", record.input, record.targets, record.source_versions, record.related_versions, record.recorded_snapshot]));
+export function planFingerprint(record: Pick<BusinessPlanRecord, "input" | "targets" | "source_versions" | "related_versions" | "recorded_snapshot" | "base_snapshot_ids">) {
+  return digest(JSON.stringify(["business-plan-v1", record.input, record.targets, record.source_versions, record.related_versions, record.recorded_snapshot, ...(record.base_snapshot_ids ? [record.base_snapshot_ids] : [])]));
 }
 
 async function inputVersions(binding: WorktreeBinding, task: Task, plan: BusinessPlan) {
@@ -66,9 +66,15 @@ export async function recordBusinessPlan(binding: WorktreeBinding, task: Task, v
     throw new AppError("BUSINESS_PLAN_ACCEPTANCE", "范围决定须关联本任务的验收项");
   const source_versions = await inputVersions(binding, task, plan);
   const files = new ProjectFiles(binding.root);
-  const { config, knowledge, models: all } = await loadWorktreeModels(binding, files);
-  if (knowledge.modules?.some(item => ["ambiguous", "partial"].includes(item.state) && plan.rules.some(rule => rule.model_id === item.model_id)))
-    throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次业务计划引用了存在歧义或覆盖不足的模型，请先复核");
+  const focusedRules = new Set(plan.rules.map(ruleKey));
+  const { config, knowledge, snapshotIds, models: all } = await loadWorktreeModels(binding, files, focusedRules);
+  const referencedModels = new Set(plan.rules.map(rule => rule.model_id));
+  const newModelIds = new Set(activeBusinessDeltas(task).filter(delta => !!delta.input.new_model).map(delta => delta.input.model_id));
+  const existingModelIds = new Set([...referencedModels].filter(id => !newModelIds.has(id)));
+  if ([...existingModelIds].some(id => !snapshotIds.has(id)))
+    throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次业务计划引用的模型尚未完成当前源码核验，请先复核来源、冲突和覆盖范围");
+  if (knowledge.rule_reviews?.items.some(item => focusedRules.has(`${item.model_id}/${item.rule_id}`)))
+    throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次业务计划引用的规则存在来源或绑定复核项，请先处理后再登记计划");
   const targets = await captureTargets(binding, task, plan, all);
   const byBinding = new Map(targets.flatMap(target => target.bindings.map(bound => [bindingKey({ ...target, binding_id: bound.input.id }), bound.input] as const)));
   const decisions = new Map(plan.decisions.map(item => [bindingKey(item), item]));
@@ -130,7 +136,8 @@ export async function recordBusinessPlan(binding: WorktreeBinding, task: Task, v
       related_versions.push(original ?? { path: item.path, sha256: digest(await safeSource(files, item.path, config)) });
     } catch { throw new AppError("BUSINESS_PLAN_RELATION_UNRESOLVED", `关联核对位置需要真实的只读文件：${item.path}`); }
   }
-  const inputs = { input: plan, targets, source_versions, related_versions, recorded_snapshot: snapshot.hash };
+  const base_snapshot_ids = [...existingModelIds].sort().map(model_id => ({ model_id, snapshot_id: snapshotIds.get(model_id)! }));
+  const inputs = { input: plan, targets, base_snapshot_ids, source_versions, related_versions, recorded_snapshot: snapshot.hash };
   const record = BusinessPlanRecord.parse({ ...inputs, fingerprint: "0".repeat(64), recorded_at: new Date().toISOString() });
   record.fingerprint = planFingerprint(record);
   const nextScope = modificationScope(record), priorScope = previous ? modificationScope(previous) : new Map<string, Set<string> | null>();

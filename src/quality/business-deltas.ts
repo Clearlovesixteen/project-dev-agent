@@ -275,7 +275,7 @@ export async function recordBusinessDeltas(
       );
     const newModel = raw.base_revision === 0;
     const selection = knowledge.modules?.find(item => item.model_id === raw.model_id);
-    if (selection?.state === "ambiguous" || selection?.state === "partial")
+    if (!newModel && (selection?.state !== "matched" || !snapshotIds.has(raw.model_id)))
       throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "草案使用的模型在当前工作树尚无唯一适用版本，请先核对候选");
     if (newModel && all.some(model => model.id === raw.model_id))
       throw new AppError("BUSINESS_DELTA_CONFLICT", "新业务模型 ID 已存在，请读取后按已有模型建立草案");
@@ -402,7 +402,10 @@ export async function businessDeltaReview(
       limitation: "本任务没有业务变更草案。",
     };
   const files = new ProjectFiles(binding.root);
-  const { models: all } = await loadWorktreeModels(binding, files);
+  const loaded = await loadWorktreeModels(binding, files);
+  // 回执复核需要看到当前工作树的本地候选，才能把“代码已变化”识别为
+  // stale。候选只用于比较与给出修订提示，仍不会进入普通生成上下文。
+  const all = [...loaded.models, ...loaded.reviewCandidates];
   const items = [], evidence = await evidenceFor(files, binding, task);
   for (const record of active) {
     const raw = await optional(files, receiptPath(task, record)),
@@ -588,18 +591,27 @@ export async function applyBusinessDelta(
   const apply = async () => {
     const path = receiptPath(task, record);
     const raw = await optional(files, path), journal = raw ? JournalSchema.parse(JSON.parse(raw)) : JournalSchema.parse({});
-    const { knowledge, config, models: visible } = await loadWorktreeModels(binding, files);
+    const { knowledge, config, models: visible, reviewCandidates } = await loadWorktreeModels(binding, files,
+      new Set([`${record.input.model_id}/${record.input.rule_id}`]));
     if (knowledge.state === "unavailable") throw new AppError("PROJECT_KNOWLEDGE_UNAVAILABLE", "共享业务模型暂无法核验，请重新查询当前项目");
     const selection = knowledge.modules?.find(item => item.model_id === record.input.model_id);
-    if (selection?.state === "ambiguous" || selection?.state === "partial")
+    if (!record.input.new_model && (!selection || selection.state === "ambiguous" || selection.state === "partial"))
       throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次规则回写涉及未解决的模型候选，请先复核");
+    if (knowledge.rule_reviews?.items.some(item => item.model_id === record.input.model_id && item.rule_id === record.input.rule_id
+      && ["configuration", "evidence_revision"].includes(item.kind)))
+      throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "本次规则回写涉及待复核的来源或绑定，请先处理模型证据");
     const local = (await models(files)).find(item => item.id === record.input.model_id);
     const chosen = visible.find(item => item.id === record.input.model_id);
     // Codex 修改代码后，原规则自然不再匹配。用任务开工时保存的只读快照恢复实际前镜像。
     const pinned = !chosen && record.base_snapshot_id
       ? await readModelSnapshot(binding, record.input.model_id, record.base_snapshot_id) : undefined;
     const pinnedModel = pinned ? worktreeModel(binding.root, pinned.content, record.input.model_id) : undefined;
-    const existing = journal.pending && local ? local : chosen ?? pinnedModel;
+    // 业务回写是在当前工作树已改代码之后执行的。此时本地旧模型仍是
+    // “待复核候选”，但它可能包含同一任务之外已经保存的摘要或规则修订，
+    // 不能退回开工快照把这些合法修订覆盖掉。只有显式业务回写路径才
+    // 使用候选作为合并基线，普通生成链路仍只接收 visible。
+    const candidate = reviewCandidates.find(item => item.id === record.input.model_id);
+    const existing = journal.pending && local ? local : chosen ?? candidate ?? pinnedModel;
     const all = [...visible.filter(item => item.id !== record.input.model_id), ...(existing && modelVisible(existing, config) ? [existing] : [])];
     const initialModel = record.input.new_model;
     const model = existing || !initialModel ? requireModel(all, record.input.model_id) : undefined;

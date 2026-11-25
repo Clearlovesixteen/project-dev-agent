@@ -4,6 +4,7 @@ import test from "node:test";
 import { ObjectEnvelopeSchema } from "../src/project-knowledge/contracts.js";
 import { resolveKnowledgeView } from "../src/project-knowledge/view-resolver.js";
 import { SourceStampSchema, type SourceStamp } from "../src/project-knowledge/source-stamp.js";
+import { ModelTrustSchema, modelTrust } from "../src/project-knowledge/model-trust.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const source = (path: string, value: string) => ({ path, kind: "file" as const, sha256: hash(value), bytes: value.length, status: ["tracked" as const] });
@@ -19,6 +20,15 @@ const snapshot = (id: string, model_id: string, paths: Array<[string, string]>, 
     model_id, module: model_id, parent_snapshot_ids: parents.map(hash), basis: "observed",
     source_fingerprints: paths.map(([path, value]) => ({ path, sha256: hash(value) })), dependency_fingerprints: [], configuration_fingerprints: [], content: { id },
   },
+});
+
+test("旧快照默认是 candidate，verified 必须携带完整复核凭据", () => {
+  assert.equal(modelTrust(undefined).state, "candidate");
+  assert.equal(ModelTrustSchema.safeParse({ state: "verified" }).success, false);
+  const verified = ModelTrustSchema.parse({ state: "verified", source_stamp_id: "a".repeat(64), review_snapshot: "b".repeat(64),
+    verified_at: "2026-01-01T00:00:00.000Z", verified_by: "task:closed" });
+  assert.equal(verified.state, "verified");
+  assert.equal(ModelTrustSchema.safeParse({ state: "conflict" }).success, false);
 });
 
 test("selects the snapshot matching the current branch source evidence", () => {

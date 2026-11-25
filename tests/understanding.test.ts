@@ -8,10 +8,12 @@ import { bindWorktree } from "../src/git/index.js";
 import { ProjectFiles } from "../src/storage/project-files.js";
 import { UnderstandingService } from "../src/understanding/service.js";
 import { mapFiles, models, readMap } from "../src/understanding/store.js";
+import { digest } from "../src/knowledge/document.js";
 import { KnowledgeService } from "../src/knowledge/service.js";
 import { ProjectKnowledgeRepository } from "../src/project-knowledge/repository.js";
 import { prepareProject } from "../src/personal-setup.js";
 import { publishModelShadow } from "../src/project-knowledge/service.js";
+import { loadWorktreeModels } from "../src/project-knowledge/worktree-models.js";
 
 async function setup(t: { after: (action: () => Promise<void>) => void }) {
   const fixture = await createGitFixture(); t.after(fixture.cleanup);
@@ -94,8 +96,15 @@ test("models validate current exact evidence, preserve revisions and flag all re
   assert.equal(search.understanding.models[0].status, "candidate"); assert.equal(search.understanding.models[0].effective, false);
   await put("src/shared/status.ts", "export const state = 'closed';\n");
   const context = (await service.context({ paths: ["src/pages/orders"] })).data as any;
+  assert.equal(context.models[0].id, "order-state");
+  assert.equal(context.models[0].review_only, true, "过期模型只能作为显式复核候选返回");
+  assert.equal(context.models[0].effective, false);
   assert.equal(context.models[0].status, "needs_review");
   assert.ok(context.models[0].source_states.some((source: any) => source.path === "src/shared/status.ts" && source.state === "changed"));
+  assert.equal(context.review_candidates[0].id, "order-state");
+  const loaded = await loadWorktreeModels(binding, files);
+  assert.deepEqual(loaded.models, [], "needs_review 模型不能回退为当前工作模型");
+  assert.equal(loaded.reviewCandidates[0]!.id, "order-state");
   assert.equal((await service.record({ ...model, expected_revision: 2 })).code, "PROJECT_SOURCE_CHANGED");
 });
 
@@ -131,6 +140,7 @@ test("saved model is shadow-published to the project knowledge store and invalid
   assert.equal(first.project_knowledge.snapshot_count, 1);
   assert.ok(first.project_knowledge.view_token);
   assert.equal(first.project_knowledge.selected_models[0].model_id, "order-state");
+  assert.equal(first.project_knowledge.selected_models[0].trust.state, "candidate");
   assert.equal(first.project_knowledge.selected_models[0].content.id, "order-state");
   assert.equal(first.project_knowledge.selected_models[0].content.project, undefined);
   const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
@@ -149,6 +159,25 @@ test("saved model is shadow-published to the project knowledge store and invalid
   const changed = (await service.context({ paths: ["src/pages/orders"] })).data as any;
   assert.equal(changed.project_knowledge.state, "needs_review");
   assert.ok(changed.project_knowledge.unresolved.some((item: string) => item.startsWith("order-state:")));
+});
+
+test("当前源码匹配显式拒绝的快照时，完整响应也撤回正文和旧本地副本", async t => {
+  const { service, input, binding } = await setup(t);
+  await service.scan({});
+  const model = await input();
+  const original = await service.record(model);
+  const repository = (await ProjectKnowledgeRepository.openExisting(binding.repo_identity))!;
+  const prior = await repository.readObject((original.data as any).snapshot_id);
+  const content = { ...prior.content as object, parent_snapshot_ids: [prior.object_id],
+    trust: { state: "rejected", reason: "复核确认规则不适用" } };
+  await repository.publish({ operation_id: "reject-model", objects: [
+    { ...prior, object_id: digest(JSON.stringify(content)), content },
+  ] });
+  const full = (await service.context({ paths: model.scope })).data as any;
+  assert.equal(full.project_knowledge.modules[0].state, "matched");
+  assert.deepEqual(full.project_knowledge.selected_models, []);
+  assert.deepEqual(full.models, []);
+  assert.deepEqual(full.review_candidates, []);
 });
 
 test("首次准备会把旧工作树模型影子迁移到项目公共知识库，不把分支内容直接合并", async (t) => {
@@ -195,6 +224,43 @@ test("日常实现摘要只带已验证的模型入口，源码变化时撤回�
   const changed = (await service.context(query)).data as any;
   assert.equal(changed.project_knowledge.state, "needs_review");
   assert.notEqual(current.context_id, changed.context_id);
+});
+
+test("待复核 v3 规则只供核对，紧凑实施视图撤回位置和保留行为", async t => {
+  const { service, input, put } = await setup(t);
+  await service.scan({});
+  const original = await input(), source = { ...original.sources[0]!, id: "order-line", kind: "code" };
+  const ruleId = "order-label", refs = [source.id];
+  const recorded = await service.record({ ...original, schema_version: 3, revision_reason: "核对订单标签入口",
+    sources: [source], relations: [], rules: [{ ...original.rules[0], id: ruleId, basis: "observed", conditions: ["进入订单页面"],
+      exceptions: [], source_ids: refs, bindings: [{ id: "label-entry", path: source.path, symbol: "label", role: "reuse", source_ids: refs }],
+      semantics: { subject: "order", action: "display", when: { field: "visible", op: "eq", value: true }, expected: "显示状态",
+        source_ids: refs, cases: [], preserves: [{ id: "label", description: "保留订单状态标签", source_ids: refs }] } }] });
+  assert.equal(recorded.outcome, "ok", JSON.stringify(recorded));
+  const query = { view: "compact", paths: ["src/pages/orders"] };
+  const before = (await service.context(query)).data as any;
+  assert.ok(before.implementation_view_v1.reuse.items.some((item: any) => item.binding_id === "label-entry"));
+  assert.ok(before.implementation_view_v1.preserved_behaviors.items.some((item: any) => item.model_id === original.id));
+
+  // 只变更依赖；源码绑定本身仍能定位，更能检验旧规则是否重新混入实施依据。
+  await put("src/shared/status.ts", "export const state = 'closed';\n");
+  const compact = (await service.context(query)).data as any;
+  assert.deepEqual(compact.models, []);
+  assert.equal(compact.review_candidates[0].review_only, true);
+  assert.equal(compact.review_candidates[0].effective, false);
+  assert.equal(compact.review_candidates[0].rules, undefined);
+  for (const role of ["modify", "reuse", "verify", "protect", "inspect", "preserved_behaviors"])
+    assert.ok(compact.implementation_view_v1[role].items.every((item: any) => item.model_id !== original.id), role);
+  const unrelated = (await service.context({ view: "compact", paths: ["src/other"] })).data as any;
+  assert.deepEqual(unrelated.review_candidates, []);
+  const full = (await service.context({ paths: query.paths })).data as any;
+  assert.equal(full.models[0].review_only, true, "v3 分页摘要须保留复核标记");
+  for (const extra of [{}, { model_snapshot_id: (recorded.data as any).snapshot_id }]) {
+    const detail = (await service.context({ model_id: original.id, rule_ids: [ruleId], ...extra })).data as any;
+    assert.equal(detail.models[0].review_only, true);
+    assert.equal(detail.models[0].status, "needs_review");
+    assert.equal(detail.business_checks, undefined);
+  }
 });
 
 test("同一源码内容仅改变 staged 状态时不会产生重复的共享业务候选", async (t) => {

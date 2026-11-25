@@ -9,6 +9,7 @@ import { digest } from "../src/knowledge/document.js";
 import { businessDeltaScenarios } from "../src/quality/business-deltas.js";
 import { runValidation } from "../src/quality/validation-runner.js";
 import { ProjectFiles } from "../src/storage/project-files.js";
+import { readProjectKnowledge } from "../src/project-knowledge/service.js";
 import { TaskService } from "../src/task-service.js";
 import { ruleFingerprint } from "../src/understanding/model-evidence.js";
 import { UnderstandingService } from "../src/understanding/service.js";
@@ -219,4 +220,6 @@ for (const input of ["sdd", "prd"] as const) test(`${input.toUpperCase()} 贯通
   task = TaskSchema.parse(((await service.check({ task_id: task.id })).data as any).recorded_task);
   await update({ phase: "closed", review_snapshot: token });
   assert.equal(task.phase, "closed");
+  const verified = await readProjectKnowledge(binding);
+  assert.equal(verified.selected_models?.find(item => item.model_id === modelId)?.trust.state, "verified");
 }));

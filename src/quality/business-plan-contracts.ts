@@ -35,6 +35,8 @@ const BoundTarget = z.object({ model_id: IdSchema, rule_id: IdSchema, rule_finge
   }).strict()).max(20),
 }).strict();
 export const BusinessPlanRecord = z.object({ input: BusinessPlanInput, targets: z.array(BoundTarget).min(1).max(20),
+  // 固定规则实际读取的模型快照，旧计划可以缺少此字段。
+  base_snapshot_ids: z.array(z.object({ model_id: IdSchema, snapshot_id: ReviewSnapshotSchema }).strict()).max(20).optional(),
   source_versions: z.array(z.object({ id: IdSchema, fingerprint: ReviewSnapshotSchema }).strict()).min(1).max(40),
   related_versions: z.array(z.object({ path: RelativePathSchema, sha256: ReviewSnapshotSchema }).strict()).max(30),
   fingerprint: ReviewSnapshotSchema,

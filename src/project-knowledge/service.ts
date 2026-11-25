@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { loadConfig } from "../knowledge/config.js";
+import { loadConfig, type ProjectConfig } from "../knowledge/config.js";
 import { ProjectFiles } from "../storage/project-files.js";
 import { ruleReviews, type RuleReviews } from "./rule-reviews.js";
 import { AppError } from "../domain/error.js";
@@ -8,6 +8,10 @@ import { ProjectKnowledgeRepository } from "./repository.js";
 import { collectSourceStamp, isConfigurationPath, type SourceStamp } from "./source-stamp.js";
 import { ModuleSnapshotSchema, resolveKnowledgeView, type KnowledgeView, type ModuleSnapshot } from "./view-resolver.js";
 import { ObjectEnvelopeSchema, ProjectKnowledgeApplyReceiptSchema, type ObjectEnvelope, type ProjectIdentity, type SnapshotPointer, type ProjectKnowledgeApplyReceipt } from "./contracts.js";
+import { ModelVerificationInputSchema, isVerifiedTrust, modelTrust, type ModelTrust, type ModelVerificationInput } from "./model-trust.js";
+import { TaskStore } from "../storage/task-store.js";
+import { reviewSnapshot } from "../git/review-snapshot.js";
+import { worktreeModel } from "./model-visibility.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -34,7 +38,7 @@ export interface ProjectKnowledgeStatus {
   view_token?: string;
   modules?: KnowledgeView["modules"];
   /** 当前源码确实匹配的共享模型正文；歧义/过期时不返回，避免 Codex 误用旧分支结论。 */
-  selected_models?: Array<{ snapshot_id: string; model_id: string; module: string; basis: ModuleSnapshot["basis"]; content: unknown; provenance?: ModuleSnapshot["provenance"] }>;
+  selected_models?: Array<{ snapshot_id: string; model_id: string; module: string; basis: ModuleSnapshot["basis"]; content: unknown; trust: ModelTrust; provenance?: ModuleSnapshot["provenance"] }>;
   rule_reviews?: RuleReviews;
   unresolved?: string[];
   coverage?: SourceStamp["coverage"];
@@ -61,7 +65,7 @@ export async function readProjectKnowledgeLight(binding: WorktreeBinding): Promi
 }
 
 /** 读取项目共享知识的当前视图；普通查询只读，不会创建项目库或改写快照。 */
-export async function readProjectKnowledge(binding: WorktreeBinding, options: { reviewedSnapshots?: Map<string, ModuleSnapshot>; focusRules?: Set<string> } = {}): Promise<ProjectKnowledgeStatus> {
+export async function readProjectKnowledge(binding: WorktreeBinding, options: { reviewedSnapshots?: Map<string, ModuleSnapshot>; applyReceipts?: ProjectKnowledgeApplyReceipt[]; focusRules?: Set<string>; evidence?: { stamp?: SourceStamp; config?: ProjectConfig } } = {}): Promise<ProjectKnowledgeStatus> {
   let repository: ProjectKnowledgeRepository | undefined;
   let identity: ProjectIdentity | undefined;
   let pointer: SnapshotPointer | undefined;
@@ -75,6 +79,12 @@ export async function readProjectKnowledge(binding: WorktreeBinding, options: { 
     if (!pointer) return { state: "empty", project_id: identity.project_id, snapshot_count: 0 };
     const objectIds = await opened.currentObjectIds(pointer);
     const objects = await Promise.all(objectIds.map((id) => opened.readObject(id)));
+    // 验收时同时取得这一次 CURRENT 中的回执，避免复核模型和回执读取不同事务。
+    if (options.applyReceipts) for (const object of objects) {
+      if (object.object_type !== "receipt") continue;
+      const receipt = ProjectKnowledgeApplyReceiptSchema.safeParse(object.content);
+      if (receipt.success) options.applyReceipts.push(receipt.data);
+    }
     const snapshots = options.reviewedSnapshots ?? new Map<string, ModuleSnapshot>();
     const paths = objects.flatMap(object => {
       if (object.object_type !== "module_snapshot") return [];
@@ -91,9 +101,13 @@ export async function readProjectKnowledge(binding: WorktreeBinding, options: { 
       const object = objects.find((item) => item.object_id === id);
       if (!object || object.object_type !== "module_snapshot") return undefined;
       const snapshot = snapshots.get(id)!;
-      return { snapshot_id: id, model_id: snapshot.model_id, module: snapshot.module, basis: snapshot.basis, content: snapshot.content, ...(snapshot.provenance ? { provenance: snapshot.provenance } : {}) };
+      return { snapshot_id: id, model_id: snapshot.model_id, module: snapshot.module, basis: snapshot.basis, content: snapshot.content,
+        trust: modelTrust(snapshot.trust), ...(snapshot.provenance ? { provenance: snapshot.provenance } : {}) };
     }).filter((item): item is NonNullable<typeof item> => Boolean(item));
-    const reviews = view.modules.length ? ruleReviews(snapshots, view.modules, source_stamp, (await loadConfig(new ProjectFiles(binding.root))).config, options.focusRules) : undefined;
+    const config = view.modules.length ? (await loadConfig(new ProjectFiles(binding.root))).config : undefined;
+    // 写前核对使用同一次查询取得的完整指纹，展示给会话的复核原因可以截断。
+    if (config && options.evidence) Object.assign(options.evidence, { stamp: source_stamp, config });
+    const reviews = config ? ruleReviews(snapshots, view.modules, source_stamp, config, options.focusRules) : undefined;
     return { state, ...(reviews?.items.length ? { rule_reviews: reviews } : {}), project_id: identity.project_id, transaction_id: pointer.transaction_id, snapshot_count: objectIds.length,
       source_stamp_id: source_stamp.stamp_id, view_token: view.view_token, modules: view.modules, selected_models, unresolved: view.unresolved, coverage: source_stamp.coverage };
   } catch (error) {
@@ -205,7 +219,7 @@ export async function publishModelShadow(
     parent_snapshot_ids: options.parent_snapshot_ids ?? (anchor ? [anchor.id] : parents.map(parent => parent.id)), basis,
     source_fingerprints: source_fingerprints.map((item) => ({ path: item.path, sha256: item.sha256 })),
     dependency_fingerprints: dependency_fingerprints.map((item) => ({ path: item.path, sha256: item.sha256 })),
-    configuration_fingerprints, content: sharedModel } satisfies ModuleSnapshot;
+    configuration_fingerprints, trust: { state: "candidate" as const, reason: "model_record_requires_review" }, content: sharedModel } satisfies ModuleSnapshot;
   const snapshot = {
     ...baseContent,
     provenance: { repo_identity: binding.repo_identity, worktree_id: digest(`${binding.repo_identity}\n${binding.root}`), head: source_stamp.head, source_stamp_id: evidence_stamp_id, recorded_at: recordedAt },
@@ -251,4 +265,79 @@ export async function publishModelShadow(
   }
   await repository.publish({ operation_id, objects, ...(options.expected_transaction_id !== undefined ? { expected_transaction_id: options.expected_transaction_id } : {}) });
   return { snapshot_id: parsed.object_id, ...(receipt_id ? { receipt_id } : {}), source_stamp_id: source_stamp.stamp_id };
+}
+
+function snapshotDescendsFrom(snapshots: Map<string, ModuleSnapshot>, currentId: string, ancestorId: string): boolean {
+  const pending = [currentId];
+  const visited = new Set<string>();
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (id === ancestorId) return true;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    pending.push(...(snapshots.get(id)?.parent_snapshot_ids ?? []));
+  }
+  return false;
+}
+
+function taskCoversAllModelRules(task: Awaited<ReturnType<TaskStore["load"]>>, model: ReturnType<typeof worktreeModel>, reviewToken: string): boolean {
+  if (!model || model.schema_version === 1) return false;
+  const planned = new Set(task.business_plans?.at(-1)?.input.rules.filter(item => item.model_id === model.id).map(item => item.rule_id));
+  const checked = new Set(task.acceptance_criteria.filter(item => item.status === "checked" && item.review_snapshot === reviewToken
+    && item.business_check?.model_id === model.id).map(item => item.business_check!.rule_id));
+  return model.rules.every(rule => planned.has(rule.id) || checked.has(rule.id));
+}
+
+/**
+ * 将已完成任务的候选快照提升为 verified。
+ *
+ * 验证只创建新的不可变快照，不修改候选对象，也不接受模型正文或外部
+ * 传入的 verified 标志。提交前再次核对当前源码唯一匹配、计划基线、
+ * 全部规则验收和当前事务，避免并行工作树或部分验收把旧结论标成最新。
+ */
+export async function publishModelVerification(binding: WorktreeBinding, rawInput: ModelVerificationInput): Promise<{ snapshot_id: string; source_stamp_id: string }> {
+  const input = ModelVerificationInputSchema.parse(rawInput);
+  const task = await new TaskStore(binding.root).load(input.task_id);
+  if (task.repo_identity !== binding.repo_identity || task.worktree_path !== binding.root || task.phase !== "closed")
+    throw new AppError("PROJECT_MODEL_VERIFICATION_TASK_REQUIRED", "只有当前工作树已关闭且完成验收的任务才能提升模型可信度");
+  const reviewSnapshots = new Set([
+    ...task.acceptance_criteria.map(item => item.review_snapshot),
+    ...task.change_items.map(item => item.review_snapshot),
+    ...task.validations.map(item => item.review_snapshot),
+  ].filter((value): value is string => typeof value === "string"));
+  if (!reviewSnapshots.has(input.review_snapshot) || task.acceptance_criteria.some(item => item.status !== "checked"))
+    throw new AppError("PROJECT_MODEL_VERIFICATION_REVIEW_REQUIRED", "模型可信度回写必须关联已关闭任务的验收快照");
+  const currentReviewSnapshot = (await reviewSnapshot(binding, task.baseline_head, task.workspace_baseline)).hash;
+  if (currentReviewSnapshot !== input.review_snapshot)
+    throw new AppError("PROJECT_MODEL_VERIFICATION_REVIEW_REQUIRED", "模型可信度回写使用了旧的验收快照，请在当前工作树重新核验后再关闭任务");
+  const repository = await ProjectKnowledgeRepository.openExisting(binding.repo_identity);
+  if (!repository) throw new AppError("PROJECT_KNOWLEDGE_UNAVAILABLE", "项目知识库不存在，无法记录模型验证");
+  const currentIds = await repository.currentObjectIds();
+  if (!currentIds.includes(input.snapshot_id)) throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "待验证模型快照已不在当前项目知识库中");
+  const objects = await Promise.all(currentIds.map(id => repository.readObject(id)));
+  const snapshots = new Map<string, ModuleSnapshot>();
+  for (const object of objects) if (object.object_type === "module_snapshot") snapshots.set(object.object_id, ModuleSnapshotSchema.parse(object.content));
+  const snapshot = snapshots.get(input.snapshot_id);
+  if (!snapshot) throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "待验证对象不是模块快照");
+  if (snapshot.model_id !== input.model_id) throw new AppError("PROJECT_MODEL_SNAPSHOT_UNKNOWN", "待验证快照与模型身份不匹配");
+  const priorTrust = modelTrust(snapshot.trust);
+  const currentModel = worktreeModel(binding.root, snapshot.content, input.model_id);
+  if (!taskCoversAllModelRules(task, currentModel, input.review_snapshot))
+    throw new AppError("PROJECT_MODEL_VERIFICATION_REVIEW_REQUIRED", "当前任务没有覆盖该业务模型的全部规则，模型继续保持候选状态");
+  if (input.base_snapshot_id && !snapshotDescendsFrom(snapshots, input.snapshot_id, input.base_snapshot_id))
+    throw new AppError("PROJECT_MODEL_VERIFICATION_REVIEW_REQUIRED", "当前模型快照不属于任务计划记录的模型基线，请重新读取并复核");
+  const paths = [...new Set([...snapshot.source_fingerprints, ...snapshot.dependency_fingerprints].map(item => item.path))];
+  const source_stamp = await collectSourceStamp(binding, { paths, includeConfiguration: true });
+  const view = resolveKnowledgeView({ source_stamp, snapshots: objects });
+  const selected = view.modules.find(item => item.model_id === input.model_id);
+  if (!selected || selected.state !== "matched" || selected.selected_snapshot_id !== input.snapshot_id)
+    throw new AppError("PROJECT_MODEL_VERIFICATION_REVIEW_REQUIRED", "当前源码没有唯一匹配到待验证快照，请重新核对模型和并行分支后再验证");
+  if (isVerifiedTrust(priorTrust, selected.state)) return { snapshot_id: input.snapshot_id, source_stamp_id: source_stamp.stamp_id };
+  const verified = ModuleSnapshotSchema.parse({ ...snapshot, parent_snapshot_ids: [input.snapshot_id],
+    trust: { state: "verified", reason: "task_review_and_validation_passed", source_stamp_id: source_stamp.stamp_id,
+      review_snapshot: input.review_snapshot, verified_at: new Date().toISOString(), verified_by: `task:${input.task_id}` } });
+  const envelope = ObjectEnvelopeSchema.parse({ schema_version: 1, object_type: "module_snapshot",
+    object_id: digest(JSON.stringify(verified)), content: verified });
+  await repository.publish({ operation_id: input.operation_id, objects: [envelope], ...(input.expected_transaction_id !== undefined ? { expected_transaction_id: input.expected_transaction_id } : {}) });
+  return { snapshot_id: envelope.object_id, source_stamp_id: source_stamp.stamp_id };
 }

@@ -4,6 +4,7 @@ import { AppError } from "../domain/error.js";
 import { HASH } from "../understanding/fields.js";
 import { ObjectEnvelopeSchema, type ObjectEnvelope } from "./contracts.js";
 import { SourceStampSchema, type SourceStamp } from "./source-stamp.js";
+import { ModelTrustSchema, modelTrust, type ModelTrust } from "./model-trust.js";
 
 const FingerprintSchema = z.object({ path: z.string().min(1), sha256: HASH.nullable() }).strict();
 const BasisSchema = z.enum(["observed", "intended", "inferred"]);
@@ -21,9 +22,14 @@ export const ModuleSnapshotSchema = z.object({
     repo_identity: z.string().min(1), worktree_id: HASH, head: z.string().regex(/^[a-f0-9]{40,64}$/),
     source_stamp_id: HASH, recorded_at: z.string().datetime({ offset: true }),
   }).strict().optional(),
+  // 0.15.1 及更早快照没有可信度字段，读取时按 candidate 迁移。
+  trust: ModelTrustSchema.optional(),
   content: z.unknown(),
 }).strict();
 export type ModuleSnapshot = z.infer<typeof ModuleSnapshotSchema>;
+
+export { ModelTrustSchema, modelTrust };
+export type { ModelTrust };
 
 export const ViewModuleSchema = z.object({
   model_id: z.string().min(1), state: z.enum(["matched", "needs_review", "ambiguous", "partial"]),

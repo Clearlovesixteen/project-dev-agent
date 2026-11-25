@@ -15,6 +15,9 @@ export function compactContext(data: Record<string, any>) {
       title: model.title, summary: String(model.summary ?? "").slice(0, 140), status: model.status,
       rules: (model.rules ?? []).slice(0, 2).map((rule: any) => ({ id: rule.id, basis: rule.basis, description: String(rule.description ?? "").slice(0, 100), freshness: rule.freshness })),
       details_request: model.details_request ?? { model_id: model.id, model_revision: model.revision } })),
+    review_candidates: (data.review_candidates ?? []).slice(0, 3).map((model: any) => ({ id: model.id, revision: model.revision,
+      title: model.title, status: "needs_review", review_only: true, effective: false,
+      details_request: model.details_request ?? { model_id: model.id, model_revision: model.revision } })),
     // 只把共享知识视图的状态和可追溯 ID 放入自动上下文；完整快照仍通过 project_context 按需读取。
     project_knowledge: data.project_knowledge ? {
       state: data.project_knowledge.state, project_id: data.project_knowledge.project_id,
@@ -34,11 +37,12 @@ export function boundedSummary(data: Record<string, any>, maximum = 4_000): stri
     [summary.implementation.examples, source.examples], [summary.files, data.files],
     [summary.implementation.shared_entries, source.shared_entries], [summary.implementation.request_entries, source.request_entries],
     [summary.implementation.candidates, source.implementation_candidates?.candidates], [summary.business_links, data.business_graph?.edges],
-    [summary.models, data.models], [summary.implementation.project_instructions, source.project_instructions],
+    [summary.models, data.models], [summary.review_candidates, data.review_candidates], [summary.implementation.project_instructions, source.project_instructions],
   ];
   summary.truncated = !!(data.files_truncated || data.next_model_offset != null || data.business_graph?.truncated || source.truncated
     || source.implementation_candidates?.truncated || groups.some(([items, original]) => items.length < (original?.length ?? 0))
     || (data.models ?? []).some((model: any) => (model.rule_count ?? model.rules?.length ?? 0) > 2)
+    || data.review_candidates_truncated
     || (data.project_knowledge?.unresolved?.length ?? 0) > 8);
   // 先保留每类首个来源，再按剩余预算裁剪。按整条裁剪，不能截断符号或半条业务依据。
   for (const reserve of [1, 0]) for (const [items] of groups) {

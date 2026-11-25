@@ -4,6 +4,7 @@ import { ContextInput } from "../understanding/contracts.js";
 import { scopedKnowledgeSearch } from "../knowledge/search.js";
 import { digest } from "../knowledge/document.js";
 import { bindWorktree } from "../git/baseline.js";
+import { isUsableModelTrust } from "../project-knowledge/model-trust.js";
 import { readProjectKnowledge } from "../project-knowledge/service.js";
 import { loadConfig } from "../knowledge/config.js";
 import { modelVisible, worktreeModel } from "../project-knowledge/worktree-models.js";
@@ -22,6 +23,8 @@ export async function provideContext(files: ProjectFiles, input: unknown) {
   if (project_knowledge?.selected_models?.length) {
     const { config } = await loadConfig(files);
     project_knowledge = { ...project_knowledge, selected_models: project_knowledge.selected_models.filter(snapshot => {
+      // 完整响应也会返回 selected_models，撤回的模型正文须在这层一并过滤。
+      if (!isUsableModelTrust(snapshot.trust)) return false;
       const model = worktreeModel(files.root, snapshot.content, snapshot.model_id);
       return model && modelVisible(model, config);
     }) };
@@ -62,7 +65,7 @@ export async function provideContext(files: ProjectFiles, input: unknown) {
       ...(view ? { implementation_view_v1: view } : {}),
       ...(indexed?.implementation_context ? { implementation_context: { ...implementation, implementation_candidates: { candidates, shown: candidates.length,
         omitted, coverage_unknown: coverageUnknown, truncated: omitted > 0 } } } : {}),
-      files: compact.files, models: compact.models, knowledge_context, business_links: compact.business_links,
+      files: compact.files, models: compact.models, review_candidates: compact.review_candidates, knowledge_context, business_links: compact.business_links,
       unindexed_paths: unindexed.items, unindexed_paths_truncated: unindexed.truncated, project_knowledge: compact.project_knowledge,
       ...(reviews ? { rule_reviews: { review_ids: reviews.items.slice(0, 2).map(item => item.review_id), omitted: reviews.omitted + Math.max(0, reviews.items.length - 2) } } : {}),
       projection: "compact", coverage_unknown: coverageUnknown, truncated: compact.truncated || unindexed.truncated || knowledge_context.truncated || !!viewTruncated || omitted > 0 || !!reviews && reviews.items.length + reviews.omitted > 2,

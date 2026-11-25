@@ -121,7 +121,11 @@ export class UnderstandingService {
           throw new AppError("PROJECT_MODEL_REVIEW_REQUIRED", "当前模型存在多个候选；请核对源码并指定修订基线");
         const { config } = await loadConfig(this.files);
         const shared = await readWorktreeModels(this.files, currentKnowledge);
-        const existing = shared.models.filter(model => modelVisible(model, config));
+        // 记录/修订阶段仍需读取旧模型作为人工复核基线，但它不能因此重新
+        // 进入当前实现上下文。readWorktreeModels 已将这类模型单独标成候选。
+        const existing = [...shared.models, ...shared.reviewCandidates]
+          .filter((model, index, all) => all.findIndex(item => item.id === model.id) === index)
+          .filter(model => modelVisible(model, config));
         const reviewed = [...new Set([request.base_snapshot_id, ...request.reviewed_snapshot_ids ?? []]
           .filter((id): id is string => !!id))];
         let nextRevision = request.expected_revision + 1;

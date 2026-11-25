@@ -11,6 +11,7 @@ import { mergeRecoveryWrite } from "./merge-recovery-gate.js";
 import type { DiagnosticContext } from "../observability/diagnostic-context.js";
 import { diagnosticAction, diagnosticCause } from "./diagnostic-context.js";
 import { modificationScope } from "../quality/business-plan.js";
+import { plannedModelWriteIssues } from "./planned-model-write.js";
 import { domainGuidance } from "../tools/task-guidance.js";
 import { guidanceEnabled } from "../runtime/guidance-release.js";
 
@@ -109,6 +110,11 @@ export async function checkProjectWrite(input: NativeHookInput, binding: Worktre
   const plan = task.business_plans?.at(-1);
   if (task.business_model_policy && !plan && !task.workspace_baseline?.merge_recovery)
     return stop("BUSINESS_PLAN_REQUIRED", "当前任务启用了业务计划。先用 task_update 保存规则、实际代码位置和场景验收，再修改业务代码。");
+  if (plan && !task.workspace_baseline?.merge_recovery) {
+    diagnostic.stage = "context";
+    const issues = await plannedModelWriteIssues(binding, task, plan);
+    if (issues.length) return stop("PROJECT_MODEL_REVIEW_REQUIRED", `业务模型需要复核。请读取当前源码和项目视图，核对计划基线后重试。${issues.slice(0, 5).join("、")}`);
+  }
   const modelScope = plan ? modificationScope(plan) : undefined;
   const planned = task.change_items.filter(item => item.action === "modify").map(item => item.target_path);
   diagnostic.stage = "target"; diagnostic.planned_count = Math.min(planned.length, 500);

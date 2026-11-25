@@ -20,6 +20,7 @@ import { readModelSnapshot, type ProjectKnowledgeStatus } from "../project-knowl
 import { modelVisible, readWorktreeModels, worktreeModel } from "../project-knowledge/worktree-models.js";
 import { ImplementationView } from "../context/implementation-view.js";
 import { addTaskLocations } from "../context/plan-locations.js";
+import type { SavedModel } from "./model-contracts.js";
 
 export function intersects(a: string, b: string): boolean { return a === b || a.startsWith(b + "/") || b.startsWith(a + "/"); }
 export function moduleSummary(entries: MapFile[]) {
@@ -84,11 +85,20 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
   }
   const worktree = await readWorktreeModels(files, knowledge);
   const eligibleModels = worktree.models.filter(model => modelVisible(model, config));
+  const reviewCandidates = worktree.reviewCandidates.filter(model => {
+    if (!modelVisible(model, config)) return false;
+    const module = knowledge?.modules?.find(item => item.model_id === model.id);
+    return !module?.reasons.some(reason => {
+      const path = reason.startsWith("source_missing:") ? reason.slice("source_missing:".length) : undefined;
+      return !!path && excluded(path, config);
+    });
+  });
   const evidence = new ModelEvidence(files, config, new Map(entries.map((entry) => [entry.path, entry])), map.repo_identity);
   const projection = request.view === "compact" && !request.model_id && process.env.PROJECT_DEV_IMPLEMENTATION_VIEW !== "off"
     ? new ImplementationView() : undefined;
   const visible = (path: string) => !excluded(path, config);
-  const materialize = (model: typeof eligibleModels[number]) => materializeModel(model, evidence, eligibleModels);
+  // 关系仅引用当前可用模型。用待复核副本作目标会使已失效的跨模型关联看起来仍然有效。
+  const materialize = (model: SavedModel) => materializeModel(model, evidence, eligibleModels);
   // 详情单独返回，容量由模型存储的 64 KiB 上限约束；不能借 ID 绕过来源排除规则。
   if (request.model_id) {
     const selection = knowledge?.modules?.find(item => item.model_id === request.model_id);
@@ -96,7 +106,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     const candidate = request.model_snapshot_id
       ? await readModelSnapshot(await bindWorktree(files.root), request.model_id, request.model_snapshot_id) : undefined;
     const model = candidate ? worktreeModel(files.root, candidate.content, request.model_id)
-      : eligibleModels.find(entry => entry.id === request.model_id);
+      : eligibleModels.find(entry => entry.id === request.model_id) ?? reviewCandidates.find(entry => entry.id === request.model_id);
     if (!model && !historical && selection && selection.state !== "matched") {
       return { state: "needs_review", files: [], models: [], modules: [], scan_id: map.scan_id,
         model_selection: selection, next_step: "按 model_snapshot_id 查看候选，核对当前源码后再修订。" };
@@ -105,7 +115,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     if (!modelVisible(model, config)) throw new AppError("PROJECT_MODEL_NOT_FOUND", "该模型的来源不在当前项目查询范围内");
     if (request.model_revision !== undefined && model.revision !== request.model_revision) throw new AppError("PROJECT_MODEL_REVISION_CONFLICT", "模型已更新，请读取最新摘要后再获取详情");
     const materialized = await materialize(model);
-    const reviewOnly = historical || knowledge?.state === "unavailable";
+    const reviewOnly = historical || knowledge?.state === "unavailable" || reviewCandidates.some(entry => entry.id === model.id);
     const detail = selectModelRules(reviewOnly ? { ...materialized, status: "needs_review" } : materialized, request.rule_ids);
     const indexedVersions = new Map(entries.map((entry) => [entry.path, entry.sha256]));
     const pathStates = await Promise.all(model.related_paths.map(async (path) => {
@@ -116,7 +126,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     const stale = gitLine((await readGit(files.root, ["rev-parse", "HEAD"])).stdout) !== map.head
       || await mapConfigHash(files, config) !== map.config_hash || pathStates.some((state) => state !== "current" && state !== "missing_after_scan");
     return { state: stale ? "needs_rescan" : detail.status === "needs_review" ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
-      files: [], modules: [], models: [{ ...detail, ...(historical ? { historical_snapshot_id: request.model_snapshot_id } :
+      files: [], modules: [], models: [{ ...detail, ...(reviewOnly ? { review_only: true } : {}), ...(historical ? { historical_snapshot_id: request.model_snapshot_id } :
         worktree.snapshotIds.has(model.id) ? { current_snapshot_id: worktree.snapshotIds.get(model.id) } : {}) }],
       models_truncated: detail.content_truncated, next_model_offset: null,
       model_audit: auditModels(eligibleModels, new Set([model.id])),
@@ -130,31 +140,40 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     try { await addTaskLocations(projection, files.root, request.task_id, eligibleModels, knowledge, evidence, visible); }
     catch (error) { projection.gap(error instanceof AppError ? error.code : "task_plan_unavailable"); }
   }
-  const modelCandidates = eligibleModels.filter((model) => !paths.length
-    || [...model.scope, ...model.related_paths, ...model.sources.flatMap((source) => { const path = sourcePath(source); return path ? [path] : []; })].some((candidate) => paths.some((path) => intersects(candidate, path))));
-  const directModels = modelCandidates.filter((model) => !request.modules.length || request.modules.includes(model.module))
+  const rankModels = (pool: SavedModel[]) => pool.filter((model) => !paths.length
+    || [...model.scope, ...model.related_paths, ...model.sources.flatMap((source) => { const path = sourcePath(source); return path ? [path] : []; })].some((candidate) => paths.some((path) => intersects(candidate, path))))
+    .filter((model) => !request.modules.length || request.modules.includes(model.module))
     .map((model) => ({ model, score: score(JSON.stringify([model.title, model.summary, model.entities, model.rules, model.flows, model.questions, model.related_paths, model.schema_version !== 1 ? model.relations : []])) }))
     .filter((item) => !terms.length || paths.length || request.modules.length || item.score > 0)
     .sort((a, b) => b.score - a.score || a.model.id.localeCompare(b.model.id));
+  const directModels = rankModels(eligibleModels);
+  const reviewRanked = rankModels(reviewCandidates);
   const directIds = new Set(directModels.map((item) => item.model.id));
   const graph = businessGraph(eligibleModels, directIds, request.relation_depth);
   const relationIds = new Set(graph.nodes.map(node => node.id).filter(id => !directIds.has(id)));
   const rankedModels = [...directModels, ...eligibleModels.filter((model) => !directIds.has(model.id) && relationIds.has(model.id))
     .sort((a, b) => a.id.localeCompare(b.id)).map((model) => ({ model, score: 0 }))];
+  // 完整列表兼容原有复核入口。日常紧凑查询仅返回复核入口及修订号，避免旧规则正文进入生码上下文。
+  if (request.view === "full" && !rankedModels.length) rankedModels.push(...reviewRanked);
+  const reviewViews = reviewRanked.slice(0, 5).map(({ model }) => ({
+    id: model.id, revision: model.revision, title: model.title, status: "needs_review", effective: false, review_only: true,
+    details_request: { model_id: model.id, model_revision: model.revision },
+  }));
   const modelResults: Record<string, unknown>[] = [];
   let modelBytes = 2;
   const page = rankedModels.slice(request.model_offset, request.model_offset + 5);
   for (const { model } of page) {
     const view = await materialize(model);
-    const full = knowledge?.state === "unavailable" ? { ...view, status: "needs_review" } : view;
+    const reviewOnly = reviewCandidates.some(candidate => candidate.id === model.id);
+    const full = reviewOnly ? { ...view, status: "needs_review", review_only: true } : view;
     const details_request = { model_id: model.id, model_revision: model.revision };
     // 给本页后续摘要预留容量，避免一个大模型截断整个列表，也不截掉业务流程的中间文本。
     const preview = modelPreview(full, request.query, paths);
-    if (projection && "rules" in preview && Array.isArray(preview.rules))
+    if (projection && !reviewOnly && "rules" in preview && Array.isArray(preview.rules))
       projection.addModel(view, new Set(preview.rules.map(rule => rule.id)), visible);
     const detail = { ...full, content_truncated: false, details_request };
     const remaining = page.length - modelResults.length - 1;
-    const match_reason = directIds.has(model.id) ? "direct" : "business_relation";
+    const match_reason = reviewOnly ? "review_candidate" : directIds.has(model.id) ? "direct" : "business_relation";
     const detailResult = { ...detail, match_reason };
     const result = model.schema_version === 1 && modelBytes + 1 + Buffer.byteLength(JSON.stringify(detailResult)) + remaining * 4_500 <= 36_000
       ? detailResult : { ...preview, match_reason };
@@ -169,7 +188,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     if (stale || !map.coverage.complete) projection.gap(stale ? "index_needs_rescan" : "index_coverage_partial");
     if (knowledge && !["matched", "empty", "not_initialized"].includes(knowledge.state)) projection.gap("model_view_needs_review");
   }
-  return { state: stale ? "needs_rescan" : modelResults.some((model) => model.status === "needs_review") ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+  return { state: stale ? "needs_rescan" : (reviewViews.length || modelResults.some((model) => model.status === "needs_review")) ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
     implementation_context: implementation, ...(projection ? { implementation_view_v1: projection.result() } : {}),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     business_graph: graph,
@@ -178,7 +197,7 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     files_truncated: matched.length > request.limit || relatedTotal > 10 || fileResults.length < selected.length,
     unindexed_paths: paths.filter((path) => !entries.some((entry) => intersects(path, entry.path))),
     modules: modules.slice(0, 40), modules_truncated: modules.length > 40,
-    models: modelResults, models_truncated: rankedModels.length > request.model_offset + modelResults.length || modelResults.some((model) => model.content_truncated),
+    models: modelResults, review_candidates: reviewViews, review_candidates_truncated: reviewRanked.length > reviewViews.length, models_truncated: rankedModels.length > request.model_offset + modelResults.length || modelResults.some((model) => model.content_truncated),
     next_model_offset: rankedModels.length > request.model_offset + modelResults.length ? request.model_offset + modelResults.length : null,
     report: ".project-dev/local/understanding/report.html",
     limitations: "结构和字面导入关系用于定位代码，不能覆盖完整的语法树、运行时关系或业务模型。仅对选中来源实时核验；新增文件需要重新扫描。作出判断前，请阅读相关源码、实际安装的组件版本和业务文档。候选模型未经规则确认，也不构成操作授权。" };

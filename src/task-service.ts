@@ -68,6 +68,7 @@ import {
   TaskUpdateInputSchema,
 } from "./tools/inputs.js";
 import { ProjectFiles } from "./storage/project-files.js";
+import { verifyClosedTaskModels } from "./project-knowledge/model-verification.js";
 import { loadKnowledge, knowledgeSourceChecker } from "./knowledge/repository.js";
 import { reviewSnapshot } from "./git/review-snapshot.js";
 import { captureMergeRecovery, assertMergeResolved, assertMergeRecovery } from "./git/merge-recovery.js";
@@ -527,6 +528,7 @@ export class TaskService {
       // 与不可变字段核验，避免一个慢任务把同一工作树的恢复/读取全部阻塞。
       // 只从本次实际执行的关闭审查摘取结果，任务持久化及完整响应沿用原结构。
       let closureReceipt: Record<string, unknown> | undefined;
+      let verifiedReviewSnapshot: string | undefined;
       const candidate = await (async (current) => {
           if (request.phase !== "aborted") assertEnhancedModelWrites(!!request.business_plan || !!current.business_model_policy
             || !!current.business_plans?.length || !!current.business_deltas?.some(delta => enhancedBusinessDelta(delta.input)));
@@ -797,6 +799,7 @@ export class TaskService {
             assertBusinessPlan(business);
             await assertFeedback(this.binding, next, snapshot.hash);
             await assertRequirementReview(this.binding, next);
+            verifiedReviewSnapshot = snapshot.hash;
             if (includeClosureReceipt && guidanceEnabled()) closureReceipt = {
               version: VERSION, review_snapshot: snapshot.hash, repository: this.binding.repo_identity, worktree: this.binding.root,
               branch: this.binding.branch, validation_state: execution.state,
@@ -808,13 +811,16 @@ export class TaskService {
         })(prior);
       const saved = await this.store.updateCandidate(request.task_id, request.expected_revision, candidate);
       const sync = await this.syncRequirementGroup(saved, "update");
+      const verificationDiagnostics = saved.phase === "closed" && verifiedReviewSnapshot
+        ? await verifyClosedTaskModels(this.binding, saved, verifiedReviewSnapshot)
+        : [];
       return {
         outcome: "ok",
         code: "TASK_UPDATED",
         data: closureReceipt ? { ...sync.task, closure_receipt_v1: {
           ...closureReceipt, task_id: sync.task.id, revision: sync.task.revision,
         } } : sync.task,
-        diagnostics: sync.diagnostics,
+        diagnostics: [...sync.diagnostics, ...verificationDiagnostics],
       };
     });
   }
