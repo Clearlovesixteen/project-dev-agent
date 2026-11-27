@@ -123,6 +123,130 @@ function stampReviews<
   });
 }
 
+type ReviewBlocker = {
+  code: string;
+  stage: string;
+  action: string;
+  tool?: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+const reviewBlockerHistory = new Map<string, { signature: string; count: number; expiresAt: number }>();
+
+/** task_check 每次由 MCP 请求创建服务实例，因此重复检查状态放在进程级短期缓存。
+ * 只记录任务和阻塞码，不保存需求、源码或命令内容；状态改变或两分钟后自动重置。
+ */
+function reviewRetryState(project: string, taskId: string, snapshot: string, blockers: ReviewBlocker[]) {
+  if (!blockers.length) return { repeated: false, count: 0 };
+  const now = Date.now();
+  const key = `${project}\u0000${taskId}`;
+  const signature = JSON.stringify([snapshot, blockers.map(({ code, stage, details }) => [code, stage, details])]);
+  const prior = reviewBlockerHistory.get(key);
+  const current = prior && prior.expiresAt > now && prior.signature === signature
+    ? { signature, count: prior.count + 1, expiresAt: now + 120_000 }
+    : { signature, count: 1, expiresAt: now + 120_000 };
+  reviewBlockerHistory.set(key, current);
+  if (reviewBlockerHistory.size > 256) {
+    const oldest = [...reviewBlockerHistory.entries()].sort(([, left], [, right]) => left.expiresAt - right.expiresAt)[0]?.[0];
+    if (oldest) reviewBlockerHistory.delete(oldest);
+  }
+  return {
+    repeated: current.count >= 2,
+    count: current.count,
+    ...(current.count >= 2 ? { instruction: "不要重复提交相同 task_check；按 recovery_actions 一次性修复全部阻塞项，完成后再检查。" } : {}),
+  };
+}
+
+
+/**
+ * 将 task_check 的并行校验结果收敛为可执行的恢复清单。
+ * checkCode 仍保留向后兼容，但 blockers 不再只暴露最高优先级的一项，
+ * 让调用方一次拿到全部阻塞原因和下一步动作，避免逐项猜参数重试。
+ */
+function reviewBlockers(input: {
+  outdated: boolean;
+  basisCode?: string;
+  reuseCode?: string;
+  businessPlanCode?: string;
+  executionCode?: string;
+  deltaCode?: string;
+  policyCodes: string[];
+  missingChangeItems: boolean;
+  pending: string[];
+  acceptance: string[];
+  validations: string[];
+  unexpected: string[];
+  nextActions: unknown[];
+}): ReviewBlocker[] {
+  const blockers: ReviewBlocker[] = [];
+  const add = (blocker: ReviewBlocker) => blockers.push(blocker);
+  if (input.outdated) add({
+    code: "REVIEW_STALE", stage: "snapshot", action: "refresh_review", tool: "task_check",
+    message: "当前代码已不同于既有审查快照；先在当前快照重新核验受影响条目。",
+  });
+  if (input.basisCode) add({
+    code: input.basisCode, stage: "implementation_basis", action: input.basisCode === "IMPLEMENTATION_BASIS_REQUIRED" ? "record_implementation_basis" : "review_implementation_basis",
+    tool: "task_update", message: input.basisCode === "IMPLEMENTATION_BASIS_REQUIRED"
+      ? "编码前缺少实现依据；读取项目规范、同类实现和复用入口后记录 implementation_basis。"
+      : "实现依据或其关联验收项需要在当前快照重新核验。",
+    ...(input.nextActions.length ? { details: { next_actions: input.nextActions } } : {}),
+  });
+  if (input.reuseCode) add({
+    code: input.reuseCode, stage: "reuse", action: "review_project_reuse", tool: "task_update",
+    message: "请求层复用检查未完成；先确认项目已有请求封装、调用入口和覆盖范围，再提交复用结论。",
+  });
+  if (input.businessPlanCode) add({
+    code: input.businessPlanCode, stage: "business_plan", action: "record_business_plan", tool: "task_update",
+    message: "业务计划缺少原文、影响范围或命名场景映射；先补齐 business_plan，再继续验收。",
+  });
+  if (input.executionCode) add({
+    code: input.executionCode, stage: "validation", action: input.executionCode === "VALIDATION_PLAN_REQUIRED" ? "record_validation_plan" : "run_validation",
+    tool: input.executionCode === "VALIDATION_PLAN_REQUIRED" ? "task_update" : "terminal",
+    message: input.executionCode === "VALIDATION_PLAN_REQUIRED"
+      ? "当前任务没有可执行的验证计划；先保存 validation_plan。"
+      : "验证计划尚未取得当前快照上的真实执行结果；按计划运行 validation，再回传 run_id。",
+  });
+  if (input.deltaCode) add({
+    code: input.deltaCode, stage: "business_delta", action: "review_business_delta", tool: "project_model_apply",
+    message: "先查看 quality.business_delta。未保存草案、来源过期或场景未完成时，先用 task_update 补齐或修订草案并验收；验收完成后用 project_model_apply 回写当前代码上的模型，不能只重复 task_update。",
+  });
+  // 反馈、来源验收和业务判断彼此独立，必须分别返回，不能用优先级隐藏后续阻塞。
+  for (const code of input.policyCodes) {
+    const recovery = code === "FEEDBACK_REVIEW_REQUIRED"
+      ? { stage: "feedback", action: "review_feedback", message: "读取 quality.feedback，补齐本次纠正适用选择并复核关联验收。" }
+      : code === "REQUIREMENT_ACCEPTANCE_REQUIRED"
+      ? { stage: "requirements", action: "review_requirement_acceptance", message: "读取 quality.requirements，补齐需求来源版本并逐项完成对应验收。" }
+      : { stage: "business_assessment", action: "record_business_assessment", message: "读取 quality.business_assessment，明确业务规则影响并补齐模型、草案与场景关联。" };
+    add({ code, ...recovery, tool: "task_update" });
+  }
+  if (input.missingChangeItems) add({
+    code: "TASK_CHANGE_ITEMS_REQUIRED", stage: "change_items", action: "record_change_items", tool: "task_update",
+    message: "本任务尚未登记修改清单；核对需求与关联入口后用 task_update 保存实际修改或验证项。",
+  });
+  if (input.pending.length) add({
+    code: "TASK_CHANGE_ITEMS_PENDING", stage: "change_items", action: "review_change_items", tool: "task_update",
+    message: "仍有修改项未完成审查。", details: { ids: input.pending },
+  });
+  if (input.acceptance.length) add({
+    code: "TASK_ACCEPTANCE_PENDING", stage: "acceptance", action: "review_acceptance", tool: "task_update",
+    message: "仍有验收项未完成核验。", details: { ids: input.acceptance },
+  });
+  if (input.validations.length) add({
+    code: "TASK_VALIDATION_PENDING", stage: "validation", action: "record_validation_result", tool: "task_update",
+    message: "仍有验证记录未通过或未执行。", details: { ids: input.validations },
+  });
+  if (input.unexpected.length) add({
+    code: "UNEXPECTED_CHANGES", stage: "scope", action: "review_scope", tool: "task_update",
+    message: "发现未登记的改动路径；先确认是否属于本需求并更新修改范围。", details: { paths: input.unexpected },
+  });
+  return blockers;
+}
+
+function blockerDiagnostics(blockers: ReviewBlocker[]) {
+  return blockers.map(({ code, message }) => ({ code, message }));
+}
+
 function staleReviews(task: Task, snapshot: string) {
   return {
     change_items: task.change_items
@@ -1029,15 +1153,13 @@ export class TaskService {
           : "issues" in businessPlan && businessPlan.issues?.length ? "BUSINESS_PLAN_INPUT_PENDING"
           : "BUSINESS_SCENARIO_REQUIRED"
         : undefined;
-      const policyCode =
-        feedback.required && feedback.state !== "checked"
-          ? "FEEDBACK_REVIEW_REQUIRED"
-          : requirements.required && requirements.state !== "checked"
-          ? "REQUIREMENT_ACCEPTANCE_REQUIRED"
-          : business_assessment.required &&
-            business_assessment.state !== "checked"
-          ? "BUSINESS_ASSESSMENT_REQUIRED"
-          : undefined;
+      const policyCodes = [
+        ...(feedback.required && feedback.state !== "checked" ? ["FEEDBACK_REVIEW_REQUIRED"] : []),
+        ...(requirements.required && requirements.state !== "checked" ? ["REQUIREMENT_ACCEPTANCE_REQUIRED"] : []),
+        ...(business_assessment.required && business_assessment.state !== "checked" ? ["BUSINESS_ASSESSMENT_REQUIRED"] : []),
+      ];
+      // 单一 code 保留原先优先级，完整 blockers 列出三个独立检查的全部失败。
+      const policyCode = policyCodes[0];
       const checkCode = reviewed
         ? "CHECKLIST_REVIEWED"
         : outdated
@@ -1051,6 +1173,20 @@ export class TaskService {
           deltaCode ??
           policyCode ??
           "REVIEW_INCOMPLETE";
+      const blockers = reviewed ? [] : reviewBlockers({
+        outdated,
+        ...(basisCode ? { basisCode } : {}),
+        ...(reuseCode ? { reuseCode } : {}),
+        ...(businessPlanCode ? { businessPlanCode } : {}),
+        ...(executionCode ? { executionCode } : {}),
+        ...(deltaCode ? { deltaCode } : {}),
+        policyCodes, missingChangeItems: task.change_items.length === 0,
+        pending, acceptance, validations, unexpected, nextActions,
+      });
+      const recoveryActions = blockers.map(({ code, stage, action, tool, message, details }) => ({
+        code, stage, action, ...(tool ? { tool } : {}), instruction: message, ...(details ? { details } : {}),
+      }));
+      const retryState = reviewRetryState(this.binding.root, task_id, snapshot, blockers);
       return {
         outcome: reviewed ? "ok" : "incomplete",
         code: checkCode,
@@ -1074,6 +1210,11 @@ export class TaskService {
           review_snapshot: snapshot,
           stale_evidence: stale,
           next_actions: nextActions,
+          // 保留 next_actions 的旧结构，同时提供完整阻塞项，避免只修最高优先级后再次盲目重试。
+          blockers,
+          recovery_actions: recoveryActions,
+          retry_same_input: false,
+          retry_state: retryState,
           quality: {
             ...quality,
             reuse,
@@ -1098,27 +1239,15 @@ export class TaskService {
           limitation:
             "代码指纹覆盖 Git 基线、当前有效改动和未跟踪文件；不包含被 Git 忽略的依赖和外部服务状态。记录新证据前需在此快照上实际核验。审查记录不能独立证明业务正确。",
         },
+        // diagnostics 与 data.blockers 保持同一套完整阻塞清单；旧客户端仍可读取首项 code。
         diagnostics: reviewed
           ? []
-          : [
-              {
-                code: checkCode,
-                message:
-                  executionCode === checkCode
-                    ? "请核对 quality.execution：保存检查计划，用原终端运行 validation run，采用当前代码上的真实执行记录。"
-                    : basisCode === checkCode
-                    ? "请按 next_actions 核对具体实现依据和关联验收项。由 Agent 完成当前快照验证并提交实际证据。"
-                    : reuseCode === checkCode
-                    ? "请求层复用检查未通过：先核对 quality.reuse 中的既有入口、重复用法及覆盖范围，不能用表面完成的清单关闭任务。"
-                    : businessPlanCode === checkCode
-                    ? "请核对 quality.business_plan 中的原文、受保护位置和命名场景结果，处理未决问题后再验收。"
-                    : policyCode === checkCode
-                    ? "请核对 quality.feedback、quality.requirements 和 quality.business_assessment：更新纠正选择、来源版本或业务判断，保存后重新验收。"
-                    : outdated
-                    ? "代码变化或旧记录缺少指纹，部分证据需要重新核验。请在当前 review_snapshot 上完成检查，通过 reviewed_ids 明确本次复核的条目，并提交对应完整集合。"
-                    : "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。",
-              },
-            ],
+          : blockerDiagnostics(blockers.length ? blockers : [{
+              code: checkCode,
+              stage: "review",
+              action: "review_task",
+              message: "部分改动、验收项或验证尚未完成审查，请检查任务清单和代码差异。",
+            }]),
       };
     });
   }

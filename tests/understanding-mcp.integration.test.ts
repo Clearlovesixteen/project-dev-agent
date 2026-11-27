@@ -18,6 +18,10 @@ test("installed protocol scans structure, persists a model and restores it acros
   };
   const call = async (client: Client, name: string, input: Record<string, unknown>) => ToolResultSchema.parse((await client.callTool({ name, arguments: input })).structuredContent);
   const client = await connect();
+  const beforeScan = await call(client, "project_context", { project: fixture.path });
+  assert.equal(beforeScan.outcome, "incomplete");
+  assert.equal(beforeScan.diagnostics[0]?.code, "PROJECT_CONTEXT_NOT_SCANNED");
+  assert.match(String((beforeScan.data as any).next_step), /project_scan/);
   assert.equal((await call(client, "project_scan", { project: fixture.path })).outcome, "ok");
   const context = (await call(client, "project_context", { project: fixture.path, paths: ["src/service.js"] })).data as any;
   const source = context.files.find((file: any) => file.path === "src/service.js"), text = await readFile(join(fixture.path, source.path), "utf8");

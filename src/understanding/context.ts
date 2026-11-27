@@ -188,7 +188,21 @@ export async function projectContext(files: ProjectFiles, input: unknown, knowle
     if (stale || !map.coverage.complete) projection.gap(stale ? "index_needs_rescan" : "index_coverage_partial");
     if (knowledge && !["matched", "empty", "not_initialized"].includes(knowledge.state)) projection.gap("model_view_needs_review");
   }
-  return { state: stale ? "needs_rescan" : (reviewViews.length || modelResults.some((model) => model.status === "needs_review")) ? "needs_review" : map.coverage.complete ? "indexed" : "partial", scan_id: map.scan_id,
+  const state = stale
+    ? "needs_rescan"
+    : (reviewViews.length || modelResults.some((model) => model.status === "needs_review"))
+    ? "needs_review"
+    : map.coverage.complete
+    ? "indexed"
+    : "partial";
+  const next_step = state === "needs_rescan"
+    ? "当前结构索引已过期或命中来源已变化；先运行 project_scan，再重新查询 project_context。"
+    : state === "partial"
+    ? "结构索引覆盖不完整；先核对 snapshot.coverage 和 diagnostics，必要时运行 project_scan 后再继续。"
+    : state === "needs_review"
+    ? "当前查询包含待复核的模型或来源；先按 review_candidates 和 next_step 核对详情，再继续修改。"
+    : "先阅读命中源码和 implementation_context，再登记任务范围。";
+  return { state, scan_id: map.scan_id, next_step,
     implementation_context: implementation, ...(projection ? { implementation_view_v1: projection.result() } : {}),
     model_audit: auditModels(eligibleModels, new Set(page.map(item => item.model.id))),
     business_graph: graph,

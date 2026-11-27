@@ -95,11 +95,20 @@ export class UnderstandingService {
       const data = await provideContext(this.files, input);
       const shared = data.project_knowledge;
       const sharedIncomplete = shared && !["not_initialized", "empty", "matched"].includes(shared.state);
-      const incomplete = ["needs_rescan", "needs_review", "partial"].includes(data.state) || sharedIncomplete;
+      const incomplete = ["not_scanned", "needs_rescan", "needs_review", "partial"].includes(data.state) || sharedIncomplete;
+      const diagnostic = sharedIncomplete
+        ? { code: "PROJECT_KNOWLEDGE_REVIEW_PENDING", message: shared?.message ?? "部分业务模型缺少唯一适用的证据。已核验的规则和源码入口仍可分别查看。" }
+        : data.state === "not_scanned"
+        ? { code: "PROJECT_CONTEXT_NOT_SCANNED", message: data.next_step ?? "请先运行 project_scan，再重新查询 project_context。" }
+        : data.state === "needs_rescan"
+        ? { code: "PROJECT_CONTEXT_NEEDS_RESCAN", message: data.next_step ?? "请先运行 project_scan，再重新查询 project_context。" }
+        : data.state === "partial"
+        ? { code: "PROJECT_CONTEXT_PARTIAL", message: data.next_step ?? "当前结构索引覆盖不完整，请核对 coverage 后按需运行 project_scan。" }
+        : data.state === "needs_review"
+        ? { code: "PROJECT_CONTEXT_NEEDS_REVIEW", message: data.next_step ?? "请核对待复核条目，再继续修改。" }
+        : undefined;
       return { outcome: incomplete ? "incomplete" : "ok", code: "PROJECT_CONTEXT", data,
-        diagnostics: incomplete ? [{ code: sharedIncomplete ? "PROJECT_KNOWLEDGE_REVIEW_PENDING" : "PROJECT_CONTEXT_NEEDS_REVIEW",
-          message: shared?.message ?? (sharedIncomplete ? "部分业务模型缺少唯一适用的证据。已核验的规则和源码入口仍可分别查看。"
-            : "请核对待复核条目，按需重新扫描当前项目。") }] : [] };
+        diagnostics: diagnostic ? [diagnostic] : [] };
     });
   }
   /** 保存有源码依据的模型候选；引用匹配只证明来源，不把语义结论自动确认为规则。 */

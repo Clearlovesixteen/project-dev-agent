@@ -1,12 +1,13 @@
 import { runFixtureChecks, withImplementationBasis } from "./helpers/implementation-basis.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { bindWorktree } from "../src/git/index.js";
 import { TaskSchema, type ChangeItem } from "../src/domain/task.js";
 import { TaskService } from "../src/task-service.js";
+import { recordFeedback } from "../src/feedback/service.js";
 import { createGitFixture } from "./helpers/create-git-fixture.js";
 
 const request = { requirement: "Add disabled account behavior", acceptance_criteria: [{ id: "disabled", description: "Disabled accounts cannot access the application" }] };
@@ -27,15 +28,62 @@ test("writer-only changes remain incomplete and evidence cannot be replaced by f
   await writeFile(path, (await readFile(path, "utf8")).replace('new Set(["active"])', 'new Set(["active", "disabled"])'));
   const checked = await service.check({ task_id: task.id });
   assert.equal(checked.outcome, "incomplete");
-  const data = checked.data as { pending_items: string[]; changed_paths: string[]; structurally_reviewed: boolean };
+  const data = checked.data as { pending_items: string[]; changed_paths: string[]; structurally_reviewed: boolean; blockers: Array<{ code: string; action: string }>; recovery_actions: Array<{ code: string; action: string }> };
   assert.deepEqual(data.pending_items, ["writer", "login-and-session", "view"]);
   assert.deepEqual(data.changed_paths, ["src/service.js"]);
   assert.equal(data.structurally_reviewed, false);
+  // task_check 一次返回所有可执行阻塞项，避免模型修一个再猜下一个。
+  assert.ok(data.blockers.some((item) => item.code === "TASK_CHANGE_ITEMS_PENDING" && item.action === "review_change_items"));
+  assert.ok(data.blockers.some((item) => item.code === "TASK_ACCEPTANCE_PENDING" && item.action === "review_acceptance"));
+  assert.deepEqual(data.recovery_actions.map((item) => item.code), data.blockers.map((item) => item.code));
+  assert.ok(checked.diagnostics.some((item) => item.code === "TASK_CHANGE_ITEMS_PENDING"));
+  assert.ok(checked.diagnostics.some((item) => item.code === "TASK_ACCEPTANCE_PENDING"));
+  const repeated = (await service.check({ task_id: task.id })).data as any;
+  assert.equal(repeated.retry_same_input, false);
+  assert.equal(repeated.retry_state.repeated, true);
+  assert.equal(repeated.retry_state.count, 2);
   const invalid = await service.update({ task_id: task.id, expected_revision: 1,
     change_items: checklist.map((entry) => ({ ...entry, status: "checked", reviewed_by: "developer" })) });
   assert.equal(invalid.outcome, "error");
   const latest = (await service.check({ task_id: task.id })).data as { recorded_task: unknown };
   assert.equal(TaskSchema.parse(latest.recorded_task).revision, 1);
+});
+
+test("反馈、需求来源验收和业务判断同时未完成时一次返回全部阻塞", async (t) => {
+  const fixture = await createGitFixture(); t.after(fixture.cleanup);
+  const binding = await bindWorktree(fixture.path), service = new TaskService(binding);
+  const { business_assessment: _assessment, ...input } = await withImplementationBasis(fixture.path, request);
+  const opened = await service.open(input);
+  assert.equal(opened.outcome, "ok", JSON.stringify(opened));
+  const task = TaskSchema.parse(opened.data);
+  // 保存实际用户纠正，使任务的反馈版本过期；另两项保留未完成状态。
+  const home = join(fixture.root, "feedback-codex"), quote = "disabled account behavior must preserve existing access checks";
+  await mkdir(join(home, "sessions"), { recursive: true });
+  await writeFile(join(home, "sessions/main.jsonl"), [
+    { type: "session_meta", payload: { id: "main", cwd: binding.root, source: "vscode" } },
+    { type: "response_item", payload: { type: "message", id: "u1", role: "user", content: [{ type: "input_text", text: quote }] } },
+  ].map(value => JSON.stringify(value)).join("\n") + "\n");
+  await recordFeedback(binding, {
+    id: "preserve-access", rule: quote, category: "code_convention", audience: "project",
+    paths: ["src/**"], conditions: ["修改 disabled account behavior"], source: { session_id: "main", quote },
+  }, home);
+  const checked = await service.check({ task_id: task.id });
+  assert.equal(checked.outcome, "incomplete");
+  const data = checked.data as { blockers: Array<{ code: string; stage: string; action: string }>; recovery_actions: Array<{ code: string; tool: string }>; quality: Record<string, { state: string }> };
+  assert.equal(data.quality.feedback!.state, "stale");
+  assert.equal(data.quality.requirements!.state, "pending");
+  assert.equal(data.quality.business_assessment!.state, "missing");
+  const expected = [
+    ["FEEDBACK_REVIEW_REQUIRED", "feedback", "review_feedback"],
+    ["REQUIREMENT_ACCEPTANCE_REQUIRED", "requirements", "review_requirement_acceptance"],
+    ["BUSINESS_ASSESSMENT_REQUIRED", "business_assessment", "record_business_assessment"],
+    ["TASK_CHANGE_ITEMS_REQUIRED", "change_items", "record_change_items"],
+  ];
+  for (const [code, stage, action] of expected) {
+    assert.ok(data.blockers.some(item => item.code === code && item.stage === stage && item.action === action), code);
+    assert.ok(data.recovery_actions.some(item => item.code === code && item.tool === "task_update"), code);
+    assert.ok(checked.diagnostics.some(item => item.code === code), code);
+  }
 });
 
 test("updates preserve existing checklist records and reject stale revisions", async (t) => {

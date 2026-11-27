@@ -6,8 +6,8 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const VERSION = "0.16.0";
-const ARCHIVE_SHA256 = "d6497add71cceb44e3d5869a0fdc43147b0bac5d443bca9af1b7b8235e304051";
+const VERSION = "0.16.1";
+const ARCHIVE_SHA256 = "bc0a17aabe786f9d396154cc51d8272ccd085e1c4488e217b712bec417ee993c";
 const RUNTIME_FILES = ["cli.mjs","hooks.mjs","symbol-index.mjs","behavior-reporter.mjs"];
 
 function readField(buffer, start, length) {
